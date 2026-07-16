@@ -734,6 +734,27 @@ function createStreamingMessage() {
       bubble.appendChild(buildActions("bot", () => text));
       if (isNearBottom()) scrollToBottom();
     },
+    renderApproval(plan) {
+      const panel = document.createElement("div");
+      panel.className = "plan-approval";
+      const count = plan.length;
+      panel.innerHTML = `
+        <div class="plan-approval-text">
+          Ready to execute <strong>${count} step${count > 1 ? "s" : ""}</strong>.
+          Approve to run the plan, or dismiss to keep it read-only.
+        </div>
+        <div class="plan-approval-actions">
+          <button type="button" class="plan-btn approve">Approve &amp; run</button>
+          <button type="button" class="plan-btn dismiss">Dismiss</button>
+        </div>`;
+      bubble.appendChild(panel);
+      panel.querySelector(".approve").addEventListener("click", () => {
+        panel.remove();
+        executePlan(plan);
+      });
+      panel.querySelector(".dismiss").addEventListener("click", () => panel.remove());
+      if (isNearBottom()) scrollToBottom();
+    },
     error(text) {
       status.remove();
       content.classList.remove("streaming");
@@ -742,21 +763,34 @@ function createStreamingMessage() {
   };
 }
 
-async function sendMessage() {
-  const text = els.input.value.trim();
-  if (!text || state.sending) return;
+async function consumeStream(res, handle) {
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const chunks = buffer.split("\n\n");
+    buffer = chunks.pop();
+    for (const chunk of chunks) {
+      const line = chunk.trim();
+      if (!line.startsWith("data:")) continue;
+      try {
+        handle(JSON.parse(line.slice(5).trim()));
+      } catch (e) {
+        /* ignore malformed frame */
+      }
+    }
+  }
+}
 
+async function runStream(url, body, statusText) {
   state.sending = true;
   els.sendBtn.disabled = true;
-  closeSlashMenu();
-  hideSuggestion();
-
-  addMessage("user", text);
-  els.input.value = "";
-  autogrow();
 
   const bot = createStreamingMessage();
-  bot.setStatus(state.mode === "plan" ? "Planning…" : "Working…");
+  bot.setStatus(statusText);
   let acc = "";
 
   const handle = (evt) => {
@@ -771,45 +805,21 @@ async function sendMessage() {
       if (evt.chat_id) state.chatId = evt.chat_id;
       acc = evt.reply || acc;
       bot.finalize(acc, evt);
+      if (evt.mode === "plan" && evt.plan && evt.plan.length) {
+        bot.renderApproval(evt.plan);
+      }
       loadChats();
     }
   };
 
   try {
-    const res = await fetch("/api/chat/stream", {
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: state.chatId,
-        project_id: state.projectId,
-        message: text,
-        mode: state.mode,
-        skill: state.skill || null,
-        action_scope: state.actionScope,
-        access_level: state.accessLevel,
-      }),
+      body: JSON.stringify(body),
     });
     if (!res.ok || !res.body) throw new Error("stream failed");
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const chunks = buffer.split("\n\n");
-      buffer = chunks.pop();
-      for (const chunk of chunks) {
-        const line = chunk.trim();
-        if (!line.startsWith("data:")) continue;
-        try {
-          handle(JSON.parse(line.slice(5).trim()));
-        } catch (e) {
-          /* ignore malformed frame */
-        }
-      }
-    }
+    await consumeStream(res, handle);
   } catch (e) {
     bot.error(acc || "Something went wrong reaching the server.");
   } finally {
@@ -817,6 +827,47 @@ async function sendMessage() {
     els.sendBtn.disabled = false;
     els.input.focus();
   }
+}
+
+async function sendMessage() {
+  const text = els.input.value.trim();
+  if (!text || state.sending) return;
+
+  closeSlashMenu();
+  hideSuggestion();
+
+  addMessage("user", text);
+  els.input.value = "";
+  autogrow();
+
+  await runStream(
+    "/api/chat/stream",
+    {
+      chat_id: state.chatId,
+      project_id: state.projectId,
+      message: text,
+      mode: state.mode,
+      skill: state.skill || null,
+      action_scope: state.actionScope,
+      access_level: state.accessLevel,
+    },
+    state.mode === "plan" ? "Planning…" : "Working…"
+  );
+}
+
+async function executePlan(plan) {
+  if (state.sending) return;
+  await runStream(
+    "/api/chat/execute-plan",
+    {
+      chat_id: state.chatId,
+      project_id: state.projectId,
+      steps: plan.map((s) => ({ skill: s.skill, objective: s.objective })),
+      action_scope: state.actionScope,
+      access_level: state.accessLevel,
+    },
+    "Executing plan…"
+  );
 }
 
 function autogrow() {

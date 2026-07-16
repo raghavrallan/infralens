@@ -947,6 +947,63 @@ select:focus,
   border-color: var(--white);
 }
 
+.plan-approval {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.plan-approval-text {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.plan-approval-text strong {
+  color: var(--text);
+}
+
+.plan-approval-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.plan-btn {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 9px 16px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.plan-btn.approve {
+  background: var(--white);
+  color: var(--black);
+  border: 1px solid var(--white);
+  font-weight: 600;
+}
+
+.plan-btn.approve:hover {
+  opacity: 0.85;
+}
+
+.plan-btn.dismiss {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border-strong);
+}
+
+.plan-btn.dismiss:hover {
+  color: var(--text);
+  border-color: var(--white);
+}
+
 .agent-chips {
   display: flex;
   flex-wrap: wrap;

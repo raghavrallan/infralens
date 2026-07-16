@@ -44,6 +44,19 @@ class ChatRequest(BaseModel):
     access_level: Literal["ask_approval", "auto_approve", "full_access"] = "ask_approval"
 
 
+class PlanStepRequest(BaseModel):
+    skill: str
+    objective: str = ""
+
+
+class ExecutePlanRequest(BaseModel):
+    chat_id: str
+    project_id: str = DEFAULT_PROJECT_ID
+    steps: list[PlanStepRequest] = []
+    action_scope: Literal["read_only", "write"] = "read_only"
+    access_level: Literal["ask_approval", "auto_approve", "full_access"] = "ask_approval"
+
+
 class RenameRequest(BaseModel):
     title: str
 
@@ -328,6 +341,71 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
             "assistant",
             reply,
             {"mode": final.get("mode"), "skills_used": final.get("skills_used", [])},
+        )
+        final["chat_id"] = chat_id
+        yield sse({"type": "final", **final})
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+@app.post("/api/chat/execute-plan")
+def execute_plan(request: ExecutePlanRequest) -> StreamingResponse:
+    """Execute a plan the user approved (from plan mode), streaming the run."""
+    chat = chats.get_chat(request.chat_id)
+    if chat is None:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    steps = [
+        orchestrator.PlanStep(skill=s.skill, objective=s.objective)
+        for s in request.steps
+        if registry.get(s.skill) is not None
+    ]
+    if not steps:
+        raise HTTPException(status_code=400, detail="No runnable steps in the plan")
+
+    chat_id = request.chat_id
+
+    def sse(event: dict[str, Any]) -> str:
+        return f"data: {json.dumps(event)}\n\n"
+
+    def generate() -> Any:
+        yield sse({"type": "chat", "chat_id": chat_id})
+
+        if not config.get_azure_config().configured:
+            reply = "Azure OpenAI is not configured yet. Open Settings to run plans."
+            yield sse({"type": "delta", "text": reply})
+            chats.add_message(chat_id, "assistant", reply, {"mode": "agent"})
+            yield sse({"type": "final", "mode": "agent", "reply": reply, "chat_id": chat_id})
+            return
+
+        history = chats.get_history(chat_id)
+        final: dict[str, Any] = {}
+        try:
+            for event in orchestrator.execute_plan_stream(
+                history,
+                request.project_id,
+                steps,
+                action_scope=request.action_scope,
+                access_level=request.access_level,
+            ):
+                if event.get("type") == "final":
+                    final = event
+                    continue
+                yield sse(event)
+        except azure_client.AzureOpenAINotConfiguredError as exc:
+            yield sse({"type": "delta", "text": str(exc)})
+            final = {"mode": "agent", "reply": str(exc)}
+        except Exception as exc:  # noqa: BLE001 - surface a clean error to the client
+            message = f"The plan failed while executing: {exc}"
+            yield sse({"type": "delta", "text": message})
+            final = {"mode": "agent", "reply": message}
+
+        reply = final.get("reply", "")
+        chats.add_message(
+            chat_id,
+            "assistant",
+            reply,
+            {"mode": final.get("mode", "agent"), "skills_used": final.get("skills_used", [])},
         )
         final["chat_id"] = chat_id
         yield sse({"type": "final", **final})

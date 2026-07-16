@@ -489,6 +489,86 @@ def _build_plan(
     return summary, steps
 
 
+DETAILED_PLAN_SYSTEM_PROMPT = (
+    "You are a lead DevSecOps engineer scoping a piece of work and writing a "
+    "DETAILED, researched plan BEFORE anything runs. You have already explored "
+    "the user's environment: any live data below (their real repositories, cloud "
+    "inventory, cost, source code, scan output) is the result of that "
+    "exploration — read it carefully and ground every statement in it. Do NOT "
+    "guess or hand-wave; if something is unknown, say precisely what you would "
+    "check and where.\n\n"
+    "Think like an engineer picking up a ticket and produce:\n"
+    "1. UNDERSTANDING — restate, in your own words, exactly what the user wants "
+    "and why.\n"
+    "2. FINDINGS — what your exploration actually shows. Cite concrete specifics "
+    "from the live data (repo names, resource counts, the actual "
+    "misconfigurations, cost drivers, file paths). If no live data is present, "
+    "state what inputs you still need to proceed.\n"
+    "3. ISSUES — the specific problems, risks or gaps this work must address, "
+    "each tied to evidence from the findings.\n"
+    "4. RESOLUTION — the approach you will take to resolve those issues.\n"
+    "5. STEPS — an ordered TODO list where each item is executed by exactly ONE "
+    "specialist skill (use exact catalog names). Order by dependency: "
+    "explore/analyse before generate/report; a later step may build on an "
+    "earlier one. Each step has a self-contained 'objective' (the instruction "
+    "the skill will receive) and a short 'detail' explaining what it does and "
+    "why it matters here.\n\n"
+    "If the request genuinely needs no specialist skill (a general question or "
+    "greeting), return an empty steps list.\n\n"
+    "Respond ONLY with JSON of the form:\n"
+    '{"understanding": "<what the user wants>", '
+    '"findings": "<what exploration shows, with specifics>", '
+    '"issues": ["<issue tied to evidence>", ...], '
+    '"resolution": "<the approach>", '
+    '"steps": [{"skill": "<exact skill name>", "objective": "<instruction for '
+    'that agent>", "detail": "<what this step does and why>"}]}\n\n'
+    "Available skills:\n{catalog}"
+)
+
+
+def _build_detailed_plan(
+    messages: list[dict[str, Any]], live_context: Optional[str] = None
+) -> tuple[dict[str, Any], list[PlanStep]]:
+    """Ask the planner LLM for a researched, detailed plan grounded in live data.
+
+    Returns the parsed plan dict (understanding / findings / issues / resolution
+    / steps) plus the validated, ordered PlanSteps used for execution.
+    """
+    catalog = _skill_catalog_text()
+    system_content = DETAILED_PLAN_SYSTEM_PROMPT.replace("{catalog}", catalog)
+    if live_context:
+        system_content += (
+            "\n\nLIVE EXPLORATION DATA (already fetched read-only from the user's "
+            "connected accounts — base your understanding, findings and issues on "
+            "this):\n" + live_context
+        )
+    planning_messages = [
+        {"role": "system", "content": system_content},
+        {"role": "user", "content": _last_user_message(messages)},
+    ]
+    completion = azure_client.chat(
+        messages=planning_messages,
+        temperature=0.2,
+        response_format={"type": "json_object"},
+    )
+    raw = completion.choices[0].message.content or "{}"
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = {}
+
+    steps: list[PlanStep] = []
+    valid_items: list[dict[str, Any]] = []
+    for item in parsed.get("steps", []):
+        skill_name = item.get("skill", "")
+        if registry.get(skill_name) is None:
+            continue
+        steps.append(PlanStep(skill=skill_name, objective=item.get("objective", "")))
+        valid_items.append(item)
+    parsed["steps"] = valid_items
+    return parsed, steps
+
+
 def _run_single_skill(
     skill_name: str, task: str, policy: str, live_context: Optional[str]
 ) -> ChatTurn:
@@ -583,28 +663,61 @@ def _run_multi_agent(
     )
 
 
+def _format_detailed_plan(parsed: dict[str, Any], steps: list[PlanStep]) -> str:
+    """Render the researched plan dict into a readable Markdown briefing."""
+    lines: list[str] = []
+
+    understanding = (parsed.get("understanding") or "").strip()
+    if understanding:
+        lines += ["## What you're asking for", understanding, ""]
+
+    findings = (parsed.get("findings") or "").strip()
+    if findings:
+        lines += ["## What I found", findings, ""]
+
+    issues = parsed.get("issues")
+    if issues:
+        lines.append("## Issues to address")
+        if isinstance(issues, list):
+            lines += [f"- {str(item).strip()}" for item in issues if str(item).strip()]
+        else:
+            lines.append(str(issues).strip())
+        lines.append("")
+
+    resolution = (parsed.get("resolution") or "").strip()
+    if resolution:
+        lines += ["## How I'll resolve it", resolution, ""]
+
+    lines.append(f"## Plan — {len(steps)} step{'s' if len(steps) != 1 else ''}")
+    valid_items = parsed.get("steps", [])
+    for index, step in enumerate(steps, start=1):
+        label = _pretty(step.skill)
+        detail = ""
+        if index - 1 < len(valid_items):
+            detail = (valid_items[index - 1].get("detail") or "").strip()
+        summary = detail or step.objective
+        lines.append(f"{index}. **{label}** — {summary}")
+    lines.append("")
+    lines.append("_Review this plan, then approve below to run it._")
+    return "\n".join(lines)
+
+
 def _run_plan_mode(
     messages: list[dict[str, Any]], live_context: Optional[str]
 ) -> ChatTurn:
-    """Produce a plan without executing any skill."""
-    summary, steps = _build_plan(messages, live_context)
+    """Explore, understand the request, and produce a detailed plan — no execution."""
+    parsed, steps = _build_detailed_plan(messages, live_context)
     if not steps:
-        reply = (
-            "No specialist skill is required for this request. In agent mode I "
-            "would answer it directly."
+        understanding = (parsed.get("understanding") or "").strip()
+        reply = understanding or (
+            "This looks like a general question rather than a task needing a "
+            "specialist skill. Ask it in agent mode and I'll answer directly."
         )
         return ChatTurn(mode="plan", reply=reply)
 
-    lines = [summary, ""] if summary else []
-    for index, step in enumerate(steps, start=1):
-        skill = registry.get(step.skill)
-        label = skill.name if skill else step.skill
-        lines.append(f"{index}. **{label}** — {step.objective}")
-    lines.append("")
-    lines.append("_Plan mode is read-only. Switch to Agent mode to execute._")
     return ChatTurn(
         mode="plan",
-        reply="\n".join(lines),
+        reply=_format_detailed_plan(parsed, steps),
         plan=steps,
         skills_used=[step.skill for step in steps],
     )
@@ -666,58 +779,19 @@ def _stream_and_collect(deltas: Iterator[str]) -> Iterator[dict[str, Any]]:
     return "".join(acc)
 
 
-def run_chat_stream(
+def _stream_steps(
+    task: str,
     messages: list[dict[str, Any]],
-    project_id: str,
-    mode: Mode = "agent",
-    skill: Optional[str] = None,
-    action_scope: ActionScope = "read_only",
-    access_level: AccessLevel = "ask_approval",
+    steps: list[PlanStep],
+    policy: str,
+    live_context: Optional[str],
 ) -> Iterator[dict[str, Any]]:
-    """Streaming variant of run_chat.
+    """Execute an ordered set of skill steps, streaming events and a final turn.
 
-    Yields event dicts: {"type": "status"|"delta"|"final", ...}. The final event
-    carries the assembled reply plus mode / skills_used / plan / agents.
+    Shared by the auto agent path (after planning) and approved-plan execution.
+    With no steps it answers directly; with one it streams that skill; with many
+    it runs each skill then streams a synthesis.
     """
-    policy = build_policy(action_scope, access_level)
-    task = _last_user_message(messages)
-    live_context = _gather_live_context(
-        task,
-        project_id,
-        force=(skill == "cloud_posture"),
-        force_cost=(skill == "cost_analyzer"),
-    )
-
-    if mode == "plan":
-        yield {"type": "status", "text": "Planning"}
-        turn = _run_plan_mode(messages, live_context)
-        for word in turn.reply.split(" "):
-            yield {"type": "delta", "text": word + " "}
-        yield {"type": "final", **turn.to_dict()}
-        return
-
-    if skill:
-        sk = registry.get(skill)
-        if sk is None:
-            turn = ChatTurn(mode="agent", reply=f"Skill '{skill}' was not found.")
-            yield {"type": "delta", "text": turn.reply}
-            yield {"type": "final", **turn.to_dict()}
-            return
-        yield {"type": "status", "text": _pretty(skill)}
-        args = _augment_args({"input": task, "operating_policy": policy}, live_context)
-        content = yield from _stream_and_collect(_skill_deltas(sk, args))
-        turn = ChatTurn(
-            mode="agent",
-            reply=content,
-            agents=[AgentRun(skill=skill, objective=task, output=content)],
-            skills_used=[skill],
-        )
-        yield {"type": "final", **turn.to_dict()}
-        return
-
-    yield {"type": "status", "text": "Analyzing request"}
-    summary, steps = _build_plan(messages, live_context)
-
     if not steps:
         system = f"{ORCHESTRATOR_SYSTEM_PROMPT}\n\n{policy}"
         if live_context:
@@ -792,3 +866,85 @@ def run_chat_stream(
         skills_used=[run.skill for run in runs],
     )
     yield {"type": "final", **turn.to_dict()}
+
+
+def run_chat_stream(
+    messages: list[dict[str, Any]],
+    project_id: str,
+    mode: Mode = "agent",
+    skill: Optional[str] = None,
+    action_scope: ActionScope = "read_only",
+    access_level: AccessLevel = "ask_approval",
+) -> Iterator[dict[str, Any]]:
+    """Streaming variant of run_chat.
+
+    Yields event dicts: {"type": "status"|"delta"|"final", ...}. The final event
+    carries the assembled reply plus mode / skills_used / plan / agents.
+    """
+    policy = build_policy(action_scope, access_level)
+    task = _last_user_message(messages)
+    live_context = _gather_live_context(
+        task,
+        project_id,
+        force=(skill == "cloud_posture"),
+        force_cost=(skill == "cost_analyzer"),
+    )
+
+    if mode == "plan":
+        yield {"type": "status", "text": "Planning"}
+        turn = _run_plan_mode(messages, live_context)
+        for word in turn.reply.split(" "):
+            yield {"type": "delta", "text": word + " "}
+        yield {"type": "final", **turn.to_dict()}
+        return
+
+    if skill:
+        sk = registry.get(skill)
+        if sk is None:
+            turn = ChatTurn(mode="agent", reply=f"Skill '{skill}' was not found.")
+            yield {"type": "delta", "text": turn.reply}
+            yield {"type": "final", **turn.to_dict()}
+            return
+        yield {"type": "status", "text": _pretty(skill)}
+        args = _augment_args({"input": task, "operating_policy": policy}, live_context)
+        content = yield from _stream_and_collect(_skill_deltas(sk, args))
+        turn = ChatTurn(
+            mode="agent",
+            reply=content,
+            agents=[AgentRun(skill=skill, objective=task, output=content)],
+            skills_used=[skill],
+        )
+        yield {"type": "final", **turn.to_dict()}
+        return
+
+    yield {"type": "status", "text": "Analyzing request"}
+    _summary, steps = _build_plan(messages, live_context)
+    yield from _stream_steps(task, messages, steps, policy, live_context)
+
+
+def execute_plan_stream(
+    messages: list[dict[str, Any]],
+    project_id: str,
+    steps: list[PlanStep],
+    action_scope: ActionScope = "read_only",
+    access_level: AccessLevel = "ask_approval",
+) -> Iterator[dict[str, Any]]:
+    """Execute a plan the user already approved, streaming each step.
+
+    The plan was produced earlier in plan mode; here we run it for real. Live
+    context is (re)gathered so the skills operate on current data. Yields the
+    same event shape as run_chat_stream.
+    """
+    policy = build_policy(action_scope, access_level)
+    task = _last_user_message(messages)
+    valid = [step for step in steps if registry.get(step.skill) is not None]
+    if not valid:
+        turn = ChatTurn(
+            mode="agent",
+            reply="The approved plan had no runnable steps, so nothing was executed.",
+        )
+        yield {"type": "final", **turn.to_dict()}
+        return
+    live_context = _gather_live_context(task, project_id)
+    yield {"type": "status", "text": "Executing plan"}
+    yield from _stream_steps(task, messages, valid, policy, live_context)
