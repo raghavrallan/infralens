@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Settings · DevSecOps Skills Suite</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body class="scroll-page">
+    <div class="page">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark">DS</div>
+          <div>
+            <h1>DevSecOps</h1>
+            <p>Skills Suite</p>
+          </div>
+        </div>
+        <nav class="nav">
+          <a href="/" class="nav-item">Chat</a>
+          <a href="/wiki" class="nav-item">Wiki</a>
+          <a href="/settings" class="nav-item active">Settings</a>
+        </nav>
+      </header>
+
+      <main class="content">
+        <h2 class="page-title">Settings</h2>
+        <p class="page-sub">
+          Configure the assistant and connect the accounts your skills operate
+          against. Everything here is stored in Postgres — never in environment
+          files — and secrets are never sent back to the browser.
+        </p>
+
+        <section class="card" id="project-card">
+          <div class="card-head">
+            <h3>Project</h3>
+            <span class="pill ok" id="project-pill">workspace</span>
+          </div>
+          <p class="muted small">
+            Connections and repositories below are isolated per project. Switch
+            projects to give a client / product its own credentials and repos.
+          </p>
+          <div class="project-controls">
+            <select id="project-select" class="project-select"></select>
+            <button type="button" class="primary" id="new-project-btn">New project</button>
+            <button type="button" class="ghost" id="rename-project-btn">Rename</button>
+            <button type="button" class="ghost danger" id="delete-project-btn">Delete</button>
+          </div>
+          <div class="form-msg" id="project-msg"></div>
+        </section>
+
+        <section class="card" id="openai-card">
+          <div class="card-head">
+            <h3>Azure OpenAI</h3>
+            <span class="pill off" id="openai-pill">checking…</span>
+          </div>
+          <p class="muted small">
+            Global · powers the assistant and every skill across all projects.
+            Stored in the database.
+          </p>
+          <form id="openai-form">
+            <div class="fields">
+              <label>Endpoint<input name="endpoint" placeholder="https://my-resource.openai.azure.com/" /></label>
+              <label>API key<input name="api_key" type="password" placeholder="leave blank to keep current key" /></label>
+              <label>Deployment name<input name="deployment" placeholder="gpt-4o" /></label>
+              <label>API version<input name="api_version" placeholder="2024-10-21" /></label>
+            </div>
+            <div class="actions">
+              <button type="submit" class="primary">Save</button>
+            </div>
+            <div class="form-msg" id="openai-msg"></div>
+          </form>
+        </section>
+
+        <section class="card provider" data-provider="azure">
+          <div class="card-head">
+            <h3>Azure account</h3>
+            <span class="pill off" data-role="pill">not connected</span>
+          </div>
+          <div class="method-tabs" data-role="tabs">
+            <button type="button" class="method-tab active" data-method="client_secret">
+              Client secret
+            </button>
+            <button type="button" class="method-tab" data-method="sso">SSO</button>
+          </div>
+          <form data-role="form">
+            <div class="fields" data-group="client_secret">
+              <label>Tenant ID<input name="tenant_id" placeholder="00000000-0000-0000-0000-000000000000" /></label>
+              <label>Client ID<input name="client_id" placeholder="app registration client id" /></label>
+              <label>Client secret<input name="client_secret" type="password" placeholder="••••••••" /></label>
+              <label>Subscription ID (optional)<input name="subscription_id" placeholder="subscription id" /></label>
+            </div>
+            <div class="fields" data-group="sso" hidden>
+              <label>Directory (tenant) domain<input name="tenant_domain" placeholder="contoso.onmicrosoft.com" /></label>
+              <p class="muted small">
+                Records your directory for single sign-on. Redirect-based login
+                completes in a follow-up build.
+              </p>
+            </div>
+            <div class="actions">
+              <button type="submit" class="primary">Connect</button>
+              <button type="button" class="ghost" data-role="disconnect" hidden>Disconnect</button>
+            </div>
+            <div class="form-msg" data-role="msg"></div>
+          </form>
+        </section>
+
+        <section class="card provider" data-provider="aws">
+          <div class="card-head">
+            <h3>AWS account</h3>
+            <span class="pill off" data-role="pill">not connected</span>
+          </div>
+          <div class="method-tabs" data-role="tabs">
+            <button type="button" class="method-tab active" data-method="access_key">
+              Access key
+            </button>
+            <button type="button" class="method-tab" data-method="sso">SSO</button>
+          </div>
+          <form data-role="form">
+            <div class="fields" data-group="access_key">
+              <label>Access key ID<input name="access_key_id" placeholder="AKIA…" /></label>
+              <label>Secret access key<input name="secret_access_key" type="password" placeholder="••••••••" /></label>
+              <label>Default region<input name="region" placeholder="us-east-1" /></label>
+            </div>
+            <div class="fields" data-group="sso" hidden>
+              <label>IAM Identity Center start URL<input name="start_url" placeholder="https://my-org.awsapps.com/start" /></label>
+              <label>Region<input name="region" placeholder="us-east-1" /></label>
+              <p class="muted small">
+                Records your Identity Center portal for single sign-on.
+                Device-authorisation login completes in a follow-up build.
+              </p>
+            </div>
+            <div class="actions">
+              <button type="submit" class="primary">Connect</button>
+              <button type="button" class="ghost" data-role="disconnect" hidden>Disconnect</button>
+            </div>
+            <div class="form-msg" data-role="msg"></div>
+          </form>
+        </section>
+
+        <section class="card provider" data-provider="github">
+          <div class="card-head">
+            <h3>GitHub</h3>
+            <span class="pill off" data-role="pill">not connected</span>
+          </div>
+          <div class="method-tabs" data-role="tabs">
+            <button type="button" class="method-tab active" data-method="token">
+              Personal access token
+            </button>
+            <button type="button" class="method-tab" data-method="sso">OAuth SSO</button>
+          </div>
+          <form data-role="form">
+            <div class="fields" data-group="token">
+              <label>Username (optional)<input name="username" placeholder="octocat" /></label>
+              <label>Personal access token<input name="token" type="password" placeholder="ghp_…" /></label>
+            </div>
+            <div class="fields" data-group="sso" hidden>
+              <label>Organisation<input name="org" placeholder="my-org" /></label>
+              <p class="muted small">
+                Records your organisation for OAuth sign-in. The OAuth redirect
+                flow completes in a follow-up build.
+              </p>
+            </div>
+            <div class="actions">
+              <button type="submit" class="primary">Connect</button>
+              <button type="button" class="ghost" data-role="disconnect" hidden>Disconnect</button>
+            </div>
+            <div class="form-msg" data-role="msg"></div>
+          </form>
+        </section>
+
+        <section class="card" id="repos-card">
+          <div class="card-head">
+            <h3>Project repositories</h3>
+            <span class="pill off" id="repos-pill">—</span>
+          </div>
+          <p class="muted small">
+            Map the repositories this project owns, across every organisation
+            your token can access. When you ask to review Terraform, pipelines,
+            Dockerfiles or code, the agent only looks inside these repos. Leave
+            all unchecked to allow every repo the token can see.
+          </p>
+          <div class="repos-toolbar" id="repos-toolbar" hidden>
+            <select id="repos-org" class="project-select" title="Filter by organisation"></select>
+            <input id="repos-search" class="repos-search" type="text" placeholder="Search repositories…" />
+            <button type="button" class="ghost small-btn" id="repos-select-all">Select all</button>
+            <button type="button" class="ghost small-btn" id="repos-clear">Clear</button>
+          </div>
+          <div class="repos-list" id="repos-list">
+            <p class="muted small">Connect GitHub above to list repositories.</p>
+          </div>
+          <div class="actions">
+            <button type="button" class="primary" id="save-repos-btn">Save repositories</button>
+            <button type="button" class="ghost" id="refresh-repos-btn">Refresh list</button>
+          </div>
+          <div class="form-msg" id="repos-msg"></div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/static/modal.js"></script>
+    <script src="/static/settings.js"></script>
+  </body>
+</html>

@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: devsecops-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: devsecops
+      POSTGRES_PASSWORD: devsecops
+      POSTGRES_DB: devsecops
+    ports:
+      - "5544:5432"
+    volumes:
+      - devsecops_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devsecops -d devsecops"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  devsecops_pgdata:
