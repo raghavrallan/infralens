@@ -11,6 +11,7 @@ Each step in a task is handled by one skill acting as an independent agent with
 its own specialised system prompt (see app/skills/*).
 """
 import json
+import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Iterator, Literal, Optional
 
@@ -199,7 +200,43 @@ _CODE_INTENT: dict[str, tuple[str, ...]] = {
         "ci/cd",
         "pipeline",
     ),
+    "azure_pipelines": (
+        "azure devops",
+        "azure-devops",
+        "ado",
+        "azure pipeline",
+        "azure-pipelines",
+        "azure pipelines",
+        "release pipeline",
+        "build pipeline",
+        "deploy pipeline",
+        "deployment pipeline",
+        "pipeline",
+        "yaml",
+        "yamls",
+        "yml",
+    ),
     "ansible": ("ansible", "playbook"),
+    "source": (
+        "source code",
+        "my code",
+        "the code",
+        "code review",
+        "review the code",
+        "optimize",
+        "optimise",
+        "optimization",
+        "optimisation",
+        "refactor",
+        "clean up",
+        "improve the code",
+        "code quality",
+        "bug in",
+        "why is",
+        "function",
+        "module",
+        "class",
+    ),
 }
 # Generic "look at my whole setup" phrasing → pull the common IaC artifacts too,
 # so "review my infra" always considers the real Terraform / Bicep / code.
@@ -214,7 +251,50 @@ _INFRA_CODE_TERMS = (
     "my repository",
     "my project",
 )
-_DEFAULT_INFRA_KINDS = ("terraform", "bicep", "kubernetes", "dockerfile")
+_DEFAULT_INFRA_KINDS = (
+    "terraform",
+    "bicep",
+    "kubernetes",
+    "dockerfile",
+    "azure_pipelines",
+)
+
+# Environment keyword patterns (word-boundary) used to pick the right branch.
+_ENV_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("prod", (r"\bprod\b", r"\bproduction\b", r"\blive\b", r"\bmaster\b", r"\bmain branch\b")),
+    ("uat", (r"\buat\b", r"\buser acceptance\b")),
+    ("qa", (r"\bqa\b", r"\bquality assurance\b")),
+    ("staging", (r"\bstaging\b", r"\bstage\b", r"\bpre-?prod\b", r"\bpreprod\b")),
+    ("dev", (r"\bdevelopment\b", r"\bdevelop\b", r"\bdev\b", r"\bdev env\b")),
+)
+_BRANCH_STOPWORDS = {
+    "the", "a", "an", "this", "that", "my", "which", "env", "environment",
+    "default", "same", "right", "correct", "feature", "current", "your", "our",
+    "release", "target",
+}
+
+
+def _detect_env(task: str) -> Optional[str]:
+    """Resolve which environment the user means, for branch selection."""
+    low = task.lower()
+    for env, patterns in _ENV_PATTERNS:
+        if any(re.search(p, low) for p in patterns):
+            return env
+    return None
+
+
+def _detect_branch(task: str) -> Optional[str]:
+    """Pick up an explicitly named branch like 'the release/x branch'."""
+    low = task.lower()
+    match = re.search(r"\bbranch\s+([\w./-]+)", low) or re.search(
+        r"\b([\w./-]+)\s+branch\b", low
+    )
+    if not match:
+        return None
+    name = match.group(1).strip()
+    if name in _BRANCH_STOPWORDS or len(name) < 2:
+        return None
+    return name
 
 # Beyond this size the user has almost certainly pasted the artifact themselves,
 # so don't go fetching code from their repos.
@@ -232,15 +312,27 @@ def _detect_code_kinds(task_lower: str) -> list[str]:
     return list(kinds)
 
 
-def _gather_code_context(task: str, project_id: str) -> Optional[str]:
-    """Locate and fetch the real source files the user is asking about from GitHub."""
+def _gather_code_context(
+    task: str, project_id: str, force: bool = False
+) -> Optional[str]:
+    """Locate and fetch the real source files the user is asking about from GitHub.
+
+    When ``force`` is set (the planner chose a code-backed skill), fall back to a
+    broad default artifact set even if the phrasing matched no specific keyword.
+    """
     if len(task) > _PASTED_CONTENT_CHARS or not github_infra.is_connected(project_id):
         return None
     kinds = _detect_code_kinds(task.lower())
+    if not kinds and force:
+        kinds = list(_DEFAULT_INFRA_KINDS) + ["source", "workflows"]
     if not kinds:
         return None
+    env = _detect_env(task)
+    branch = _detect_branch(task)
     try:
-        report = github_infra.build_code_report(project_id, kinds)
+        report = github_infra.build_code_report(
+            project_id, kinds, env=env, branch=branch
+        )
     except github_infra.GitHubConnectionError:
         return None
     except github_infra.GitHubApiError as exc:
@@ -273,18 +365,69 @@ _COST_TRIGGERS = (
 )
 
 
+# Billing target keyword -> ServiceName substrings to filter the cost query to.
+_COST_SERVICE_FILTERS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
+    (("storage", "blob", "storage account"), ("storage",)),
+    (
+        ("foundry", "openai", "open ai", "cognitive", "ai model", "token", "gpt", "llm"),
+        ("foundry", "openai", "cognitive", "azure ai"),
+    ),
+    (("postgres", "postgre", "psql"), ("postgre",)),
+    (("container app", "containerapp", "aca"), ("container apps", "app service")),
+    (("sql", "sql database"), ("sql",)),
+    (("redis", "cache"), ("redis", "cache")),
+    (("cosmos",), ("cosmos",)),
+    (("app service", "web app"), ("app service",)),
+    (("registry", "acr", "container registry"), ("container registry",)),
+)
+# Phrasing that means "break the bill down finely" (per meter / per token type).
+_COST_METER_TERMS = (
+    "meter",
+    "detail",
+    "detailed",
+    "breakdown",
+    "break down",
+    "per model",
+    "token",
+    "input",
+    "output",
+    "line item",
+)
+
+
+def _cost_service_filter(task_lower: str) -> Optional[list[str]]:
+    for keywords, subs in _COST_SERVICE_FILTERS:
+        if any(k in task_lower for k in keywords):
+            return list(subs)
+    return None
+
+
 def _gather_cost_context(
     task: str, project_id: str, force: bool = False
 ) -> Optional[str]:
-    """Fetch real Azure spend when the user asks about billing / cost."""
+    """Fetch real Azure spend when the user asks about billing / cost.
+
+    Detects the service the user is asking about (storage, Foundry/OpenAI, …) to
+    filter the bill, and whether they want a fine meter-level breakdown (token
+    meters for OpenAI, etc.).
+    """
     task_lower = task.lower()
     if not force and not any(term in task_lower for term in _COST_TRIGGERS):
         return None
     if not azure_infra.is_connected(project_id):
         return None
     from_date, to_date, label = azure_infra.parse_cost_period(task)
+    service_filter = _cost_service_filter(task_lower)
+    group_by = "meter" if any(t in task_lower for t in _COST_METER_TERMS) else "service"
     try:
-        report = azure_infra.build_cost_report(project_id, from_date, to_date, label)
+        report = azure_infra.build_cost_report(
+            project_id,
+            from_date,
+            to_date,
+            label,
+            group_by=group_by,
+            service_filter=service_filter,
+        )
     except azure_infra.AzureConnectionError:
         return None
     except azure_infra.AzureApiError as exc:
@@ -305,23 +448,281 @@ def _gather_cost_context(
     )
 
 
+# Phrasing that means "show me telemetry / how busy a resource has been".
+_METRIC_TRIGGERS = (
+    "metric",
+    "metrics",
+    "cpu",
+    "memory",
+    "utilization",
+    "utilisation",
+    "telemetry",
+    "throughput",
+    "latency",
+    "replicas",
+    "how busy",
+    "usage over",
+    "last 24 hour",
+    "last 24 hours",
+    "24h",
+    "graph of",
+    "plot",
+    "token",
+    "tokens",
+    "input token",
+    "output token",
+    "transactions",
+    "connections",
+    "iops",
+    "requests",
+)
+
+
+_METRIC_INTENT_PROMPT = (
+    "From a user's request about cloud resource telemetry, extract which Azure "
+    "resource they mean and which metrics they want. Respond ONLY with JSON:\n"
+    '{"resource_types": [], "resource_name": null, "metrics": []}\n'
+    "resource_types: zero or more of exactly these keys — container_app, "
+    "postgresql, mysql, mariadb, vm, vmss, sql_database, storage, web_app, aks, "
+    "redis, cosmos, app_gateway, service_bus, event_hub, cognitive. Use "
+    "'cognitive' for Azure OpenAI / AI Foundry / Cognitive Services / AI models. "
+    "Pick the type(s) the user names; leave empty if truly unclear.\n"
+    "resource_name: a specific resource name the user mentions, else null.\n"
+    "metrics: zero or more short keywords the user asks for — cpu, memory, "
+    "connections, iops, disk, storage, requests, latency, network, replicas, "
+    "restarts, errors, transactions, tokens, input_tokens, output_tokens, calls. "
+    "Use input_tokens/output_tokens/tokens for Azure OpenAI token usage. Include "
+    "every metric they mention (e.g. both input_tokens and output_tokens). Leave "
+    "empty if they don't name one."
+)
+
+
+def _parse_metric_intent(
+    task: str,
+) -> tuple[Optional[list[str]], Optional[str], Optional[list[str]]]:
+    """Use the LLM to resolve the resource type(s) and metrics the user wants."""
+    try:
+        completion = azure_client.chat(
+            messages=[
+                {"role": "system", "content": _METRIC_INTENT_PROMPT},
+                {"role": "user", "content": task},
+            ],
+            temperature=0.0,
+            response_format={"type": "json_object"},
+        )
+        parsed = json.loads(completion.choices[0].message.content or "{}")
+    except Exception:  # noqa: BLE001 - fall back to keyword inference on any failure
+        return None, None, None
+    types = parsed.get("resource_types") or None
+    name = parsed.get("resource_name") or None
+    metrics = parsed.get("metrics") or None
+    types = [t for t in types if isinstance(t, str)] if isinstance(types, list) else None
+    metrics = (
+        [m for m in metrics if isinstance(m, str)] if isinstance(metrics, list) else None
+    )
+    return (types or None), (name if isinstance(name, str) else None), (metrics or None)
+
+
+def _gather_metrics_context(
+    task: str, project_id: str, force: bool = False
+) -> tuple[Optional[str], list[dict[str, Any]]]:
+    """Fetch real Azure Monitor metrics when the user asks about performance.
+
+    The connected AI parses the request into the resource type(s) and metrics
+    involved, so any resource kind (Container App, PostgreSQL, VM, storage, …)
+    and any exposed metric (CPU, memory, connections, …) can be fetched.
+    Returns a (text_block, charts) pair; ``charts`` is empty when nothing was
+    fetched.
+    """
+    task_lower = task.lower()
+    if not force and not any(term in task_lower for term in _METRIC_TRIGGERS):
+        return None, []
+    if not azure_infra.is_connected(project_id):
+        return None, []
+    resource_types, resource_name, metric_hints = _parse_metric_intent(task)
+    try:
+        report = azure_infra.build_metrics_report(
+            project_id,
+            task,
+            resource_types=resource_types,
+            resource_name=resource_name,
+            metric_hints=metric_hints,
+        )
+    except azure_infra.AzureConnectionError:
+        return None, []
+    except azure_infra.AzureApiError as exc:
+        note = (
+            "LIVE AZURE METRICS FETCH FAILED. The user's Azure account IS "
+            "connected, but the read-only Azure Monitor query failed. Tell the "
+            "user this, show the error verbatim, and note the most likely cause: "
+            "the app registration needs the 'Monitoring Reader' role (or Reader) "
+            "on the subscription, and a subscription id must be set. Do NOT ask "
+            f"them to paste telemetry.\nError: {exc}"
+        )
+        return note, []
+    block = (
+        "LIVE AZURE METRICS DATA — read-only, fetched just now via Azure Monitor "
+        "using the user's connected credentials. Answer the performance question "
+        "directly from these REAL figures; the same series is being plotted as a "
+        "graph for the user. Do NOT ask the user to paste telemetry.\n\n"
+        + report["text"]
+    )
+    return block, report.get("charts", [])
+
+
+# Phrasing that means "count errors / HTTP statuses from request telemetry".
+_LOG_TRIGGERS = (
+    "log",
+    "logs",
+    "error",
+    "errors",
+    "4xx",
+    "5xx",
+    "400",
+    "401",
+    "403",
+    "404",
+    "429",
+    "500",
+    "502",
+    "503",
+    "504",
+    "status code",
+    "status codes",
+    "failed request",
+    "failing",
+    "error rate",
+)
+
+
+# Phrasing that means "read the actual log lines / diagnose a failure".
+_LOG_CONTENT_TRIGGERS = (
+    "log",
+    "logs",
+    "revision",
+    "crash",
+    "crashed",
+    "restart",
+    "exception",
+    "traceback",
+    "stack trace",
+    "stacktrace",
+    "failed",
+    "failing",
+    "failure",
+    "provision",
+    "deploy",
+    "deployment",
+    "why is",
+    "what happened",
+    "root cause",
+    "diagnose",
+    "not starting",
+    "won't start",
+)
+
+
+def _gather_logs_context(
+    task: str, project_id: str, force: bool = False
+) -> tuple[Optional[str], list[dict[str, Any]]]:
+    """Gather live error signals: HTTP status counts and real log/revision content.
+
+    Combines (a) HTTP 4xx/5xx counts from Azure Monitor request telemetry (with a
+    chart) and (b) real container app revision status plus system/console log
+    lines from Log Analytics, so both "how many 500s" and "why did my revision
+    fail — show the logs" are answered from REAL data.
+    """
+    task_lower = task.lower()
+    want_status = force or any(term in task_lower for term in _LOG_TRIGGERS)
+    want_content = force or any(term in task_lower for term in _LOG_CONTENT_TRIGGERS)
+    if not want_status and not want_content:
+        return None, []
+    if not azure_infra.is_connected(project_id):
+        return None, []
+
+    blocks: list[str] = []
+    charts: list[dict[str, Any]] = []
+
+    if want_status:
+        try:
+            report = azure_infra.build_status_report(project_id, task)
+            blocks.append(
+                "LIVE AZURE REQUEST/ERROR TELEMETRY — read-only, fetched just now "
+                "via Azure Monitor using the user's connected credentials. Answer "
+                "the error/status question directly from these REAL counts; 4xx/5xx "
+                "are plotted for the user. Do NOT ask the user to paste logs.\n\n"
+                + report["text"]
+            )
+            charts = report.get("charts", [])
+        except azure_infra.AzureConnectionError:
+            pass
+        except azure_infra.AzureApiError as exc:
+            blocks.append(
+                "LIVE AZURE REQUEST/ERROR TELEMETRY unavailable: the read-only "
+                "request-metric query failed or the app had no ingress traffic in "
+                f"the window. Error: {exc}"
+            )
+
+    if want_content:
+        try:
+            logs = azure_infra.build_logs_report(project_id, task)
+            blocks.append(
+                "LIVE AZURE LOGS & REVISION STATUS — read-only, fetched just now "
+                "from Log Analytics and the Container Apps control plane. Diagnose "
+                "the issue from these REAL revision states and log lines; cite the "
+                "revision name/image and the exact log messages. Do NOT ask the "
+                "user to paste logs.\n\n" + logs["text"]
+            )
+        except azure_infra.AzureConnectionError:
+            pass
+        except azure_infra.AzureApiError as exc:
+            blocks.append(
+                "LIVE AZURE LOGS FETCH FAILED. The user's Azure account IS "
+                "connected, but reading Log Analytics failed. Tell the user this, "
+                "show the error verbatim, and note the likely cause: the app "
+                "registration needs the 'Log Analytics Reader' (or Reader) role, or "
+                "no workspace is linked to the container app environment. Do NOT "
+                f"ask them to paste logs.\nError: {exc}"
+            )
+
+    if not blocks:
+        return None, charts
+    return "\n\n---\n\n".join(blocks), charts
+
+
 def _gather_live_context(
-    task: str, project_id: str, force: bool = False, force_cost: bool = False
-) -> Optional[str]:
+    task: str,
+    project_id: str,
+    force: bool = False,
+    force_cost: bool = False,
+    force_metrics: bool = False,
+    force_logs: bool = False,
+) -> tuple[Optional[str], list[dict[str, Any]]]:
     """Fetch live, read-only context from GitHub code and every relevant provider.
 
-    Combines (a) real Azure spend when the user asks about billing/cost, (b) real
-    source files located in the project's repos when they ask about Terraform /
-    Bicep / Dockerfiles / K8s / pipelines / infra, and (c) live environment
-    reports for each connected Azure / AWS / GitHub account relevant to the
-    request. Everything is scoped to the given project. Returns the combined
-    block, an error note to surface, or None when nothing relevant is connected.
+    Combines (a) real Azure spend when the user asks about billing/cost, (b) live
+    Azure Monitor metrics when they ask about performance/CPU (also returned as
+    plottable charts), (c) real source files located in the project's repos when
+    they ask about Terraform / Bicep / Dockerfiles / K8s / pipelines / infra, and
+    (d) live environment reports for each connected Azure / AWS / GitHub account
+    relevant to the request. Everything is scoped to the given project. Returns a
+    (combined_text_or_None, charts) pair.
     """
     task_lower = task.lower()
     blocks: list[str] = []
     cost_block = _gather_cost_context(task, project_id, force=force_cost)
     if cost_block:
         blocks.append(cost_block)
+    metrics_block, charts = _gather_metrics_context(
+        task, project_id, force=force_metrics
+    )
+    if metrics_block:
+        blocks.append(metrics_block)
+    logs_block, logs_charts = _gather_logs_context(task, project_id, force=force_logs)
+    if logs_block:
+        blocks.append(logs_block)
+    if logs_charts:
+        charts = charts + logs_charts
     code_block = _gather_code_context(task, project_id)
     if code_block:
         blocks.append(code_block)
@@ -330,7 +731,68 @@ def _gather_live_context(
         for spec in _PROVIDER_SPECS
         if (block := _provider_block(spec, force, task_lower, project_id))
     )
-    return "\n\n---\n\n".join(blocks) if blocks else None
+    text = "\n\n---\n\n".join(blocks) if blocks else None
+    return text, charts
+
+
+def _ensure_planned_context(
+    task: str,
+    project_id: str,
+    steps: list["PlanStep"],
+    live_context: Optional[str],
+    charts: list[dict[str, Any]],
+) -> tuple[Optional[str], list[dict[str, Any]]]:
+    """Guarantee the data-backed skills the planner chose actually have live data.
+
+    Skill routing is decided by the LLM while the keyword gate decides what live
+    data we pre-fetch; the two can disagree (e.g. "how has my app been doing"
+    routes to metrics_analyzer but matches no metric keyword). When that happens
+    the skill would run with no data and no graph, so here we force-fetch the
+    data for any data-backed skill the planner selected but we haven't gathered.
+    """
+    names = {step.skill for step in steps}
+    extra: list[str] = []
+    if "metrics_analyzer" in names and not charts:
+        text, gathered = _gather_metrics_context(task, project_id, force=True)
+        if text:
+            extra.append(text)
+        if gathered:
+            charts = gathered
+    ctx = live_context or ""
+    if names & {"log_analyzer", "incident_analyzer"} and (
+        "AZURE REQUEST/ERROR TELEMETRY" not in ctx and "AZURE LOGS" not in ctx
+    ):
+        text, gathered = _gather_logs_context(task, project_id, force=True)
+        if text:
+            extra.append(text)
+        if gathered:
+            charts = charts + gathered
+    if "cost_analyzer" in names and "LIVE AZURE BILLING" not in ctx:
+        block = _gather_cost_context(task, project_id, force=True)
+        if block:
+            extra.append(block)
+    if names & {"cloud_posture", "drift_auditor"} and "ENVIRONMENT DATA" not in ctx:
+        task_lower = task.lower()
+        for spec in _PROVIDER_SPECS:
+            block = _provider_block(spec, True, task_lower, project_id)
+            if block:
+                extra.append(block)
+    if names & {
+        "iac_reviewer",
+        "pipeline_auditor",
+        "drift_auditor",
+        "code_reviewer",
+        "incident_analyzer",
+    } and "LIVE GITHUB CODE" not in ctx:
+        code = _gather_code_context(task, project_id, force=True)
+        if code:
+            extra.append(code)
+    if extra:
+        merged = "\n\n---\n\n".join(extra)
+        live_context = (
+            merged + "\n\n---\n\n" + live_context if live_context else merged
+        )
+    return live_context, charts
 
 
 def _augment_args(args: dict[str, Any], live_context: Optional[str]) -> dict[str, Any]:
@@ -379,6 +841,7 @@ class ChatTurn:
     plan: list[PlanStep] = field(default_factory=list)
     agents: list[AgentRun] = field(default_factory=list)
     skills_used: list[str] = field(default_factory=list)
+    charts: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -387,6 +850,7 @@ class ChatTurn:
             "plan": [asdict(s) for s in self.plan],
             "agents": [asdict(a) for a in self.agents],
             "skills_used": self.skills_used,
+            "charts": self.charts,
         }
 
 
@@ -451,11 +915,22 @@ def _build_plan(
             "and/or a live cloud/account inventory. Route by intent:\n"
             "- Reviewing Terraform / Bicep / IaC / Kubernetes / Dockerfiles → "
             "'iac_reviewer'.\n"
-            "- Reviewing CI/CD pipelines or GitHub Actions workflows → "
-            "'pipeline_auditor'.\n"
+            "- Reviewing CI/CD pipelines, GitHub Actions or Azure DevOps YAML "
+            "pipelines → 'pipeline_auditor'.\n"
+            "- Reviewing / optimizing / refactoring / comparing APPLICATION source "
+            "code (finding bugs, code smells, improvements) → 'code_reviewer'.\n"
+            "- Comparing LIVE infra against IaC/pipelines, drift, 'what's missing "
+            "in my code', 'is my code in sync with what's deployed' → "
+            "'drift_auditor'.\n"
+            "- A failed/unhealthy container app revision, a crash, an outage, "
+            "'why did it fail', diagnosing from logs → 'incident_analyzer'.\n"
             "- Overall live cloud/account/repository security posture → "
             "'cloud_posture'.\n"
             "- Billing / cost / spend / invoice questions → 'cost_analyzer'.\n"
+            "- Performance / metrics / CPU / memory / utilization / tokens / "
+            "'last 24 hours' / graph questions → 'metrics_analyzer'.\n"
+            "- Error / HTTP status counts / 4xx / 5xx / 400 / 500 / 'error rate' → "
+            "'log_analyzer'.\n"
             "Never ask the user to paste files — the real code/inventory is "
             "already provided below and will reach the skill you pick."
         )
@@ -620,11 +1095,19 @@ def _synthesise(task: str, runs: list[AgentRun]) -> str:
 
 
 def _run_multi_agent(
-    messages: list[dict[str, Any]], policy: str, live_context: Optional[str]
+    messages: list[dict[str, Any]],
+    policy: str,
+    live_context: Optional[str],
+    project_id: str,
+    charts: Optional[list[dict[str, Any]]] = None,
 ) -> ChatTurn:
     """Plan the task, run each step as a skill agent, then synthesise."""
     task = _last_user_message(messages)
+    charts = charts or []
     summary, steps = _build_plan(messages, live_context)
+    live_context, charts = _ensure_planned_context(
+        task, project_id, steps, live_context, charts
+    )
 
     if not steps:
         system = f"{ORCHESTRATOR_SYSTEM_PROMPT}\n\n{policy}"
@@ -637,7 +1120,11 @@ def _run_multi_agent(
             ],
             temperature=0.3,
         )
-        return ChatTurn(mode="agent", reply=completion.choices[0].message.content or "")
+        return ChatTurn(
+            mode="agent",
+            reply=completion.choices[0].message.content or "",
+            charts=charts,
+        )
 
     runs: list[AgentRun] = []
     for step in steps:
@@ -660,6 +1147,7 @@ def _run_multi_agent(
         plan=steps,
         agents=runs,
         skills_used=[run.skill for run in runs],
+        charts=charts,
     )
 
 
@@ -743,17 +1231,23 @@ def run_chat(
     """
     policy = build_policy(action_scope, access_level)
     task = _last_user_message(messages)
-    live_context = _gather_live_context(
+    live_context, charts = _gather_live_context(
         task,
         project_id,
         force=(skill == "cloud_posture"),
         force_cost=(skill == "cost_analyzer"),
+        force_metrics=(skill == "metrics_analyzer"),
+        force_logs=(skill == "log_analyzer"),
     )
     if mode == "plan":
-        return _run_plan_mode(messages, live_context)
-    if skill:
-        return _run_single_skill(skill, task, policy, live_context)
-    return _run_multi_agent(messages, policy, live_context)
+        turn = _run_plan_mode(messages, live_context)
+        turn.charts = charts
+    elif skill:
+        turn = _run_single_skill(skill, task, policy, live_context)
+        turn.charts = charts
+    else:
+        turn = _run_multi_agent(messages, policy, live_context, project_id, charts)
+    return turn
 
 
 def _pretty(name: str) -> str:
@@ -785,13 +1279,16 @@ def _stream_steps(
     steps: list[PlanStep],
     policy: str,
     live_context: Optional[str],
+    charts: Optional[list[dict[str, Any]]] = None,
 ) -> Iterator[dict[str, Any]]:
     """Execute an ordered set of skill steps, streaming events and a final turn.
 
     Shared by the auto agent path (after planning) and approved-plan execution.
     With no steps it answers directly; with one it streams that skill; with many
-    it runs each skill then streams a synthesis.
+    it runs each skill then streams a synthesis. Any ``charts`` gathered from
+    live data are attached to the final turn so the UI can plot them.
     """
+    charts = charts or []
     if not steps:
         system = f"{ORCHESTRATOR_SYSTEM_PROMPT}\n\n{policy}"
         if live_context:
@@ -800,7 +1297,7 @@ def _stream_steps(
             [{"role": "system", "content": system}, *messages], temperature=0.3
         )
         content = yield from _stream_and_collect(deltas)
-        turn = ChatTurn(mode="agent", reply=content)
+        turn = ChatTurn(mode="agent", reply=content, charts=charts)
         yield {"type": "final", **turn.to_dict()}
         return
 
@@ -819,6 +1316,7 @@ def _stream_steps(
             plan=steps,
             agents=[AgentRun(skill=step.skill, objective=step.objective, output=content)],
             skills_used=[step.skill],
+            charts=charts,
         )
         yield {"type": "final", **turn.to_dict()}
         return
@@ -864,6 +1362,7 @@ def _stream_steps(
         plan=steps,
         agents=runs,
         skills_used=[run.skill for run in runs],
+        charts=charts,
     )
     yield {"type": "final", **turn.to_dict()}
 
@@ -883,11 +1382,13 @@ def run_chat_stream(
     """
     policy = build_policy(action_scope, access_level)
     task = _last_user_message(messages)
-    live_context = _gather_live_context(
+    live_context, charts = _gather_live_context(
         task,
         project_id,
         force=(skill == "cloud_posture"),
         force_cost=(skill == "cost_analyzer"),
+        force_metrics=(skill == "metrics_analyzer"),
+        force_logs=(skill == "log_analyzer"),
     )
 
     if mode == "plan":
@@ -913,13 +1414,17 @@ def run_chat_stream(
             reply=content,
             agents=[AgentRun(skill=skill, objective=task, output=content)],
             skills_used=[skill],
+            charts=charts,
         )
         yield {"type": "final", **turn.to_dict()}
         return
 
     yield {"type": "status", "text": "Analyzing request"}
     _summary, steps = _build_plan(messages, live_context)
-    yield from _stream_steps(task, messages, steps, policy, live_context)
+    live_context, charts = _ensure_planned_context(
+        task, project_id, steps, live_context, charts
+    )
+    yield from _stream_steps(task, messages, steps, policy, live_context, charts)
 
 
 def execute_plan_stream(
@@ -945,6 +1450,9 @@ def execute_plan_stream(
         )
         yield {"type": "final", **turn.to_dict()}
         return
-    live_context = _gather_live_context(task, project_id)
+    live_context, charts = _gather_live_context(task, project_id)
+    live_context, charts = _ensure_planned_context(
+        task, project_id, valid, live_context, charts
+    )
     yield {"type": "status", "text": "Executing plan"}
-    yield from _stream_steps(task, messages, valid, policy, live_context)
+    yield from _stream_steps(task, messages, valid, policy, live_context, charts)

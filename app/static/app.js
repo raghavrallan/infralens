@@ -632,8 +632,11 @@ function addMessage(role, content, meta) {
     `<div class="bubble-content">${
       role === "user" ? escapeHtml(content) : renderMarkdownish(content)
     }</div>`;
+  if (role !== "user") {
+    enhanceBlocks(bubble.querySelector(".bubble-content"));
+    if (meta && meta.charts) renderCharts(bubble, meta.charts);
+  }
   bubble.appendChild(buildActions(role, () => content));
-  if (role !== "user") enhanceBlocks(bubble.querySelector(".bubble-content"));
 
   msg.appendChild(avatar);
   msg.appendChild(bubble);
@@ -687,6 +690,220 @@ function enhanceBlocks(container) {
   });
 }
 
+/* ---------- Metric charts (line / bar) ---------- */
+
+const CHART_COLORS = ["#f5f5f7", "#9a9aa2", "#5f616b"];
+
+const SVGNS = "http://www.w3.org/2000/svg";
+const CHART_W = 720;
+const CHART_H = 260;
+const CHART_PAD = { l: 48, r: 14, t: 14, b: 30 };
+
+function fmtChartTime(iso) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const hh = d.getHours().toString().padStart(2, "0");
+  const mm = d.getMinutes().toString().padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+function fmtChartFull(iso) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function buildChartSvg(chart, type) {
+  const series = (chart.series || []).filter((s) => s.points && s.points.length);
+  if (!series.length) {
+    return { svg: '<div class="chart-empty">No samples returned.</div>', geom: null };
+  }
+  const W = CHART_W;
+  const H = CHART_H;
+  const pad = CHART_PAD;
+  const plotW = W - pad.l - pad.r;
+  const plotH = H - pad.t - pad.b;
+  const n = Math.max(...series.map((s) => s.points.length));
+  let maxV = 0;
+  series.forEach((s) => s.points.forEach((p) => (maxV = Math.max(maxV, p.v))));
+  const yMax = maxV <= 0 ? 1 : maxV * 1.1;
+  const xAt = (i) => pad.l + (n <= 1 ? plotW / 2 : (i / (n - 1)) * plotW);
+  const yAt = (v) => pad.t + plotH - (v / yMax) * plotH;
+
+  let grid = "";
+  const gridN = 4;
+  for (let g = 0; g <= gridN; g++) {
+    const val = (yMax / gridN) * g;
+    const y = yAt(val);
+    grid += `<line x1="${pad.l}" y1="${y.toFixed(1)}" x2="${W - pad.r}" y2="${y.toFixed(1)}" class="chart-grid"/>`;
+    grid += `<text x="${pad.l - 8}" y="${(y + 3).toFixed(1)}" class="chart-ylabel">${val < 10 ? val.toFixed(1) : Math.round(val)}</text>`;
+  }
+
+  const ref = series[0].points;
+  let xlabels = "";
+  const step = Math.max(1, Math.floor(ref.length / 5));
+  for (let i = 0; i < ref.length; i += step) {
+    xlabels += `<text x="${xAt(i).toFixed(1)}" y="${H - 8}" class="chart-xlabel">${fmtChartTime(ref[i].t)}</text>`;
+  }
+
+  let body = "";
+  if (type === "bar") {
+    const groupW = (plotW / n) * 0.8;
+    const barW = Math.max(1, groupW / series.length);
+    series.forEach((s, si) => {
+      s.points.forEach((p, i) => {
+        const x = xAt(i) - groupW / 2 + si * barW;
+        const y = yAt(p.v);
+        const h = pad.t + plotH - y;
+        body += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" fill="${CHART_COLORS[si % CHART_COLORS.length]}" opacity="0.85"/>`;
+      });
+    });
+  } else {
+    series.forEach((s, si) => {
+      const pts = s.points.map((p, i) => `${xAt(i).toFixed(1)},${yAt(p.v).toFixed(1)}`).join(" ");
+      body += `<polyline points="${pts}" fill="none" stroke="${CHART_COLORS[si % CHART_COLORS.length]}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    });
+  }
+  const svg = `<svg viewBox="0 0 ${W} ${H}" class="chart-svg" preserveAspectRatio="xMidYMid meet">${grid}${body}${xlabels}</svg>`;
+  return {
+    svg,
+    geom: { pad, plotW, plotH, n, yMax, series, ref, unit: chart.unit || "" },
+  };
+}
+
+function attachChartHover(svg, geom, tooltip) {
+  if (!svg || !geom) return;
+  const { pad, plotW, plotH, n, yMax, series, ref, unit } = geom;
+  const xAt = (i) => pad.l + (n <= 1 ? plotW / 2 : (i / (n - 1)) * plotW);
+  const yAt = (v) => pad.t + plotH - (v / yMax) * plotH;
+
+  const guide = document.createElementNS(SVGNS, "line");
+  guide.setAttribute("class", "chart-cursor");
+  guide.setAttribute("y1", pad.t);
+  guide.setAttribute("y2", pad.t + plotH);
+  guide.style.display = "none";
+  svg.appendChild(guide);
+
+  const dots = series.map((s, si) => {
+    const c = document.createElementNS(SVGNS, "circle");
+    c.setAttribute("r", "3.5");
+    c.setAttribute("fill", CHART_COLORS[si % CHART_COLORS.length]);
+    c.setAttribute("stroke", "#0a0a0b");
+    c.setAttribute("stroke-width", "1.5");
+    c.style.display = "none";
+    svg.appendChild(c);
+    return c;
+  });
+
+  const hide = () => {
+    guide.style.display = "none";
+    dots.forEach((d) => (d.style.display = "none"));
+    tooltip.style.display = "none";
+  };
+
+  const move = (evt) => {
+    const rect = svg.getBoundingClientRect();
+    if (!rect.width) return;
+    const svgX = ((evt.clientX - rect.left) / rect.width) * CHART_W;
+    let i = n <= 1 ? 0 : Math.round(((svgX - pad.l) / plotW) * (n - 1));
+    i = Math.max(0, Math.min(n - 1, i));
+    const gx = xAt(i);
+    guide.setAttribute("x1", gx);
+    guide.setAttribute("x2", gx);
+    guide.style.display = "";
+
+    let rows = "";
+    series.forEach((s, si) => {
+      const p = s.points[i];
+      if (!p) {
+        dots[si].style.display = "none";
+        return;
+      }
+      dots[si].setAttribute("cx", gx);
+      dots[si].setAttribute("cy", yAt(p.v));
+      dots[si].style.display = "";
+      rows += `<div class="tt-row"><i style="background:${CHART_COLORS[si % CHART_COLORS.length]}"></i><span class="tt-name">${escapeHtml(s.name)}</span><span class="tt-val">${p.v}${escapeHtml(unit)}</span></div>`;
+    });
+    const stamp = ref[i] ? fmtChartFull(ref[i].t) : "";
+    tooltip.innerHTML = `<div class="tt-time">${stamp}</div>${rows}`;
+    tooltip.style.display = "block";
+
+    const cont = tooltip.offsetParent || svg.parentElement;
+    const contRect = cont.getBoundingClientRect();
+    let left = evt.clientX - contRect.left + 14;
+    let top = evt.clientY - contRect.top + 14;
+    if (left + tooltip.offsetWidth > contRect.width) {
+      left = evt.clientX - contRect.left - tooltip.offsetWidth - 14;
+    }
+    if (left < 0) left = 6;
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
+  };
+
+  svg.addEventListener("mousemove", move);
+  svg.addEventListener("mouseleave", hide);
+}
+
+function renderCharts(bubble, charts) {
+  if (!charts || !charts.length) return;
+  charts.forEach((chart) => {
+    const wrap = document.createElement("div");
+    wrap.className = "chart";
+    const head = document.createElement("div");
+    head.className = "chart-head";
+    const unit = chart.unit ? ` <span class="chart-unit">(${escapeHtml(chart.unit)})</span>` : "";
+    head.innerHTML = `
+      <span class="chart-title">${escapeHtml(chart.title || "Metric")}${unit}</span>
+      <div class="chart-toggle">
+        <button type="button" class="chart-btn active" data-type="line">Line</button>
+        <button type="button" class="chart-btn" data-type="bar">Bar</button>
+      </div>`;
+    const plot = document.createElement("div");
+    plot.className = "chart-plot";
+    const tooltip = document.createElement("div");
+    tooltip.className = "chart-tooltip";
+    tooltip.style.display = "none";
+    const legend = document.createElement("div");
+    legend.className = "chart-legend";
+    legend.innerHTML = (chart.series || [])
+      .map(
+        (s, i) =>
+          `<span class="chart-key"><i style="background:${CHART_COLORS[i % CHART_COLORS.length]}"></i>${escapeHtml(s.name)}</span>`
+      )
+      .join("");
+    wrap.appendChild(head);
+    wrap.appendChild(plot);
+    wrap.appendChild(tooltip);
+    wrap.appendChild(legend);
+
+    let type = chart.type || "line";
+    const draw = () => {
+      try {
+        const { svg, geom } = buildChartSvg(chart, type);
+        plot.innerHTML = svg;
+        attachChartHover(plot.querySelector(".chart-svg"), geom, tooltip);
+      } catch (e) {
+        console.error("chart render failed", e);
+        plot.innerHTML = '<div class="chart-empty">Could not render this chart.</div>';
+      }
+    };
+    head.querySelectorAll(".chart-btn").forEach((b) => {
+      b.addEventListener("click", () => {
+        type = b.dataset.type;
+        head.querySelectorAll(".chart-btn").forEach((x) => x.classList.toggle("active", x === b));
+        draw();
+      });
+    });
+    draw();
+    bubble.appendChild(wrap);
+  });
+}
+
 function createStreamingMessage() {
   els.emptyState.style.display = "none";
   const msg = document.createElement("div");
@@ -731,6 +948,7 @@ function createStreamingMessage() {
       content.innerHTML = renderMarkdownish(text);
       enhanceBlocks(content);
       meta.innerHTML = metaHtml(evt);
+      if (evt && evt.charts) renderCharts(bubble, evt.charts);
       bubble.appendChild(buildActions("bot", () => text));
       if (isNearBottom()) scrollToBottom();
     },

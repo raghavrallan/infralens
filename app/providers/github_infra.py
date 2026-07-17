@@ -210,15 +210,61 @@ _CODE_MATCHERS: dict[str, dict[str, Any]] = {
         "suffixes": (".yml", ".yaml"),
         "path_any": (".github/workflows",),
     },
+    "azure_pipelines": {
+        "label": "Azure DevOps pipeline",
+        "lang": "yaml",
+        "suffixes": (".yml", ".yaml"),
+        "path_any": (
+            "azure-pipelines",
+            "azure/",
+            "/pipelines/",
+            "pipelines/",
+            "/templates/",
+            "pipeline",
+            ".ado",
+        ),
+    },
     "ansible": {
         "label": "Ansible",
         "lang": "yaml",
         "suffixes": (".yml", ".yaml"),
         "path_any": ("ansible", "playbook", "roles"),
     },
+    "source": {
+        "label": "application source",
+        "lang": "",
+        "suffixes": (
+            ".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".java", ".cs", ".rb",
+            ".rs", ".php", ".kt",
+        ),
+    },
 }
+# File extension -> code-fence language for display.
+_LANG_BY_EXT = {
+    "py": "python", "ts": "typescript", "tsx": "tsx", "js": "javascript",
+    "jsx": "jsx", "go": "go", "java": "java", "cs": "csharp", "rb": "ruby",
+    "rs": "rust", "php": "php", "kt": "kotlin", "yml": "yaml", "yaml": "yaml",
+    "tf": "hcl", "tfvars": "hcl", "bicep": "bicep",
+}
+# Path fragments that make a source file a likely entry point worth reading first.
+_SOURCE_PRIORITY = (
+    "main.", "app.", "index.", "server.", "settings.", "config.", "startup.",
+    "program.", "__init__.", "manage.", "wsgi.", "asgi.",
+)
+# Noise to skip when reading application source.
+_SOURCE_SKIP = (
+    "test", "spec", "mock", "fixture", "node_modules", "dist/", "build/",
+    "vendor/", ".min.", "migrations/", "__snapshots__",
+)
 # Language hints that make a repo a good candidate for a given artifact kind.
 _PRIORITY_LANGS = {"hcl", "dockerfile", "yaml", "shell", "hcl2"}
+
+
+def _lang_for(path: str, fallback: str) -> str:
+    if fallback:
+        return fallback
+    ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+    return _LANG_BY_EXT.get(ext, "")
 
 
 def _path_matches(path: str, matcher: dict[str, Any]) -> bool:
@@ -230,6 +276,90 @@ def _path_matches(path: str, matcher: dict[str, Any]) -> bool:
     if "path_any" in matcher and not any(sub in p for sub in matcher["path_any"]):
         return False
     return "suffixes" in matcher or "path_any" in matcher
+
+
+# Environment keyword -> candidate branch names, in priority order.
+_ENV_BRANCHES: dict[str, tuple[str, ...]] = {
+    "dev": ("develop", "development", "dev"),
+    "uat": ("uat",),
+    "qa": ("qa",),
+    "staging": ("staging", "stage", "stg"),
+    "preprod": ("preprod", "pre-prod", "preproduction"),
+    "prod": ("main", "master", "production", "prod", "release"),
+}
+# When no env is stated, prefer the active integration branch if it exists.
+_ACTIVE_BRANCHES = ("develop", "development")
+
+
+def _list_branches(client: httpx.Client, full_name: str) -> list[str]:
+    names: list[str] = []
+    page = 1
+    while page <= 3:
+        resp = _get(client, f"/repos/{full_name}/branches", {"per_page": 100, "page": page})
+        if resp.status_code != 200:
+            break
+        batch = resp.json()
+        if not isinstance(batch, list) or not batch:
+            break
+        names.extend(b.get("name") for b in batch if b.get("name"))
+        if len(batch) < 100:
+            break
+        page += 1
+    return names
+
+
+def _resolve_branch(
+    branches: list[str],
+    default_branch: str,
+    env: Optional[str] = None,
+    explicit: Optional[str] = None,
+) -> str:
+    """Pick the branch to read: explicit name > env-matched > active > default.
+
+    Handles per-repo naming differences (develop vs development) and ignores
+    long feature/fix branches when matching an environment.
+    """
+    lower = {b.lower(): b for b in branches}
+    top = [b for b in branches if "/" not in b]
+
+    if explicit:
+        if explicit in branches:
+            return explicit
+        if explicit.lower() in lower:
+            return lower[explicit.lower()]
+        hit = next((b for b in branches if explicit.lower() in b.lower()), None)
+        if hit:
+            return hit
+
+    if env and env in _ENV_BRANCHES:
+        cands = _ENV_BRANCHES[env]
+        for cand in cands:
+            if cand in lower and "/" not in lower[cand]:
+                return lower[cand]
+        for branch in sorted(top, key=len):
+            bl = branch.lower()
+            if any(bl == c or bl.startswith(c) for c in cands):
+                return branch
+        for branch in sorted(top, key=len):
+            if any(c in branch.lower() for c in cands):
+                return branch
+    elif env is None:
+        for cand in _ACTIVE_BRANCHES:
+            if cand in lower and "/" not in lower[cand]:
+                return lower[cand]
+
+    return default_branch or "main"
+
+
+def _candidate_priority(item: tuple[str, dict[str, Any]]) -> tuple[int, int, str]:
+    """Sort matched files so entry points and shallow paths are read first."""
+    path, matcher = item
+    lower = path.lower()
+    name = lower.rsplit("/", 1)[-1]
+    is_source = matcher["label"] == "application source"
+    entry = 0 if (is_source and any(name.startswith(p) for p in _SOURCE_PRIORITY)) else 1
+    depth = lower.count("/")
+    return (entry, depth, lower)
 
 
 def _get_tree(client: httpx.Client, full_name: str, branch: str) -> list[dict[str, Any]]:
@@ -265,14 +395,17 @@ def build_code_report(
     max_per_repo: int = 10,
     max_bytes: int = 20000,
     max_repos: int = 25,
+    env: Optional[str] = None,
+    branch: Optional[str] = None,
 ) -> Optional[dict[str, Any]]:
     """Locate and fetch real source files of the given kinds from the project's repos.
 
-    Scans each mapped repo's default-branch tree, matches files by artifact kind
-    (terraform, bicep, dockerfile, kubernetes, workflows, ansible) and fetches
-    their raw contents (read-only, bounded). Returns a formatted ``text`` block
-    the reviewing skill can analyse directly, plus ``meta``. Returns None when
-    no requested kind is known.
+    For each mapped repo it resolves the right branch — an explicitly named
+    ``branch``, else the branch matching ``env`` (dev -> develop/development,
+    uat -> uat, prod -> main/master), else the active integration branch, else
+    the default — then scans that branch's tree, matches files by artifact kind
+    and fetches their raw contents (read-only, bounded). Returns a formatted
+    ``text`` block plus ``meta``. Returns None when no requested kind is known.
     """
     matchers = [_CODE_MATCHERS[k] for k in kinds if k in _CODE_MATCHERS]
     if not matchers:
@@ -298,56 +431,90 @@ def build_code_report(
 
         files: list[dict[str, Any]] = []
         scanned = 0
+        branches_used: dict[str, str] = {}
         for repo in active[:max_repos]:
             if len(files) >= max_files:
                 break
             full_name = repo.get("full_name")
-            branch = repo.get("default_branch") or "main"
             if not full_name:
                 continue
+            default_branch = repo.get("default_branch") or "main"
+            use_branch = _resolve_branch(
+                _list_branches(client, full_name), default_branch, env, branch
+            )
+            branches_used[full_name] = use_branch
             scanned += 1
             repo_files = 0
-            for item in _get_tree(client, full_name, branch):
-                if len(files) >= max_files or repo_files >= max_per_repo:
-                    break
+            candidates: list[tuple[str, dict[str, Any]]] = []
+            for item in _get_tree(client, full_name, use_branch):
                 if item.get("type") != "blob":
                     continue
                 path = item.get("path", "")
                 matched = next((m for m in matchers if _path_matches(path, m)), None)
                 if matched is None:
                     continue
-                content = _get_raw_file(client, full_name, path, branch, max_bytes)
+                if matched["label"] == "application source" and any(
+                    s in path.lower() for s in _SOURCE_SKIP
+                ):
+                    continue
+                candidates.append((path, matched))
+            candidates.sort(key=_candidate_priority)
+            for path, matched in candidates:
+                if len(files) >= max_files or repo_files >= max_per_repo:
+                    break
+                content = _get_raw_file(client, full_name, path, use_branch, max_bytes)
                 if content is None:
                     continue
                 files.append(
-                    {"repo": full_name, "path": path, "lang": matched["lang"], "content": content}
+                    {
+                        "repo": full_name,
+                        "path": path,
+                        "branch": use_branch,
+                        "lang": _lang_for(path, matched["lang"]),
+                        "content": content,
+                    }
                 )
                 repo_files += 1
 
     scope = creds.org or login or "the authenticated account"
+    branch_note = ", ".join(
+        f"{name.split('/')[-1]}@{br}" for name, br in branches_used.items()
+    )
+    env_label = f" for the '{env}' environment" if env else ""
     header = (
         f"LIVE GITHUB CODE — {labels} located and fetched read-only from the user's "
-        "repositories just now. Review THIS real code and reference the exact "
-        "repo/path in findings. Do NOT ask the user to paste files.\n"
-        f"Scope: {scope} | repositories scanned: {scanned} | matching files: {len(files)}"
+        f"repositories just now{env_label}. Review THIS real code and reference the "
+        "exact repo/path (and branch) in findings. Do NOT ask the user to paste "
+        "files.\n"
+        f"Scope: {scope} | branches read: {branch_note or 'default'} | "
+        f"repositories scanned: {scanned} | matching files: {len(files)}"
     )
     if not files:
         body = (
-            "No matching files were found in the scanned repositories. Tell the user "
-            "you searched their connected GitHub and found none of these files, and "
-            "ask which repository or path to look in."
+            "No matching files were found on the scanned branches "
+            f"({branch_note or 'default'}). Tell the user which branches you searched "
+            "and that you found none of these files, and ask which repository, branch "
+            "or path to look in."
         )
-        return {"text": header + "\n\n" + body, "meta": {"files": 0, "scanned": scanned}}
+        return {
+            "text": header + "\n\n" + body,
+            "meta": {"files": 0, "scanned": scanned, "branches": branches_used},
+        }
 
     parts = [header]
     for entry in files:
         parts.append(
-            f"### {entry['repo']} — {entry['path']}\n"
+            f"### {entry['repo']} — {entry['path']} (branch: {entry['branch']})\n"
             f"```{entry['lang']}\n{entry['content']}\n```"
         )
     return {
         "text": "\n\n".join(parts),
-        "meta": {"files": len(files), "scanned": scanned, "scope": scope},
+        "meta": {
+            "files": len(files),
+            "scanned": scanned,
+            "scope": scope,
+            "branches": branches_used,
+        },
     }
 
 

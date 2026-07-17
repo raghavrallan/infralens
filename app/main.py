@@ -340,7 +340,11 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
             chat_id,
             "assistant",
             reply,
-            {"mode": final.get("mode"), "skills_used": final.get("skills_used", [])},
+            {
+                "mode": final.get("mode"),
+                "skills_used": final.get("skills_used", []),
+                "charts": final.get("charts", []),
+            },
         )
         final["chat_id"] = chat_id
         yield sse({"type": "final", **final})
@@ -405,7 +409,11 @@ def execute_plan(request: ExecutePlanRequest) -> StreamingResponse:
             chat_id,
             "assistant",
             reply,
-            {"mode": final.get("mode", "agent"), "skills_used": final.get("skills_used", [])},
+            {
+                "mode": final.get("mode", "agent"),
+                "skills_used": final.get("skills_used", []),
+                "charts": final.get("charts", []),
+            },
         )
         final["chat_id"] = chat_id
         yield sse({"type": "final", **final})
@@ -454,7 +462,7 @@ def chat(request: ChatRequest) -> dict[str, Any]:
         chat_id,
         "assistant",
         turn.reply,
-        {"mode": turn.mode, "skills_used": turn.skills_used},
+        {"mode": turn.mode, "skills_used": turn.skills_used, "charts": turn.charts},
     )
     result = turn.to_dict()
     result["chat_id"] = chat_id
