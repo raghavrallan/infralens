@@ -1436,14 +1436,11 @@ select:focus,
   padding: 15px 16px;
   font-size: 14px;
   font-family: var(--font-body);
-  max-height: 200px;
+  min-height: 56px;
+  max-height: 240px;
   line-height: 1.5;
   overflow-y: auto;
-  scrollbar-width: none;
-}
-
-#input::-webkit-scrollbar {
-  display: none;
+  scrollbar-width: thin;
 }
 
 #input:focus {

@@ -13,6 +13,16 @@ function prettyName(value: string) {
   return value.split("_").map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
 }
 
+function capitalize(value: string) {
+  return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
+}
+
+function scoreSkill(item: Skill, text: string) {
+  const terms = [item.name.replaceAll("_", " "), ...(item.triggers || []), item.category || ""];
+  const haystack = text.toLowerCase();
+  return terms.reduce((score, term) => score + term.toLowerCase().split(/[\s,]+/).filter((word) => word.length > 3 && haystack.includes(word)).length, 0);
+}
+
 function renderText(text: string) {
   return text.split("\n").map((line, index) => <span key={`${index}-${line}`}>{line}{index < text.split("\n").length - 1 && <br />}</span>);
 }
@@ -37,6 +47,13 @@ export function ChatPage() {
   const [pendingPlan, setPendingPlan] = useState<{ messageId: string; steps: { skill: string; objective: string }[] } | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
+
+  const resizeInput = useCallback(() => {
+    const element = inputRef.current;
+    if (!element) return;
+    element.style.height = "auto";
+    element.style.height = `${Math.min(element.scrollHeight, 240)}px`;
+  }, []);
 
   const loadProjects = useCallback(async () => {
     const list = await api<Project[]>("/api/projects");
@@ -86,17 +103,44 @@ export function ChatPage() {
     messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
 
+  useEffect(() => {
+    resizeInput();
+  }, [input, resizeInput]);
+
   const slashMatches = useMemo(() => {
     if (!slashOpen) return [];
     const query = input.slice(input.lastIndexOf("/") + 1).toLowerCase();
     return skills.filter((item) => item.name.includes(query) || item.category.toLowerCase().includes(query)).slice(0, 8);
   }, [input, slashOpen, skills]);
 
+  const suggestedSkill = useMemo<Skill | null>(() => {
+    const text = input.trim();
+    if (skill || slashOpen || text.startsWith("/") || text.length < 8) return null;
+    let best: Skill | null = null;
+    let bestScore = 0;
+    skills.forEach((item) => {
+      const score = scoreSkill(item, text);
+      if (score > bestScore) {
+        best = item;
+        bestScore = score;
+      }
+    });
+    return bestScore > 0 ? best : null;
+  }, [input, skill, slashOpen, skills]);
+
+  const emptyStateSuggestions = useMemo(() => skills.map((item) => capitalize(item.triggers?.[0] || item.description)).slice(0, 4), [skills]);
+
   const chooseSkill = (name: string) => {
     setSkill(name === "auto" ? "" : name);
     const slash = input.lastIndexOf("/");
     setInput(`${input.slice(0, slash)}${name === "auto" ? "" : `/${name} `}`);
     setSlashOpen(false);
+    inputRef.current?.focus();
+  };
+
+  const acceptSuggestion = () => {
+    if (!suggestedSkill) return;
+    setSkill(suggestedSkill.name);
     inputRef.current?.focus();
   };
 
@@ -196,6 +240,7 @@ export function ChatPage() {
       if (event.key === "Enter" || event.key === "Tab") { event.preventDefault(); chooseSkill(slashMatches[slashIndex].name); return; }
       if (event.key === "Escape") { setSlashOpen(false); return; }
     }
+    if (event.key === "Tab" && suggestedSkill) { event.preventDefault(); acceptSuggestion(); return; }
     if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void sendMessage(); }
   };
 
@@ -229,7 +274,7 @@ export function ChatPage() {
           </div>
           <div className="messages scroll" ref={messagesRef}>
             {!messages.length && <div className="empty-state"><div className="empty-eyebrow">Secure-by-design delivery</div><h3>What can I help you secure today?</h3><p>Let the agent plan a multi-skill task, or type <code>/</code> to pick a skill inline.</p><div className="suggestions">
-              {skills.slice(0, 4).map((item) => <button className="suggestion" key={item.name} onClick={() => setInput(`Review ${item.name.replaceAll("_", " ")} for me`)}>{prettyName(item.name)}</button>)}
+              {emptyStateSuggestions.map((suggestion) => <button className="suggestion" key={suggestion} onClick={() => { onInput(suggestion); inputRef.current?.focus(); }}>{suggestion}</button>)}
             </div></div>}
             {messages.map((message) => <div className={`message ${message.role}${message.error ? " error" : ""}`} key={message.id}>
               <div className="message-role">{message.role === "user" ? "You" : "Assistant"}</div>
@@ -239,6 +284,7 @@ export function ChatPage() {
           </div>
           <form className="composer" onSubmit={(event) => { event.preventDefault(); void sendMessage(); }}>
             {slashOpen && slashMatches.length > 0 && <div className="slash-menu scroll">{slashMatches.map((item, index) => <button type="button" className={`slash-item${index === slashIndex ? " active" : ""}`} key={item.name} onClick={() => chooseSkill(item.name)}><strong>/{item.name}</strong><span>{item.description}</span></button>)}</div>}
+            {suggestedSkill && <div className="suggest-bar"><span className="suggest-label">Suggested skill</span><button type="button" className="suggest-pill" onClick={acceptSuggestion}>{prettyName(suggestedSkill.name)}</button><span className="suggest-hint">Press Tab</span></div>}
             <div className="composer-row"><textarea id="input" ref={inputRef} value={input} rows={1} onChange={(event) => onInput(event.target.value)} onKeyDown={onKeyDown} placeholder="Describe your task, paste a pipeline / IaC / scan output, or type / to pick a skill…" /><button id="send-btn" type="submit" disabled={sending}>{sending ? "…" : "Send"}</button></div>
             <div className="composer-controls"><label className="control"><span>Actions</span><select value={actionScope} onChange={(event) => setActionScope(event.target.value as typeof actionScope)}><option value="read_only">Read-only actions</option><option value="write">Write actions</option></select></label><label className="control"><span>Access</span><select value={accessLevel} onChange={(event) => setAccessLevel(event.target.value as typeof accessLevel)}><option value="ask_approval">Ask for approval</option><option value="auto_approve">Approve for me</option><option value="full_access">Full access</option></select></label><span className="composer-hint">{mode === "plan" ? "Plans are read-only until approved." : "Shift+Enter for a new line."}</span></div>
           </form>
