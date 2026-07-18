@@ -7,7 +7,9 @@ import type { ChatDetail, ChatMessage, ChatSummary, MetricChart, Project, Skill,
 import { MarkdownContent } from "./markdown";
 import { MetricCharts } from "./metric-charts";
 import { Modal } from "./modal";
+import { ProjectModal } from "./project-modal";
 import { Shell } from "./shell";
+import { ThemedSelect } from "./themed-select";
 
 type ChatMode = "agent" | "plan";
 type UiMessage = ChatMessage & { plan?: { skill: string; objective: string }[]; charts?: MetricChart[]; displayMode?: ChatMode; streaming?: boolean; error?: boolean };
@@ -54,6 +56,7 @@ export function ChatPage() {
   const [deletingChat, setDeletingChat] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const [projectModalOpen, setProjectModalOpen] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
 
@@ -158,10 +161,8 @@ export function ChatPage() {
     inputRef.current?.focus();
   };
 
-  const createProject = async () => {
-    const name = window.prompt("Project name");
-    if (!name?.trim()) return;
-    const project = await api<Project>("/api/projects", { method: "POST", body: JSON.stringify({ name: name.trim() }) });
+  const createProject = async (name: string) => {
+    const project = await api<Project>("/api/projects", { method: "POST", body: JSON.stringify({ name }) });
     setProjects((current) => [...current, project]);
     setProjectId(project.id);
     window.localStorage.setItem("projectId", project.id);
@@ -323,10 +324,8 @@ export function ChatPage() {
       <div className="workspace">
         <aside className="chat-sidebar">
           <div className="project-bar"><span className="project-label">Project</span><div className="project-row">
-            <select className="project-select" value={projectId} onChange={(event) => { setProjectId(event.target.value); window.localStorage.setItem("projectId", event.target.value); }}>
-              {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
-            </select>
-            <button className="icon-btn" title="New project" onClick={() => void createProject()}>+</button>
+            <ThemedSelect className="project-select" value={projectId} ariaLabel="Project" onChange={(value) => { setProjectId(value); window.localStorage.setItem("projectId", value); }} options={projects.map((project) => ({ value: project.id, label: project.name }))} />
+            <button className="icon-btn" title="New project" onClick={() => setProjectModalOpen(true)}>+</button>
           </div></div>
           <button className="new-chat" onClick={() => void newChat()}>+ New chat</button>
           <div className="chat-list scroll">
@@ -367,10 +366,11 @@ export function ChatPage() {
             {suggestedSkill && <div className="suggest-bar"><span className="suggest-label">Suggested skill</span><button type="button" className="suggest-pill" onClick={acceptSuggestion}>{prettyName(suggestedSkill.name)}</button><span className="suggest-hint">Press Tab</span></div>}
             {editingMessageId && <div className="edit-context"><span>Editing your question</span><button type="button" onClick={() => { setEditingMessageId(null); setInput(""); inputRef.current?.focus(); }}>Cancel</button></div>}
             <div className="composer-row"><textarea id="input" ref={inputRef} value={input} rows={1} onChange={(event) => onInput(event.target.value)} onKeyDown={onKeyDown} placeholder="Describe your task, paste a pipeline / IaC / scan output, or type / to pick a skill…" /><button id="send-btn" type="submit" disabled={sending}>{sending ? "…" : "Send"}</button></div>
-            <div className="composer-controls"><label className="control"><span>Actions</span><select value={actionScope} onChange={(event) => setActionScope(event.target.value as typeof actionScope)}><option value="read_only">Read-only actions</option><option value="write">Write actions</option></select></label><label className="control"><span>Access</span><select value={accessLevel} onChange={(event) => setAccessLevel(event.target.value as typeof accessLevel)}><option value="ask_approval">Ask for approval</option><option value="auto_approve">Approve for me</option><option value="full_access">Full access</option></select></label><span className="composer-hint">{mode === "plan" ? "Plans are read-only until approved." : "Shift+Enter for a new line."}</span></div>
+            <div className="composer-controls"><label className="control"><span>Actions</span><ThemedSelect className="control-select" value={actionScope} ariaLabel="Actions" onChange={(value) => setActionScope(value as typeof actionScope)} options={[{ value: "read_only", label: "Read-only actions" }, { value: "write", label: "Write actions" }]} /></label><label className="control"><span>Access</span><ThemedSelect className="control-select" value={accessLevel} ariaLabel="Access" onChange={(value) => setAccessLevel(value as typeof accessLevel)} options={[{ value: "ask_approval", label: "Ask for approval" }, { value: "auto_approve", label: "Approve for me" }, { value: "full_access", label: "Full access" }]} /></label><span className="composer-hint">{mode === "plan" ? "Plans are read-only until approved." : "Shift+Enter for a new line."}</span></div>
           </form>
         </main>
       </div>
+      {projectModalOpen && <ProjectModal onClose={() => setProjectModalOpen(false)} onCreate={createProject} />}
       {deleteTarget && <Modal eyebrow="Delete chat" title="Delete this conversation?" description={`This permanently removes “${deleteTarget.title || "New chat"}” and its messages.`} onClose={() => { if (!deletingChat) setDeleteTarget(null); }}><div className="modal-actions"><button type="button" className="modal-btn ghost" onClick={() => setDeleteTarget(null)} disabled={deletingChat}>Cancel</button><button type="button" className="modal-btn danger" onClick={() => void confirmDeleteChat()} disabled={deletingChat}>{deletingChat ? "Deleting…" : "Delete chat"}</button></div></Modal>}
     </Shell>
   );
