@@ -83,7 +83,15 @@ export type Run = {
   findings?: Finding[];
 };
 
-export type ConnectionStatus = { provider: string; connected: boolean; method?: string; project_id?: string };
+export type ConnectionStatus = {
+  provider: string;
+  connected: boolean;
+  method?: string;
+  identity?: string;
+  hint?: string;
+  connected_at?: string;
+  project_id?: string;
+};
 
 export type StreamEvent = JsonObject & {
   type?: string;

@@ -732,7 +732,16 @@ body.scroll-page .page {
 .slash-item { width: 100%; display: flex; flex-direction: column; gap: 4px; text-align: left; background: transparent; color: var(--text); }
 .slash-item strong { font-family: var(--font-mono); font-size: 12px; }
 .slash-item span { color: var(--muted); font-size: 12px; }
-.wiki-index-item, .wiki-card { font: inherit; text-align: left; cursor: pointer; }
+.wiki-index-item,
+.wiki-card {
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
 .wiki-index-item { width: 100%; }
 .wiki-card { width: 100%; }
 .repo-row { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-bottom: 1px solid var(--border); color: var(--muted); }
@@ -1591,7 +1600,7 @@ select:focus,
 .content {
   position: relative;
   z-index: 1;
-  max-width: 780px;
+  max-width: 1180px;
   width: 100%;
   margin: 0 auto;
   padding: 44px 24px 80px;
@@ -1757,7 +1766,7 @@ select:focus,
   display: grid;
   grid-template-columns: 280px 1fr;
   gap: 36px;
-  max-width: 1100px;
+  max-width: 1480px;
   width: 100%;
   margin: 0 auto;
   padding: 40px 24px 80px;
@@ -2146,7 +2155,7 @@ select:focus,
 .dash {
   position: relative;
   z-index: 1;
-  max-width: 1240px;
+  max-width: 1480px;
   width: 100%;
   margin: 0 auto;
   padding: 30px 32px 18px;
@@ -2268,7 +2277,7 @@ select:focus,
 
 .dash-grid {
   display: grid;
-  grid-template-columns: 1fr 380px;
+  grid-template-columns: minmax(0, 1fr) 440px;
   gap: 28px;
   align-items: stretch;
   flex: 1;
@@ -2289,8 +2298,16 @@ select:focus,
   padding-right: 8px;
 }
 
-/* Right column scrolls as a whole. */
+/* Keep each dashboard module independently scrollable. */
 .dash-side {
+  overflow: visible;
+  padding-right: 0;
+}
+
+.dash-side > .approvals-list,
+.dash-side > .workflow-list,
+.dash-side > .run-list {
+  max-height: 280px;
   overflow-y: auto;
   padding-right: 8px;
 }
@@ -2855,7 +2872,11 @@ button.run-item:hover {
     min-height: 0;
   }
   .dash-col:not(.dash-side) .findings-feed,
-  .dash-side {
+  .dash-side,
+  .dash-side > .approvals-list,
+  .dash-side > .workflow-list,
+  .dash-side > .run-list {
     overflow-y: visible;
+    max-height: none;
   }
 }
