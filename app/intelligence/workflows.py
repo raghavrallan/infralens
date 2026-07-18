@@ -578,39 +578,27 @@ def dashboard_summary(project_id: str) -> dict[str, Any]:
         # Conditional aggregates keep the dashboard count payload to one DB
         # round-trip instead of one query per tile/filter group.
         active = Finding.status != "resolved"
-        finding_counts = session.execute(
-            select(
-                func.count(Finding.id).filter(active).label("open_total"),
-                func.count(Finding.id)
-                .filter(active, Finding.severity == "critical")
-                .label("critical"),
-                func.count(Finding.id)
-                .filter(active, Finding.severity == "high")
-                .label("high"),
-                func.count(Finding.id)
-                .filter(active, Finding.severity == "medium")
-                .label("medium"),
-                func.count(Finding.id)
-                .filter(active, Finding.severity == "low")
-                .label("low"),
-                func.count(Finding.id)
-                .filter(active, Finding.gate_decision == "human_approval")
-                .label("human_approval"),
-                func.count(Finding.id)
-                .filter(active, Finding.gate_decision == "two_person")
-                .label("two_person"),
-            ).where(Finding.project_id == project_id)
-        ).one()._mapping
-        by_severity = {
-            severity: int(finding_counts[severity])
-            for severity in ("critical", "high", "medium", "low")
-        }
-        open_total = int(finding_counts["open_total"])
-        by_gate = {
-            gate: int(finding_counts[gate])
-            for gate in ("human_approval", "two_person")
-        }
-        needs_approval = by_gate.get("human_approval", 0) + by_gate.get("two_person", 0)
+        finding_count_columns = (
+            func.count(Finding.id).filter(active).label("open_total"),
+            func.count(Finding.id)
+            .filter(active, Finding.severity == "critical")
+            .label("critical"),
+            func.count(Finding.id)
+            .filter(active, Finding.severity == "high")
+            .label("high"),
+            func.count(Finding.id)
+            .filter(active, Finding.severity == "medium")
+            .label("medium"),
+            func.count(Finding.id)
+            .filter(active, Finding.severity == "low")
+            .label("low"),
+            func.count(Finding.id)
+            .filter(active, Finding.gate_decision == "human_approval")
+            .label("human_approval"),
+            func.count(Finding.id)
+            .filter(active, Finding.gate_decision == "two_person")
+            .label("two_person"),
+        )
 
         pending_approvals = (
             select(func.count())
@@ -618,25 +606,57 @@ def dashboard_summary(project_id: str) -> dict[str, Any]:
             .where(Approval.project_id == project_id, Approval.decision == "pending")
             .scalar_subquery()
         )
-        workflow_counts = session.execute(
+        workflow_total = (
+            select(func.count())
+            .select_from(Workflow)
+            .where(Workflow.project_id == project_id)
+            .scalar_subquery()
+        )
+        workflow_enabled = (
+            select(func.count())
+            .select_from(Workflow)
+            .where(Workflow.project_id == project_id, Workflow.enabled.is_(True))
+            .scalar_subquery()
+        )
+        run_counts = {
+            status: (
+                select(func.count())
+                .select_from(WorkflowRun)
+                .where(
+                    WorkflowRun.project_id == project_id,
+                    WorkflowRun.status == status,
+                )
+                .scalar_subquery()
+            )
+            for status in ("queued", "running", "succeeded", "failed")
+        }
+        dashboard_counts = session.execute(
             select(
-                func.count(Workflow.id).label("total"),
-                func.count(Workflow.id)
-                .filter(Workflow.enabled.is_(True))
-                .label("enabled"),
+                *finding_count_columns,
+                workflow_total.label("workflow_total"),
+                workflow_enabled.label("workflow_enabled"),
                 pending_approvals.label("pending_approvals"),
-            ).where(Workflow.project_id == project_id)
+                *(value.label(f"runs_{status}") for status, value in run_counts.items()),
+            ).select_from(Finding).where(Finding.project_id == project_id)
         ).one()._mapping
-        workflow_total = int(workflow_counts["total"])
-        workflow_enabled = int(workflow_counts["enabled"])
-
-        status_rows = session.execute(
-            select(WorkflowRun.status, func.count())
-            .where(WorkflowRun.project_id == project_id)
-            .group_by(WorkflowRun.status)
-        ).all()
-        runs_by_status = {status: count for status, count in status_rows}
-        pending_approval_count = int(workflow_counts["pending_approvals"])
+        by_severity = {
+            severity: int(dashboard_counts[severity])
+            for severity in ("critical", "high", "medium", "low")
+        }
+        open_total = int(dashboard_counts["open_total"])
+        by_gate = {
+            gate: int(dashboard_counts[gate])
+            for gate in ("human_approval", "two_person")
+        }
+        needs_approval = by_gate.get("human_approval", 0) + by_gate.get("two_person", 0)
+        workflow_total = int(dashboard_counts["workflow_total"])
+        workflow_enabled = int(dashboard_counts["workflow_enabled"])
+        pending_approval_count = int(dashboard_counts["pending_approvals"])
+        runs_by_status = {
+            status: int(dashboard_counts[f"runs_{status}"])
+            for status in run_counts
+            if dashboard_counts[f"runs_{status}"]
+        }
 
     return {
         "open_findings": open_total,
