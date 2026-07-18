@@ -153,6 +153,17 @@ def build_policy(action_scope: ActionScope, access_level: AccessLevel) -> str:
     return f"{scope}\n{access}"
 
 
+def build_agent_policy(action_scope: ActionScope, access_level: AccessLevel) -> str:
+    """Add the execution-mode boundary used by chat and approved plan runs."""
+    return (
+        build_policy(action_scope, access_level)
+        + "\nCHAT MODE: AGENT EXECUTION. The requested analysis is running now. Do not "
+        "return a plan, an 'Approval checkpoint', or an instruction to approve a "
+        "second plan. Report the actual analysis and recommendations; state-changing "
+        "actions remain governed by the operating scope and access policy above."
+    )
+
+
 def _provider_block(
     spec: dict[str, Any], force: bool, task_lower: str, project_id: str
 ) -> Optional[str]:
@@ -951,7 +962,9 @@ ORCHESTRATOR_SYSTEM_PROMPT = (
     "incident, or writing a report), briefly say so and tell the user they can "
     "paste the relevant artefact or type '/' to invoke that skill. Never "
     "fabricate scan data, CVEs, or metrics the user did not provide, and always "
-    "keep security and least-privilege front of mind."
+    "keep security and least-privilege front of mind. In agent mode, report the "
+    "work performed and its results; do not add an approval checkpoint or defer "
+    "the response into a second plan."
 )
 
 
@@ -984,14 +997,16 @@ class ChatTurn:
     charts: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "mode": self.mode,
             "reply": self.reply,
-            "plan": [asdict(s) for s in self.plan],
             "agents": [asdict(a) for a in self.agents],
             "skills_used": self.skills_used,
             "charts": self.charts,
         }
+        if self.plan:
+            payload["plan"] = [asdict(s) for s in self.plan]
+        return payload
 
 
 def _last_user_message(messages: list[dict[str, Any]]) -> str:
@@ -1222,7 +1237,8 @@ def _synthesise(task: str, runs: list[AgentRun]) -> str:
                 "clear, non-repetitive response for the user. Preserve concrete "
                 "details (code, tables, findings). Open with a one-line summary "
                 "of what was done, then present each agent's contribution under "
-                "a clear heading."
+                "a clear heading. This is agent execution: do not add an approval "
+                "checkpoint or defer the result into another plan."
             ),
         },
         {
@@ -1281,7 +1297,6 @@ def _run_multi_agent(
     return ChatTurn(
         mode="agent",
         reply=reply,
-        plan=steps,
         agents=runs,
         skills_used=[run.skill for run in runs],
         charts=charts,
@@ -1366,7 +1381,7 @@ def run_chat(
         action_scope: "read_only" or "write" — gates change-producing behaviour.
         access_level: approval model for state-changing actions.
     """
-    policy = build_policy(action_scope, access_level)
+    policy = build_agent_policy(action_scope, access_level) if mode == "agent" else build_policy(action_scope, access_level)
     task = _last_user_message(messages)
     live_context, charts = _gather_live_context(
         task,
@@ -1448,7 +1463,6 @@ def _stream_steps(
         turn = ChatTurn(
             mode="agent",
             reply=content,
-            plan=steps,
             agents=[AgentRun(skill=step.skill, objective=step.objective, output=content)],
             skills_used=[step.skill],
             charts=charts,
@@ -1482,7 +1496,8 @@ def _stream_steps(
                 "clear, non-repetitive response for the user. Preserve concrete "
                 "details (code, tables, findings). Open with a one-line summary "
                 "of what was done, then present each agent's contribution under "
-                "a clear heading."
+                "a clear heading. This is agent execution: do not add an approval "
+                "checkpoint or defer the result into another plan."
             ),
         },
         {"role": "user", "content": f"Original task:\n{task}\n\nAgent outputs:\n{joined}"},
@@ -1491,7 +1506,6 @@ def _stream_steps(
     turn = ChatTurn(
         mode="agent",
         reply=content or joined,
-        plan=steps,
         agents=runs,
         skills_used=[run.skill for run in runs],
         charts=charts,
@@ -1512,7 +1526,7 @@ def run_chat_stream(
     Yields event dicts: {"type": "status"|"delta"|"final", ...}. The final event
     carries the assembled reply plus mode / skills_used / plan / agents.
     """
-    policy = build_policy(action_scope, access_level)
+    policy = build_agent_policy(action_scope, access_level) if mode == "agent" else build_policy(action_scope, access_level)
     task = _last_user_message(messages)
     live_context, charts = _gather_live_context(
         task,
@@ -1573,7 +1587,7 @@ def execute_plan_stream(
     context is (re)gathered so the skills operate on current data. Yields the
     same event shape as run_chat_stream.
     """
-    policy = build_policy(action_scope, access_level)
+    policy = build_agent_policy(action_scope, access_level)
     task = _last_user_message(messages)
     valid = [step for step in steps if registry.get(step.skill) is not None]
     if not valid:

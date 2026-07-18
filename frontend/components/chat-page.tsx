@@ -3,9 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, consumeSse } from "../lib/api";
 import type { ChatDetail, ChatMessage, ChatSummary, Project, Skill, StreamEvent } from "../lib/types";
+import { MarkdownContent } from "./markdown";
+import { Modal } from "./modal";
 import { Shell } from "./shell";
 
-type UiMessage = ChatMessage & { plan?: { skill: string; objective: string }[]; streaming?: boolean; error?: boolean };
+type ChatMode = "agent" | "plan";
+type UiMessage = ChatMessage & { plan?: { skill: string; objective: string }[]; displayMode?: ChatMode; streaming?: boolean; error?: boolean };
 
 const defaultProject = "default";
 
@@ -23,10 +26,6 @@ function scoreSkill(item: Skill, text: string) {
   return terms.reduce((score, term) => score + term.toLowerCase().split(/[\s,]+/).filter((word) => word.length > 3 && haystack.includes(word)).length, 0);
 }
 
-function renderText(text: string) {
-  return text.split("\n").map((line, index) => <span key={`${index}-${line}`}>{line}{index < text.split("\n").length - 1 && <br />}</span>);
-}
-
 export function ChatPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState(defaultProject);
@@ -35,7 +34,7 @@ export function ChatPage() {
   const [chatId, setChatId] = useState<string | null>(null);
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [input, setInput] = useState("");
-  const [mode, setMode] = useState<"agent" | "plan">("agent");
+  const [mode, setMode] = useState<ChatMode>("agent");
   const [skill, setSkill] = useState("");
   const [actionScope, setActionScope] = useState<"read_only" | "write">("read_only");
   const [accessLevel, setAccessLevel] = useState<"ask_approval" | "auto_approve" | "full_access">("ask_approval");
@@ -45,6 +44,8 @@ export function ChatPage() {
   const [slashOpen, setSlashOpen] = useState(false);
   const [slashIndex, setSlashIndex] = useState(0);
   const [pendingPlan, setPendingPlan] = useState<{ messageId: string; steps: { skill: string; objective: string }[] } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ChatSummary | null>(null);
+  const [deletingChat, setDeletingChat] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
 
@@ -70,7 +71,10 @@ export function ChatPage() {
   const selectChat = useCallback(async (id: string) => {
     const chat = await api<ChatDetail>(`/api/chats/${id}`);
     setChatId(id);
-    setMessages(chat.messages || []);
+    setMessages((chat.messages || []).map((message) => ({
+      ...message,
+      displayMode: message.metadata?.mode === "plan" ? "plan" : "agent",
+    })));
     setPendingPlan(null);
   }, []);
 
@@ -161,14 +165,31 @@ export function ChatPage() {
     inputRef.current?.focus();
   };
 
-  const deleteChat = async (id: string) => {
-    await api(`/api/chats/${id}`, { method: "DELETE" });
-    setChats((current) => current.filter((chat) => chat.id !== id));
-    if (chatId === id) {
-      setChatId(null);
-      setMessages([]);
+  const confirmDeleteChat = async () => {
+    if (!deleteTarget || deletingChat) return;
+    const id = deleteTarget.id;
+    setDeletingChat(true);
+    try {
+      await api(`/api/chats/${id}`, { method: "DELETE" });
+      setChats((current) => current.filter((chat) => chat.id !== id));
+      if (chatId === id) {
+        setChatId(null);
+        setMessages([]);
+      }
+      setDeleteTarget(null);
+    } finally {
+      setDeletingChat(false);
     }
   };
+
+  const selectMode = (nextMode: ChatMode) => {
+    setMode(nextMode);
+    if (nextMode === "agent") setPendingPlan(null);
+  };
+
+  const showPlanApproval = (message: UiMessage) => (
+    mode === "plan" && message.displayMode === "plan" && Boolean(message.plan?.length) && pendingPlan?.messageId === message.id
+  );
 
   const runStream = async (url: string, body: Record<string, unknown>, messageId: string) => {
     const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -183,9 +204,11 @@ export function ChatPage() {
       }
       if (event.type === "final") {
         accumulated = String(event.reply || accumulated);
-        const plan = Array.isArray(event.plan) ? event.plan : undefined;
-        setMessages((current) => current.map((message) => message.id === messageId ? { ...message, content: accumulated, streaming: false, plan } : message));
-        if (plan?.length) setPendingPlan({ messageId, steps: plan });
+        const responseMode: ChatMode = event.mode === "plan" ? "plan" : "agent";
+        const plan = responseMode === "plan" && Array.isArray(event.plan) ? event.plan : undefined;
+        setMessages((current) => current.map((message) => message.id === messageId ? { ...message, content: accumulated, streaming: false, displayMode: responseMode, plan } : message));
+        if (responseMode === "plan" && plan?.length) setPendingPlan({ messageId, steps: plan });
+        else setPendingPlan(null);
         setStatus(configured ? "Connected" : "Not configured");
       }
     });
@@ -197,6 +220,7 @@ export function ChatPage() {
     if (!text || sending) return;
     setSlashOpen(false);
     setInput("");
+    setPendingPlan(null);
     setSending(true);
     const userMessage: UiMessage = { id: `user-${Date.now()}`, role: "user", content: text };
     const assistantId = `assistant-${Date.now()}`;
@@ -258,15 +282,15 @@ export function ChatPage() {
           <div className="chat-list scroll">
             {chats.map((chat) => <div className={`chat-item${chat.id === chatId ? " active" : ""}`} key={chat.id}>
               <button className="chat-item-title" onClick={() => void selectChat(chat.id)}>{chat.title || "New chat"}</button>
-              <button className="chat-item-del" title="Delete chat" onClick={() => void deleteChat(chat.id)}>×</button>
+              <button className="chat-item-del" title="Delete chat" onClick={() => setDeleteTarget(chat)}>×</button>
             </div>)}
           </div>
         </aside>
         <main className="chat">
           <div className="chat-toolbar">
             <div className="mode-toggle">
-              <button className={`mode-btn${mode === "agent" ? " active" : ""}`} onClick={() => setMode("agent")}>Agent</button>
-              <button className={`mode-btn${mode === "plan" ? " active" : ""}`} onClick={() => setMode("plan")}>Plan</button>
+              <button className={`mode-btn${mode === "agent" ? " active" : ""}`} onClick={() => selectMode("agent")}>Agent</button>
+              <button className={`mode-btn${mode === "plan" ? " active" : ""}`} onClick={() => selectMode("plan")}>Plan</button>
             </div>
             <div className="toolbar-right"><div className="status"><span className={`dot${configured ? " ok" : ""}`} /><span>{status}</span></div>
               <div className="active-skill"><span className="active-skill-label">{skill ? prettyName(skill) : "Auto · multi-agent"}</span></div>
@@ -278,8 +302,8 @@ export function ChatPage() {
             </div></div>}
             {messages.map((message) => <div className={`message ${message.role}${message.error ? " error" : ""}`} key={message.id}>
               <div className="message-role">{message.role === "user" ? "You" : "Assistant"}</div>
-              <div className="message-content">{renderText(message.content || (message.streaming ? "Working…" : ""))}</div>
-              {message.plan?.length && pendingPlan?.messageId === message.id && <div className="plan-actions"><div className="plan-list">{message.plan.map((step) => <div className="plan-step" key={`${step.skill}-${step.objective}`}><strong>{prettyName(step.skill)}</strong><span>{step.objective}</span></div>)}</div><button className="primary" onClick={() => void executePlan()} disabled={sending}>Approve and execute</button></div>}
+              <div className="message-content">{message.role === "assistant" ? <MarkdownContent text={message.content || (message.streaming ? "Working…" : "")} /> : <span className="plain-message">{message.content}</span>}</div>
+              {showPlanApproval(message) && <div className="plan-actions"><div className="plan-list">{message.plan?.map((step) => <div className="plan-step" key={`${step.skill}-${step.objective}`}><strong>{prettyName(step.skill)}</strong><span>{step.objective}</span></div>)}</div><button className="primary" onClick={() => void executePlan()} disabled={sending}>Approve and execute</button></div>}
             </div>)}
           </div>
           <form className="composer" onSubmit={(event) => { event.preventDefault(); void sendMessage(); }}>
@@ -290,6 +314,7 @@ export function ChatPage() {
           </form>
         </main>
       </div>
+      {deleteTarget && <Modal eyebrow="Delete chat" title="Delete this conversation?" description={`This permanently removes “${deleteTarget.title || "New chat"}” and its messages.`} onClose={() => { if (!deletingChat) setDeleteTarget(null); }}><div className="modal-actions"><button type="button" className="modal-btn ghost" onClick={() => setDeleteTarget(null)} disabled={deletingChat}>Cancel</button><button type="button" className="modal-btn danger" onClick={() => void confirmDeleteChat()} disabled={deletingChat}>{deletingChat ? "Deleting…" : "Delete chat"}</button></div></Modal>}
     </Shell>
   );
 }

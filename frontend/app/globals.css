@@ -725,6 +725,39 @@ body.scroll-page .page {
 }
 
 .message.error .message-content { color: #f28a8a; }
+.message.assistant { align-self: flex-start; width: min(1000px, 100%); max-width: min(1000px, 100%); }
+.message.user { width: min(860px, 100%); max-width: min(860px, 100%); }
+.message-content { min-width: 0; overflow-wrap: anywhere; }
+.plain-message { white-space: pre-wrap; }
+.markdown-content { line-height: 1.7; }
+.markdown-content > :first-child { margin-top: 0; }
+.markdown-content > :last-child { margin-bottom: 0; }
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4,
+.markdown-content h5,
+.markdown-content h6 { color: var(--white); font-family: var(--font-display); line-height: 1.2; margin: 20px 0 8px; }
+.markdown-content h1 { font-size: 26px; }
+.markdown-content h2 { font-size: 21px; }
+.markdown-content h3 { font-size: 17px; }
+.markdown-content h4,
+.markdown-content h5,
+.markdown-content h6 { font-size: 14px; }
+.markdown-content p { margin: 10px 0; }
+.markdown-content ul,
+.markdown-content ol { margin: 10px 0; padding-left: 24px; }
+.markdown-content li { margin: 5px 0; }
+.markdown-content a { color: var(--white); text-decoration: underline; text-underline-offset: 3px; }
+.markdown-content code { background: var(--elev-2); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; font-family: var(--font-mono); font-size: 0.9em; }
+.markdown-content pre { margin: 14px 0; padding: 14px; overflow-x: auto; background: var(--black); border: 1px solid var(--border); border-radius: var(--radius); }
+.markdown-content pre code { padding: 0; border: 0; background: transparent; white-space: pre; }
+.markdown-content blockquote { margin: 14px 0; padding: 8px 14px; border-left: 2px solid var(--border-strong); color: var(--muted); }
+.markdown-content hr { border: 0; border-top: 1px solid var(--border); margin: 18px 0; }
+.markdown-content table { width: 100%; margin: 14px 0; border-collapse: collapse; font-size: 12px; }
+.markdown-content th,
+.markdown-content td { padding: 8px 10px; border: 1px solid var(--border); text-align: left; vertical-align: top; }
+.markdown-content th { color: var(--white); background: var(--elev-2); font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
 .plan-actions { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
 .plan-list { display: grid; gap: 8px; margin-bottom: 12px; }
 .plan-step { display: flex; gap: 10px; font-size: 12px; color: var(--muted); }
