@@ -14,6 +14,9 @@
   --faint: #85858d;
   --white: #000000;
   --black: #ffffff;
+  --solid: #17171a;
+  --solid-hover: #34343a;
+  --solid-text: #ffffff;
 
   --font-display: "Bricolage Grotesque", Georgia, serif;
   --font-body: "IBM Plex Sans", system-ui, sans-serif;
@@ -531,12 +534,13 @@ body.scroll-page .page {
 }
 
 .modal-btn.primary {
-  background: var(--white);
-  color: var(--black);
+  background: var(--solid);
+  color: var(--solid-text);
 }
 
 .modal-btn.primary:hover {
-  background: #e4e4e6;
+  background: var(--solid-hover);
+  color: var(--solid-text);
 }
 
 .modal-btn.ghost {
@@ -666,8 +670,8 @@ body.scroll-page .page {
 }
 
 .new-chat {
-  background: var(--white);
-  color: var(--black);
+  background: var(--solid);
+  color: var(--solid-text);
   border: none;
   font-family: var(--font-mono);
   font-size: 12px;
@@ -680,7 +684,8 @@ body.scroll-page .page {
 }
 
 .new-chat:hover {
-  background: #e4e4e6;
+  background: var(--solid-hover);
+  color: var(--solid-text);
 }
 
 .chat-list {
@@ -1754,8 +1759,8 @@ select option:hover {
 }
 
 #send-btn {
-  background: var(--white);
-  color: var(--black);
+  background: var(--solid);
+  color: var(--solid-text);
   border: none;
   font-family: var(--font-mono);
   font-size: 12px;
@@ -1768,7 +1773,8 @@ select option:hover {
 }
 
 #send-btn:hover {
-  background: #e4e4e6;
+  background: var(--solid-hover);
+  color: var(--solid-text);
 }
 
 #send-btn:disabled {
@@ -1820,7 +1826,8 @@ select option:hover {
   margin-bottom: 2px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--elev);
+  background: var(--solid);
+  border-color: var(--solid);
 }
 
 .suggest-label {
@@ -1828,12 +1835,12 @@ select option:hover {
   font-size: 10px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--faint);
+  color: #c4c4cb;
 }
 
 .suggest-pill {
-  background: var(--white);
-  color: var(--black);
+  background: var(--panel);
+  color: var(--text);
   border: none;
   font-family: var(--font-mono);
   font-size: 11px;
@@ -1843,12 +1850,17 @@ select option:hover {
   cursor: pointer;
 }
 
+.suggest-pill:hover {
+  background: var(--elev-2);
+  color: var(--text);
+}
+
 .suggest-hint {
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--faint);
+  color: #a8a8b0;
   margin-left: auto;
 }
 
@@ -2033,8 +2045,8 @@ select option:hover {
 }
 
 .primary {
-  background: var(--white);
-  color: var(--black);
+  background: var(--solid);
+  color: var(--solid-text);
   border: none;
   font-family: var(--font-mono);
   font-size: 12px;
@@ -2047,7 +2059,8 @@ select option:hover {
 }
 
 .primary:hover {
-  background: #e4e4e6;
+  background: var(--solid-hover);
+  color: var(--solid-text);
 }
 
 .form-msg {
@@ -2882,9 +2895,15 @@ select option:hover {
 }
 
 .tiny-btn.solid {
-  background: var(--white);
-  color: var(--black);
-  border-color: var(--white);
+  background: var(--solid);
+  color: var(--solid-text);
+  border-color: var(--solid);
+}
+
+.tiny-btn.solid:hover {
+  background: var(--solid-hover);
+  color: var(--solid-text);
+  border-color: var(--solid-hover);
 }
 
 .tiny-btn.danger:hover {
