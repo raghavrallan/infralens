@@ -5,6 +5,13 @@ Adding a new skill is a two-step process:
   2. Import it here and register it.
 """
 from app.skills.base import SkillResult, registry
+from app.skills.classification import (
+    WORKFLOW_SAFE,
+    action_class_for,
+    blast_radius_for,
+    is_workflow_safe,
+    remediation_class_for,
+)
 from app.skills.cloud_posture import skill as cloud_posture
 from app.skills.code_reviewer import skill as code_reviewer
 from app.skills.compliance_mapper import skill as compliance_mapper
@@ -38,4 +45,12 @@ for _skill in (
 ):
     registry.register(_skill)
 
-__all__ = ["registry", "SkillResult"]
+__all__ = [
+    "registry",
+    "SkillResult",
+    "WORKFLOW_SAFE",
+    "is_workflow_safe",
+    "action_class_for",
+    "remediation_class_for",
+    "blast_radius_for",
+]

@@ -17,5 +17,50 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    container_name: devsecops-redis
+    restart: unless-stopped
+    ports:
+      - "6399:6379"
+    volumes:
+      - devsecops_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    container_name: devsecops-api
+    restart: unless-stopped
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg2://devsecops:devsecops@postgres:5432/devsecops
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: .
+    container_name: devsecops-worker
+    restart: unless-stopped
+    command: rq worker intelligence --worker-class app.intelligence.worker.Worker --url redis://redis:6379/0
+    environment:
+      DATABASE_URL: postgresql+psycopg2://devsecops:devsecops@postgres:5432/devsecops
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   devsecops_pgdata:
+  devsecops_redisdata:

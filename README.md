@@ -1,11 +1,57 @@
 # DevSecOps LLM Skills Suite
 
-A chatbot-driven **library of DevSecOps skills** powered by LLMs (Azure OpenAI).
-Each skill is a reusable, self-contained capability mapped to the managed
-service operating model — mobilise, baseline, transform, operate, improve.
+A **DevSecOps product** powered by LLMs (Azure OpenAI) with two execution modules
+on one platform:
 
-> Status: **first draft** for internal review. Azure OpenAI only for now; the
-> integration point is isolated so other providers can be added later.
+1. **Chat / Skills** — a chatbot-driven library of reusable DevSecOps skills, each
+   mapped to the managed service operating model (mobilise, baseline, transform,
+   operate, improve).
+2. **DevOps Intelligence Layer** — a dashboard fed by skills that run
+   **autonomously in a queue**, where every recommended action is gated by
+   **action class × blast radius**, not by tool.
+
+> Status: **first milestone** of the Intelligence Layer. Azure OpenAI only for
+> now; the integration point is isolated so other providers can be added later.
+
+## DevOps Intelligence Layer
+
+The design principle is to **classify actions, not tools**. Gating "Terraform"
+is wrong; gating "an irreversible, high-blast change to production" is right. The
+Risk Engine resolves a gate for every action from its class and blast radius:
+
+| Action class | Dev / Staging | Production |
+|---|---|---|
+| Read / diagnose | Autonomous | Autonomous |
+| Reversible change | Autonomous, logged | Auto + instant-undo + notify |
+| Config / code change | Auto-apply | Human approval |
+| Irreversible / high-blast | Human approval | Two-person rule |
+| Safety-direction (rollback, isolate) | Autonomous | Autonomous — never gate the exit |
+
+A high blast radius escalates a change gate by one step, and safety-direction
+actions are never gated: you gate entry into risk, never the escape from it.
+
+**What runs unattended.** Only read-only *diagnose* skills are marked
+workflow-safe (`app/skills/classification.py`) and can be scheduled or run on
+demand. They are grouped under the six agent modules — Pipeline Intelligence,
+Release Confidence, Infrastructure as Code, Incident Response, Security & Patch,
+and FinOps. A workflow runs its skills in a Redis/RQ worker, normalizes each
+skill's output into discrete **findings**, and attaches the Risk Engine gate to
+every finding before it reaches the dashboard.
+
+**Design rules realized now.** Every finding carries a recommended action plus
+its gate (diff-first); the approvals path is scaffolded with a time-boxed
+`expires_at` and a break-glass-ready model; and an engineering-memory table is in
+place to later turn approved/rejected outcomes into retrievable precedent.
+Change execution and approval actuation are intentionally out of scope this
+milestone.
+
+### How this differs from the market
+
+Coforge **Forge-X / EvolveOps.AI**, Zensar **ZenseAI.AgentMesh**, and Globant
+**Glob.AI OS / AI Pods** all sell agent marketplaces with governance layered on
+top. This product's differentiator is the **safety model itself**: gating by
+action class × blast radius, a diff- and rollback-first execution path, and
+engineering memory as precedent — rather than a generic catalog of agents.
 
 ## Interaction model
 
@@ -54,15 +100,24 @@ Browser chat UI  ──▶  FastAPI (/api/chat)  ──▶  Orchestrator
 ```
 
 - `app/skills/base.py` — `Skill` base class (incl. wiki docs) + `SkillRegistry`.
+- `app/skills/classification.py` — action class, blast radius and the
+  workflow-safe set for every skill.
 - `app/skills/*.py` — one file per skill (metadata, wiki, system prompt, schema).
 - `app/orchestrator.py` — modes, forced-skill routing, and the multi-agent
   planner/executor.
-- `app/db.py` — SQLAlchemy engine, models (`app_config`, `connections`), init.
+- `app/intelligence/risk_engine.py` — the action-class × blast-radius gate matrix.
+- `app/intelligence/workflows.py` — workflow / run / finding persistence + the
+  six-module mapping.
+- `app/intelligence/queue.py` — Redis/RQ wiring.
+- `app/intelligence/worker.py` — the `run_workflow` job executed by `rq worker`.
+- `app/intelligence/findings.py` — normalizes skill output into gated findings.
+- `app/intelligence/scheduler.py` — APScheduler cron enqueue.
+- `app/db.py` — SQLAlchemy engine, models, init (chat + intelligence tables).
 - `app/config.py` — Postgres-backed Azure OpenAI configuration.
 - `app/connections.py` — Postgres-backed Azure/AWS/GitHub credential store.
 - `app/azure_client.py` — the single Azure OpenAI integration point.
-- `app/main.py` — FastAPI app (chat, skills, skill detail, config, connections).
-- `app/static/` — chat, wiki and settings pages.
+- `app/main.py` — FastAPI app (chat, skills, workflows, runs, findings, config).
+- `app/static/` — chat, dashboard, wiki and settings pages.
 
 ## Storage
 
@@ -77,8 +132,8 @@ Only the Postgres connection string (`DATABASE_URL`) comes from the environment.
 ## Quick start
 
 ```bash
-# 1. Start Postgres (Docker)
-docker compose up -d
+# 1. Start Postgres + Redis (Docker)
+docker compose up -d postgres redis
 
 # 2. Create a virtual environment
 python -m venv .venv
@@ -90,17 +145,27 @@ python -m venv .venv
 # 3. Install dependencies
 pip install -r requirements.txt
 
-# 4. (Optional) point at a non-default database
+# 4. (Optional) point at a non-default database / redis
 copy .env.example .env      # Windows  (cp on macOS/Linux)
 # the default DATABASE_URL already matches docker-compose.yml
+# REDIS_URL defaults to redis://localhost:6399/0 (the compose mapping)
 
-# 5. Run
+# 5. Run the API (serves chat + dashboard, schedules workflows)
 uvicorn app.main:app --reload
+
+# 6. In a second shell, run the worker that executes queued workflows.
+# This cross-platform worker class runs in-process with a timer-based timeout,
+# so it works on Windows (no SIGALRM) as well as Linux/Docker.
+rq worker intelligence --worker-class app.intelligence.worker.Worker --url redis://localhost:6399/0
 ```
 
-Open http://127.0.0.1:8000, then go to **Settings** and add your Azure OpenAI
+Open http://127.0.0.1:8000 for the chat and http://127.0.0.1:8000/dashboard for
+the Intelligence Layer, then go to **Settings** and add your Azure OpenAI
 endpoint, key and deployment — these are saved to Postgres. The wiki and
 Settings pages work before Azure is configured.
+
+The full stack (API + worker + Postgres + Redis) can also run entirely in
+Docker with `docker compose up --build`.
 
 ## Adding a new skill
 
@@ -111,11 +176,14 @@ Settings pages work before Azure is configured.
 That's it — it automatically appears in the catalog and becomes callable by the
 chatbot.
 
-## Roadmap (post-draft)
+## Roadmap (next milestones)
 
-- Wire stored connections into tool-using skills (call real GitHub / K8s /
-  cloud / scanner APIs, not just reason over pasted input)
-- Complete redirect-based SSO login flows for Azure / AWS / GitHub
-- RAG over runbooks and past post-mortems
-- MCP servers so any model/tool can reuse the skills
-- Streaming responses and multi-provider support
+- Wire actuation onto the finding → risk → gate path: reversible changes with
+  instant-undo, human-approval and two-person flows, and never-gated rollback.
+- Populate the approvals inbox with time-boxed, informed approvals (diff, blast
+  radius, dry-run, rollback plan) and a bounded break-glass path.
+- Feed approved/rejected outcomes into engineering memory and surface precedent
+  ("the last three times we approved this class of change, two caused incidents")
+  back into the Risk Engine.
+- Complete redirect-based SSO login flows for Azure / AWS / GitHub.
+- MCP servers so any model/tool can reuse the skills.

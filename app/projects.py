@@ -9,7 +9,19 @@ from typing import Any, Optional
 
 from sqlalchemy import delete, select
 
-from app.db import DEFAULT_PROJECT_ID, Chat, Connection, Message, Project, SessionLocal
+from app.db import (
+    DEFAULT_PROJECT_ID,
+    Approval,
+    Chat,
+    Connection,
+    EngineeringMemory,
+    Finding,
+    Message,
+    Project,
+    SessionLocal,
+    Workflow,
+    WorkflowRun,
+)
 
 
 def _summary(project: Project) -> dict[str, Any]:
@@ -102,6 +114,15 @@ def delete_project(project_id: str) -> bool:
             session.execute(delete(Message).where(Message.chat_id.in_(chat_ids)))
             session.execute(delete(Chat).where(Chat.id.in_(chat_ids)))
         session.execute(delete(Connection).where(Connection.project_id == project_id))
+        session.execute(delete(Approval).where(Approval.project_id == project_id))
+        session.execute(delete(Finding).where(Finding.project_id == project_id))
+        session.execute(delete(WorkflowRun).where(WorkflowRun.project_id == project_id))
+        session.execute(delete(Workflow).where(Workflow.project_id == project_id))
+        session.execute(
+            delete(EngineeringMemory).where(
+                EngineeringMemory.project_id == project_id
+            )
+        )
         session.delete(project)
         session.commit()
         return True

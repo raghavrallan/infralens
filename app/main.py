@@ -19,8 +19,11 @@ from app import (
     projects,
 )
 from app.db import DEFAULT_PROJECT_ID, init_db
+from app.intelligence import scheduler as intel_scheduler
+from app.intelligence import workflows as intel
+from app.intelligence.queue import enqueue_run
 from app.providers import github_infra
-from app.skills import registry
+from app.skills import WORKFLOW_SAFE, registry
 
 _STATIC_DIR = Path(__file__).parent / "static"
 
@@ -28,7 +31,12 @@ _STATIC_DIR = Path(__file__).parent / "static"
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
-    yield
+    intel.seed_default_workflows(DEFAULT_PROJECT_ID)
+    intel_scheduler.start_scheduler()
+    try:
+        yield
+    finally:
+        intel_scheduler.shutdown_scheduler()
 
 
 app = FastAPI(title="DevSecOps LLM Skills Suite", version=__version__, lifespan=lifespan)
@@ -176,8 +184,11 @@ def list_projects() -> list[dict[str, Any]]:
 
 @app.post("/api/projects")
 def create_project(body: ProjectRequest) -> dict[str, Any]:
-    """Create a new project."""
-    return projects.create_project(body.name)
+    """Create a new project, seeded with the starter intelligence workflows."""
+    project = projects.create_project(body.name)
+    intel.seed_default_workflows(project["id"])
+    intel_scheduler.sync_schedules()
+    return project
 
 
 @app.patch("/api/projects/{project_id}")
@@ -192,7 +203,10 @@ def rename_project(project_id: str, body: ProjectRequest) -> dict[str, Any]:
 @app.delete("/api/projects/{project_id}")
 def delete_project(project_id: str) -> dict[str, bool]:
     """Delete a project and everything scoped to it (the default cannot be deleted)."""
-    return {"deleted": projects.delete_project(project_id)}
+    deleted = projects.delete_project(project_id)
+    if deleted:
+        intel_scheduler.sync_schedules()
+    return {"deleted": deleted}
 
 
 @app.get("/api/projects/{project_id}/repos")
@@ -467,6 +481,197 @@ def chat(request: ChatRequest) -> dict[str, Any]:
     result = turn.to_dict()
     result["chat_id"] = chat_id
     return result
+
+
+class WorkflowRequest(BaseModel):
+    name: str = "New workflow"
+    objective: str = ""
+    skills: list[str] = []
+    module: str = ""
+    environment: Literal["dev", "staging", "prod"] = "prod"
+    schedule_cron: str = ""
+    enabled: bool = True
+
+
+class WorkflowPatchRequest(BaseModel):
+    name: Optional[str] = None
+    objective: Optional[str] = None
+    skills: Optional[list[str]] = None
+    module: Optional[str] = None
+    environment: Optional[Literal["dev", "staging", "prod"]] = None
+    schedule_cron: Optional[str] = None
+    enabled: Optional[bool] = None
+
+
+class FindingStatusRequest(BaseModel):
+    status: Literal["open", "acknowledged", "resolved"]
+
+
+@app.get("/api/intelligence/catalog")
+def intelligence_catalog() -> dict[str, Any]:
+    """Return the workflow-safe skills and the six agent modules for the UI."""
+    safe = [
+        {
+            "name": s.name,
+            "category": s.category,
+            "description": s.description,
+        }
+        for s in registry.all()
+        if s.name in WORKFLOW_SAFE
+    ]
+    modules = [
+        {"key": key, "label": spec["label"], "skills": spec["skills"]}
+        for key, spec in intel.MODULES.items()
+    ]
+    return {"skills": safe, "modules": modules}
+
+
+@app.get("/api/dashboard/summary")
+def dashboard_summary(project_id: str = DEFAULT_PROJECT_ID) -> dict[str, Any]:
+    """Aggregate counts for the dashboard tiles."""
+    _require_project(project_id)
+    return intel.dashboard_summary(project_id)
+
+
+@app.get("/api/workflows")
+def list_workflows(project_id: str = DEFAULT_PROJECT_ID) -> list[dict[str, Any]]:
+    """List the workflows configured for a project."""
+    _require_project(project_id)
+    return intel.list_workflows(project_id)
+
+
+@app.post("/api/workflows")
+def create_workflow(
+    body: WorkflowRequest, project_id: str = DEFAULT_PROJECT_ID
+) -> dict[str, Any]:
+    """Create a workflow (only read-only diagnose skills are kept)."""
+    _require_project(project_id)
+    workflow = intel.create_workflow(
+        project_id,
+        name=body.name,
+        skills=body.skills,
+        objective=body.objective,
+        module=body.module,
+        environment=body.environment,
+        schedule_cron=body.schedule_cron,
+        enabled=body.enabled,
+    )
+    intel_scheduler.sync_schedules()
+    return workflow
+
+
+@app.patch("/api/workflows/{workflow_id}")
+def update_workflow(workflow_id: str, body: WorkflowPatchRequest) -> dict[str, Any]:
+    """Update a workflow's fields and re-sync the schedule."""
+    workflow = intel.update_workflow(
+        workflow_id, **body.model_dump(exclude_none=True)
+    )
+    if workflow is None:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    intel_scheduler.sync_schedules()
+    return workflow
+
+
+@app.delete("/api/workflows/{workflow_id}")
+def delete_workflow(workflow_id: str) -> dict[str, bool]:
+    """Delete a workflow and its runs/findings."""
+    deleted = intel.delete_workflow(workflow_id)
+    intel_scheduler.sync_schedules()
+    return {"deleted": deleted}
+
+
+@app.post("/api/workflows/{workflow_id}/run")
+def run_workflow_now(workflow_id: str) -> dict[str, Any]:
+    """Queue a workflow to run now."""
+    run = intel.create_run(workflow_id, trigger="manual")
+    if run is None:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    try:
+        enqueue_run(run["id"])
+    except Exception as exc:  # noqa: BLE001 - surface a clean queue error
+        intel.mark_run_failed(run["id"], f"Could not enqueue run: {exc}")
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Could not reach the job queue. Ensure Redis and the worker are "
+                f"running. ({exc})"
+            ),
+        ) from exc
+    return run
+
+
+@app.get("/api/runs")
+def list_runs(project_id: str = DEFAULT_PROJECT_ID, limit: int = 30) -> list[dict[str, Any]]:
+    """List recent workflow runs for a project."""
+    _require_project(project_id)
+    return intel.list_runs(project_id, limit=limit)
+
+
+@app.get("/api/runs/{run_id}")
+def get_run(run_id: str) -> dict[str, Any]:
+    """Return a run with its findings."""
+    run = intel.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return run
+
+
+@app.get("/api/findings")
+def list_findings(
+    project_id: str = DEFAULT_PROJECT_ID,
+    severity: Optional[str] = None,
+    skill: Optional[str] = None,
+    module: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """List findings for a project, optionally filtered."""
+    _require_project(project_id)
+    return intel.list_findings(
+        project_id,
+        severity=severity,
+        skill=skill,
+        module=module,
+        status=status,
+        limit=limit,
+    )
+
+
+@app.patch("/api/findings/{finding_id}")
+def update_finding(finding_id: str, body: FindingStatusRequest) -> dict[str, Any]:
+    """Acknowledge or resolve a finding."""
+    finding = intel.update_finding_status(finding_id, body.status)
+    if finding is None:
+        raise HTTPException(status_code=404, detail="Finding not found")
+    return finding
+
+
+class ApprovalDecisionRequest(BaseModel):
+    decision: Literal["approved", "rejected"]
+    decided_by: str = ""
+
+
+@app.get("/api/approvals")
+def list_approvals(
+    project_id: str = DEFAULT_PROJECT_ID, status: str = "pending", limit: int = 100
+) -> list[dict[str, Any]]:
+    """List gated findings awaiting a decision (default: pending), with lineage."""
+    _require_project(project_id)
+    return intel.list_approvals(project_id, status=status, limit=limit)
+
+
+@app.post("/api/approvals/{approval_id}/decide")
+def decide_approval(approval_id: str, body: ApprovalDecisionRequest) -> dict[str, Any]:
+    """Approve or reject a gated finding. Nothing executes — the decision is recorded."""
+    decided = intel.decide_approval(approval_id, body.decision, body.decided_by)
+    if decided is None:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    return decided
+
+
+@app.get("/dashboard")
+def dashboard_page() -> FileResponse:
+    return FileResponse(_STATIC_DIR / "dashboard.html")
 
 
 @app.get("/")

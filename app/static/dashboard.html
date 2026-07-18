@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dashboard · DevSecOps Skills Suite</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark">DS</div>
+          <div>
+            <h1>DevSecOps</h1>
+            <p>Intelligence Layer</p>
+          </div>
+        </div>
+        <nav class="nav">
+          <a href="/" class="nav-item">Chat</a>
+          <a href="/dashboard" class="nav-item active">Dashboard</a>
+          <a href="/wiki" class="nav-item">Wiki</a>
+          <a href="/settings" class="nav-item">Settings</a>
+        </nav>
+      </header>
+
+      <main class="dash">
+        <div class="dash-head">
+          <div>
+            <h2 class="page-title">DevOps Intelligence</h2>
+            <p class="page-sub">
+              Skills run unattended in a queue. Every finding is gated by action
+              class and blast radius — you gate entry into risk, never the escape.
+            </p>
+          </div>
+          <div class="dash-head-controls">
+            <label class="control">
+              <span>Project</span>
+              <select id="project-select" class="project-select"></select>
+            </label>
+            <span class="updated-note" id="updated-note" title="Auto-refreshes every 15s">Auto</span>
+            <button class="ghost" id="refresh-btn">Refresh</button>
+            <button class="primary" id="new-workflow-btn">+ Workflow</button>
+          </div>
+        </div>
+
+        <section class="dash-tiles" id="tiles"></section>
+
+        <div class="dash-grid">
+          <section class="dash-col">
+            <div class="dash-section-head">
+              <h3>Findings</h3>
+              <div class="filter-stack">
+                <div class="filter-row" id="finding-filters">
+                  <button class="chip active" data-sev="">All severities</button>
+                  <button class="chip" data-sev="critical">Critical</button>
+                  <button class="chip" data-sev="high">High</button>
+                  <button class="chip" data-sev="medium">Medium</button>
+                  <button class="chip" data-sev="low">Low</button>
+                </div>
+                <div class="filter-row" id="status-filters">
+                  <button class="chip active" data-status="open">Open</button>
+                  <button class="chip" data-status="acknowledged">Acknowledged</button>
+                  <button class="chip" data-status="resolved">Resolved</button>
+                  <button class="chip" data-status="">All</button>
+                  <select id="module-filter" class="mini-select">
+                    <option value="">All modules</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div id="findings" class="findings-feed">
+              <p class="muted small">Loading…</p>
+            </div>
+          </section>
+
+          <aside class="dash-col dash-side">
+            <div class="dash-section-head">
+              <h3>Approvals</h3>
+              <span class="pill" id="approvals-count">0 pending</span>
+            </div>
+            <div id="approvals" class="approvals-list">
+              <p class="muted small">Loading…</p>
+            </div>
+
+            <div class="dash-section-head"><h3>Workflows</h3></div>
+            <div id="workflows" class="workflow-list">
+              <p class="muted small">Loading…</p>
+            </div>
+
+            <div class="dash-section-head">
+              <h3>Recent runs</h3>
+              <span class="hint small">Click a run for its findings</span>
+            </div>
+            <div id="runs" class="run-list">
+              <p class="muted small">Loading…</p>
+            </div>
+          </aside>
+        </div>
+      </main>
+    </div>
+
+    <script src="/static/modal.js"></script>
+    <script src="/static/dashboard.js"></script>
+  </body>
+</html>

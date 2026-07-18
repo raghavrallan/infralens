@@ -1147,9 +1147,20 @@ els.suggestPill.addEventListener("click", acceptSuggestion);
 els.projectSelect.addEventListener("change", () => setProject(els.projectSelect.value));
 els.newProjectBtn.addEventListener("click", createProject);
 
+function consumePendingPrompt() {
+  const pending = localStorage.getItem("pendingPrompt");
+  if (!pending) return;
+  localStorage.removeItem("pendingPrompt");
+  els.input.value = pending;
+  autogrow();
+  updateSuggestion();
+  els.input.focus();
+}
+
 async function boot() {
   await loadProjects();
   await loadChats();
+  consumePendingPrompt();
 }
 
 loadHealth();

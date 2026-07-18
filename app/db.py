@@ -6,7 +6,7 @@ the Postgres connection string itself comes from the environment.
 """
 import os
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 from sqlalchemy import DateTime, String, create_engine, inspect, text
 from sqlalchemy.dialects.postgresql import JSONB
@@ -97,6 +97,105 @@ class Message(Base):
     role: Mapped[str] = mapped_column(String(16))
     content: Mapped[str] = mapped_column(String, default="")
     meta: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class Workflow(Base):
+    """A saved set of diagnose skills that run together on a schedule/on demand."""
+
+    __tablename__ = "workflows"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(String(36), index=True, default=DEFAULT_PROJECT_ID)
+    name: Mapped[str] = mapped_column(String(160), default="New workflow")
+    objective: Mapped[str] = mapped_column(String, default="")
+    module: Mapped[str] = mapped_column(String(64), default="")
+    environment: Mapped[str] = mapped_column(String(16), default="prod")
+    skills: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    schedule_cron: Mapped[str] = mapped_column(String(64), default="")
+    enabled: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+
+class WorkflowRun(Base):
+    """One execution of a workflow, tracked from queued to finished."""
+
+    __tablename__ = "workflow_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workflow_id: Mapped[str] = mapped_column(String(36), index=True)
+    project_id: Mapped[str] = mapped_column(String(36), index=True, default=DEFAULT_PROJECT_ID)
+    status: Mapped[str] = mapped_column(String(16), default="queued")
+    trigger: Mapped[str] = mapped_column(String(16), default="manual")
+    finding_count: Mapped[int] = mapped_column(default=0)
+    error: Mapped[str] = mapped_column(String, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    finished_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class Finding(Base):
+    """A single issue a workflow run surfaced, with its gate decision."""
+
+    __tablename__ = "findings"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    run_id: Mapped[str] = mapped_column(String(36), index=True)
+    workflow_id: Mapped[str] = mapped_column(String(36), index=True)
+    project_id: Mapped[str] = mapped_column(String(36), index=True, default=DEFAULT_PROJECT_ID)
+    skill: Mapped[str] = mapped_column(String(64), default="")
+    module: Mapped[str] = mapped_column(String(64), default="")
+    severity: Mapped[str] = mapped_column(String(16), default="low")
+    title: Mapped[str] = mapped_column(String(400), default="")
+    resource: Mapped[str] = mapped_column(String(400), default="")
+    category: Mapped[str] = mapped_column(String(120), default="")
+    evidence: Mapped[str] = mapped_column(String, default="")
+    recommended_action: Mapped[str] = mapped_column(String, default="")
+    risk_class: Mapped[str] = mapped_column(String(32), default="config_code_change")
+    blast_radius: Mapped[str] = mapped_column(String(16), default="medium")
+    gate_decision: Mapped[str] = mapped_column(String(32), default="human_approval")
+    gate_label: Mapped[str] = mapped_column(String(64), default="")
+    gate_rationale: Mapped[str] = mapped_column(String, default="")
+    status: Mapped[str] = mapped_column(String(16), default="open")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class Approval(Base):
+    """Scaffold for time-boxed approvals — populated by a later milestone."""
+
+    __tablename__ = "approvals"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    finding_id: Mapped[str] = mapped_column(String(36), index=True)
+    project_id: Mapped[str] = mapped_column(String(36), index=True, default=DEFAULT_PROJECT_ID)
+    gate: Mapped[str] = mapped_column(String(32), default="human_approval")
+    decision: Mapped[str] = mapped_column(String(16), default="pending")
+    decided_by: Mapped[str] = mapped_column(String(120), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class EngineeringMemory(Base):
+    """Scaffold for retrievable precedent — approved/rejected actions + outcomes."""
+
+    __tablename__ = "engineering_memory"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(String(36), index=True, default=DEFAULT_PROJECT_ID)
+    kind: Mapped[str] = mapped_column(String(32), default="finding")
+    ref_id: Mapped[str] = mapped_column(String(36), default="")
+    summary: Mapped[str] = mapped_column(String, default="")
+    outcome: Mapped[str] = mapped_column(String(32), default="")
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
