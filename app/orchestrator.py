@@ -346,6 +346,80 @@ def _gather_code_context(
     return report["text"] if report else None
 
 
+_SECURITY_SKILLS = {"vuln_triage", "compliance_mapper"}
+_SECURITY_TASK_TERMS = (
+    "vulnerab", "security", "cve", "scanner", "dependabot", "dependency",
+    "compliance", "patch", "sbom", "snyk", "trivy", "grype", "codeql",
+)
+_SECURITY_CONTEXT_MAX_CHARS = 100000
+
+
+def _is_security_task(task: str) -> bool:
+    lowered = (task or "").lower()
+    return any(term in lowered for term in _SECURITY_TASK_TERMS)
+
+
+def _gather_security_context(task: str, project_id: str) -> Optional[str]:
+    """Fetch the evidence bundle required by security skills.
+
+    Security triage cannot be grounded by a workflow sentence alone. Gather
+    provider posture and repository security artifacts up front, while keeping
+    every source read-only and bounded by the provider helpers.
+    """
+    blocks: list[str] = []
+    task_lower = (task or "").lower()
+
+    for spec in _PROVIDER_SPECS:
+        block = _provider_block(spec, True, task_lower, project_id)
+        if block:
+            blocks.append(block)
+
+    if github_infra.is_connected(project_id):
+        try:
+            report = github_infra.build_code_report(
+                project_id,
+                ["security", "workflows", "dockerfile"],
+                max_files=12,
+                max_per_repo=4,
+                max_bytes=9000,
+                max_repos=15,
+                env=_detect_env(task),
+                branch=_detect_branch(task),
+            )
+        except github_infra.GitHubConnectionError:
+            report = None
+        except github_infra.GitHubApiError as exc:
+            report = {
+                "text": (
+                    "LIVE GITHUB SECURITY ARTIFACTS FETCH FAILED. The GitHub account "
+                    "is connected, but repository security evidence could not be "
+                    f"read. Error: {exc}"
+                )
+            }
+        if report:
+            blocks.append(report["text"])
+
+    if not blocks:
+        return (
+            "SECURITY EVIDENCE BUNDLE — no connected provider or repository evidence "
+            "was available for this project. Do not ask the user to paste data in a "
+            "workflow response; report the coverage gap as unknown and state the "
+            "read-only source that was unavailable."
+        )
+    evidence = "\n\n---\n\n".join(blocks)
+    if len(evidence) > _SECURITY_CONTEXT_MAX_CHARS:
+        evidence = evidence[:_SECURITY_CONTEXT_MAX_CHARS] + (
+            "\n\n[Security evidence truncated at the safe context limit. "
+            "The listed sources remain read-only and bounded.]"
+        )
+    return (
+        "SECURITY EVIDENCE BUNDLE — gathered read-only just now. Treat the sections "
+        "below as the complete evidence available for this run. Distinguish actual "
+        "scanner findings from coverage gaps and never invent CVEs, versions, or "
+        "control evidence.\n\n" + evidence
+    )
+
+
 # Phrasing that means "tell me what I'm being charged / spending".
 _COST_TRIGGERS = (
     "billing",
@@ -697,6 +771,7 @@ def _gather_live_context(
     force_cost: bool = False,
     force_metrics: bool = False,
     force_logs: bool = False,
+    force_security: bool = False,
 ) -> tuple[Optional[str], list[dict[str, Any]]]:
     """Fetch live, read-only context from GitHub code and every relevant provider.
 
@@ -726,11 +801,16 @@ def _gather_live_context(
     code_block = _gather_code_context(task, project_id)
     if code_block:
         blocks.append(code_block)
-    blocks.extend(
-        block
-        for spec in _PROVIDER_SPECS
-        if (block := _provider_block(spec, force, task_lower, project_id))
-    )
+    if force_security:
+        security_block = _gather_security_context(task, project_id)
+        if security_block:
+            blocks.append(security_block)
+    if not force_security:
+        blocks.extend(
+            block
+            for spec in _PROVIDER_SPECS
+            if (block := _provider_block(spec, force, task_lower, project_id))
+        )
     text = "\n\n---\n\n".join(blocks) if blocks else None
     return text, charts
 
@@ -787,6 +867,10 @@ def _ensure_planned_context(
         code = _gather_code_context(task, project_id, force=True)
         if code:
             extra.append(code)
+    if names & _SECURITY_SKILLS and "SECURITY EVIDENCE BUNDLE" not in ctx:
+        security = _gather_security_context(task, project_id)
+        if security:
+            extra.append(security)
     if extra:
         merged = "\n\n---\n\n".join(extra)
         live_context = (
@@ -798,6 +882,62 @@ def _ensure_planned_context(
 def _augment_args(args: dict[str, Any], live_context: Optional[str]) -> dict[str, Any]:
     if live_context:
         args = {**args, "live_environment": live_context}
+    return args
+
+
+def _security_framework(text: str) -> str:
+    lowered = (text or "").lower()
+    if "soc 2" in lowered or "soc2" in lowered:
+        return "soc2"
+    if "iso 27001" in lowered or "iso27001" in lowered:
+        return "iso27001"
+    if "pci" in lowered:
+        return "pci-dss"
+    if "nist" in lowered:
+        return "nist-csf"
+    return "nist-csf"
+
+
+def _skill_args(
+    skill_name: str,
+    task: str,
+    objective: str,
+    policy: str,
+    live_context: Optional[str],
+) -> dict[str, Any]:
+    """Build arguments that match each skill's declared evidence contract."""
+    args: dict[str, Any] = {
+        "task": task,
+        "objective": objective,
+        "operating_policy": policy,
+    }
+    if skill_name not in _SECURITY_SKILLS:
+        return _augment_args(args, live_context)
+
+    evidence = live_context or (
+        "No live security evidence was returned. Treat scanner findings, reachability, "
+        "and controls as unknown; do not ask the user to paste data as the workflow "
+        "already attempted its read-only evidence collection."
+    )
+    if skill_name == "vuln_triage":
+        args.update(
+            {
+                "findings": evidence,
+                "context": (
+                    "Use the provider posture, repository inventory, dependency "
+                    "manifests, scanner artifacts, workflow files, and deployment "
+                    "metadata already supplied in Findings as reachability context. "
+                    "Do not request a second pasted copy of the evidence."
+                ),
+            }
+        )
+    else:
+        args.update(
+            {
+                "controls": evidence,
+                "framework": _security_framework(objective or task),
+            }
+        )
     return args
 
 
@@ -1054,7 +1194,7 @@ def _run_single_skill(
             mode="agent",
             reply=f"Skill '{skill_name}' was not found.",
         )
-    args = _augment_args({"input": task, "operating_policy": policy}, live_context)
+    args = _skill_args(skill_name, task, task, policy, live_context)
     result = skill.run(args)
     return ChatTurn(
         mode="agent",
@@ -1131,10 +1271,7 @@ def _run_multi_agent(
         skill = registry.get(step.skill)
         if skill is None:
             continue
-        args = _augment_args(
-            {"task": task, "objective": step.objective, "operating_policy": policy},
-            live_context,
-        )
+        args = _skill_args(step.skill, task, step.objective, policy, live_context)
         result = skill.run(args)
         runs.append(
             AgentRun(skill=step.skill, objective=step.objective, output=result.content)
@@ -1238,6 +1375,7 @@ def run_chat(
         force_cost=(skill == "cost_analyzer"),
         force_metrics=(skill == "metrics_analyzer"),
         force_logs=(skill == "log_analyzer"),
+        force_security=(skill in _SECURITY_SKILLS or _is_security_task(task)),
     )
     if mode == "plan":
         turn = _run_plan_mode(messages, live_context)
@@ -1305,10 +1443,7 @@ def _stream_steps(
         step = steps[0]
         sk = registry.get(step.skill)
         yield {"type": "status", "text": f"Running {_pretty(step.skill)}"}
-        args = _augment_args(
-            {"task": task, "objective": step.objective, "operating_policy": policy},
-            live_context,
-        )
+        args = _skill_args(step.skill, task, step.objective, policy, live_context)
         content = yield from _stream_and_collect(_skill_deltas(sk, args))
         turn = ChatTurn(
             mode="agent",
@@ -1327,10 +1462,7 @@ def _stream_steps(
         if sk is None:
             continue
         yield {"type": "status", "text": f"Running {_pretty(step.skill)}"}
-        args = _augment_args(
-            {"task": task, "objective": step.objective, "operating_policy": policy},
-            live_context,
-        )
+        args = _skill_args(step.skill, task, step.objective, policy, live_context)
         result = sk.run(args)
         runs.append(
             AgentRun(skill=step.skill, objective=step.objective, output=result.content)
@@ -1389,6 +1521,7 @@ def run_chat_stream(
         force_cost=(skill == "cost_analyzer"),
         force_metrics=(skill == "metrics_analyzer"),
         force_logs=(skill == "log_analyzer"),
+        force_security=(skill in _SECURITY_SKILLS or _is_security_task(task)),
     )
 
     if mode == "plan":
@@ -1407,7 +1540,7 @@ def run_chat_stream(
             yield {"type": "final", **turn.to_dict()}
             return
         yield {"type": "status", "text": _pretty(skill)}
-        args = _augment_args({"input": task, "operating_policy": policy}, live_context)
+        args = _skill_args(skill, task, task, policy, live_context)
         content = yield from _stream_and_collect(_skill_deltas(sk, args))
         turn = ChatTurn(
             mode="agent",

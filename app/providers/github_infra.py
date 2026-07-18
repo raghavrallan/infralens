@@ -192,6 +192,43 @@ def _vuln_alerts(client: httpx.Client, full_name: str) -> str:
     return f"unknown ({resp.status_code})"
 
 
+def _dependabot_alerts(client: httpx.Client, full_name: str) -> dict[str, Any]:
+    """Return bounded Dependabot alert evidence without failing the whole report."""
+    resp = _get(
+        client,
+        f"/repos/{full_name}/dependabot/alerts",
+        {"per_page": 50, "state": "open"},
+    )
+    if resp.status_code == 200:
+        rows = resp.json()
+        alerts = []
+        for row in rows if isinstance(rows, list) else []:
+            dependency = row.get("dependency") or {}
+            advisory = row.get("security_advisory") or {}
+            alerts.append(
+                {
+                    "state": row.get("state"),
+                    "severity": advisory.get("severity") or row.get("severity"),
+                    "cve": advisory.get("cve_id"),
+                    "ghsa": advisory.get("ghsa_url"),
+                    "package": (dependency.get("package") or {}).get("name"),
+                    "ecosystem": (dependency.get("package") or {}).get("ecosystem"),
+                    "manifest": dependency.get("manifest_path"),
+                    "vulnerableVersion": (dependency.get("vulnerable_version_range")),
+                    "patchedVersion": (
+                        (row.get("security_vulnerability") or {}).get(
+                            "first_patched_version"
+                        )
+                        or {}
+                    ).get("identifier"),
+                }
+            )
+        return {"status": "available", "alerts": alerts[:50]}
+    if resp.status_code in (403, 404):
+        return {"status": "unavailable", "reason": _error_detail(resp)}
+    return {"status": f"error ({resp.status_code})", "reason": _error_detail(resp)}
+
+
 # Artifact kinds the suite can locate and fetch from the user's repositories.
 # A path matches when it satisfies the suffix rule AND (if present) the path rule.
 _CODE_MATCHERS: dict[str, dict[str, Any]] = {
@@ -229,6 +266,23 @@ _CODE_MATCHERS: dict[str, dict[str, Any]] = {
         "lang": "yaml",
         "suffixes": (".yml", ".yaml"),
         "path_any": ("ansible", "playbook", "roles"),
+    },
+    "security": {
+        "label": "security and dependency evidence",
+        "lang": "",
+        "names": (
+            "package.json", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock",
+            "pnpm-lock.yaml", "requirements.txt", "requirements-dev.txt", "pipfile",
+            "pipfile.lock", "poetry.lock", "pyproject.toml", "go.mod", "go.sum",
+            "pom.xml", "build.gradle", "build.gradle.kts", "packages.config",
+            "packages.lock.json", "cargo.toml", "cargo.lock", "composer.json",
+            "composer.lock", "gemfile", "gemfile.lock", "mix.exs", "mix.lock",
+        ),
+        "suffixes": (".sarif", ".json", ".xml", ".yaml", ".yml", ".txt"),
+        "path_any": (
+            "security", "scanner", "scan", "trivy", "snyk", "grype", "codeql",
+            "dependabot", "sbom", "sca", "vulnerability",
+        ),
     },
     "source": {
         "label": "application source",
@@ -600,14 +654,14 @@ def build_environment_report(project_id: str) -> dict[str, Any]:
             branch = repo.get("default_branch") or "main"
             if not full_name:
                 continue
-            probe_rows.append(
-                {
-                    "repo": full_name,
-                    "defaultBranch": branch,
-                    "branchProtection": _branch_protection(client, full_name, branch),
-                    "vulnerabilityAlerts": _vuln_alerts(client, full_name),
-                }
-            )
+            row = {
+                "repo": full_name,
+                "defaultBranch": branch,
+                "branchProtection": _branch_protection(client, full_name, branch),
+                "vulnerabilityAlerts": _vuln_alerts(client, full_name),
+            }
+            row["dependabotAlerts"] = _dependabot_alerts(client, full_name)
+            probe_rows.append(row)
         sections.append(
             "Default-branch protection & Dependabot alerts "
             f"(top {len(probe_rows)} by recent activity):\n" + _format_rows(probe_rows)
