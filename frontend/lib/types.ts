@@ -23,7 +23,17 @@ export type ChatMessage = {
   role: "user" | "assistant" | "system";
   content: string;
   metadata?: JsonObject;
+  meta?: JsonObject;
   created_at?: string;
+};
+
+export type MetricPoint = { t?: string; v: number };
+export type MetricSeries = { name: string; points: MetricPoint[] };
+export type MetricChart = {
+  title: string;
+  unit?: string;
+  type?: "line" | "bar";
+  series: MetricSeries[];
 };
 
 export type ChatDetail = ChatSummary & { messages: ChatMessage[] };
@@ -100,4 +110,5 @@ export type StreamEvent = JsonObject & {
   reply?: string;
   mode?: string;
   plan?: { skill: string; objective: string }[];
+  charts?: MetricChart[];
 };

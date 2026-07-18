@@ -1,4 +1,7 @@
-import type { ReactNode } from "react";
+"use client";
+
+import { useState, type ReactNode } from "react";
+import { copyText } from "../lib/clipboard";
 
 function inline(text: string): ReactNode[] {
   const pattern = /(\*\*[^*]+\*\*|__[^_]+__|`[^`]+`|\*[^*]+\*|_[^_]+_|\[[^\]]+\]\([^\s)]+\))/g;
@@ -12,9 +15,27 @@ function inline(text: string): ReactNode[] {
   });
 }
 
+function tableCells(line: string) {
+  return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+}
+
 function tableRow(line: string, key: string) {
-  const cells = line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+  const cells = tableCells(line);
   return <tr key={key}>{cells.map((cell, index) => <td key={`${key}-${index}`}>{inline(cell)}</td>)}</tr>;
+}
+
+function CopyButton({ value, label = "Copy" }: { value: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await copyText(value);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      setCopied(false);
+    }
+  };
+  return <button type="button" className={`markdown-copy${copied ? " copied" : ""}`} onClick={() => void copy()} title={`${label} to clipboard`} aria-label={`${label} to clipboard`}>{copied ? "Copied" : label}</button>;
 }
 
 export function MarkdownContent({ text }: { text: string }) {
@@ -33,7 +54,8 @@ export function MarkdownContent({ text }: { text: string }) {
       index += 1;
       while (index < lines.length && !/^\s*```\s*$/.test(lines[index])) { code.push(lines[index]); index += 1; }
       index += 1;
-      blocks.push(<pre key={`code-${index}`}><code className={language ? `language-${language}` : undefined}>{code.join("\n")}</code></pre>);
+      const source = code.join("\n");
+      blocks.push(<div className="markdown-code-wrap" key={`code-${index}`}><CopyButton value={source} label="Copy code" /><pre><code className={language ? `language-${language}` : undefined}>{source}</code></pre></div>);
       continue;
     }
 
@@ -49,11 +71,13 @@ export function MarkdownContent({ text }: { text: string }) {
     if (/^\s*([-*_])(?:\s*\1){2,}\s*$/.test(line)) { blocks.push(<hr key={`rule-${index}`} />); index += 1; continue; }
 
     if (line.includes("|") && index + 1 < lines.length && /^\s*\|?\s*:?-{3,}/.test(lines[index + 1])) {
-      const headerCells = line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+      const headerCells = tableCells(line);
       index += 2;
       const rows: ReactNode[] = [];
-      while (index < lines.length && lines[index].includes("|")) { rows.push(tableRow(lines[index], `row-${index}`)); index += 1; }
-      blocks.push(<table key={`table-${index}`}><thead><tr>{headerCells.map((cell, cellIndex) => <th key={`${cell}-${cellIndex}`}>{inline(cell)}</th>)}</tr></thead><tbody>{rows}</tbody></table>);
+      const rawRows: string[][] = [];
+      while (index < lines.length && lines[index].includes("|")) { rawRows.push(tableCells(lines[index])); rows.push(tableRow(lines[index], `row-${index}`)); index += 1; }
+      const tableText = [headerCells, ...rawRows].map((row) => row.join("\t")).join("\n");
+      blocks.push(<div className="markdown-table-wrap" key={`table-${index}`}><CopyButton value={tableText} label="Copy table" /><table><thead><tr>{headerCells.map((cell, cellIndex) => <th key={`${cell}-${cellIndex}`}>{inline(cell)}</th>)}</tr></thead><tbody>{rows}</tbody></table></div>);
       continue;
     }
 

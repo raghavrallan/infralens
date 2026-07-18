@@ -106,6 +106,30 @@ def add_message(
         return {"id": message.id, "role": role, "content": content, "meta": meta or {}}
 
 
+def replace_user_message(chat_id: str, message_id: str, content: str) -> bool:
+    """Edit a user turn and discard the stale assistant context after it."""
+    with SessionLocal() as session:
+        target = session.get(Message, message_id)
+        if target is None or target.chat_id != chat_id or target.role != "user":
+            return False
+        rows = list(
+            session.execute(
+                select(Message)
+                .where(Message.chat_id == chat_id)
+                .order_by(Message.created_at.asc(), Message.id.asc())
+            ).scalars()
+        )
+        try:
+            target_index = next(index for index, row in enumerate(rows) if row.id == message_id)
+        except StopIteration:
+            return False
+        for stale in rows[target_index + 1 :]:
+            session.delete(stale)
+        target.content = content
+        session.commit()
+        return True
+
+
 def rename_chat(chat_id: str, title: str) -> Optional[dict[str, Any]]:
     with SessionLocal() as session:
         chat = session.get(Chat, chat_id)

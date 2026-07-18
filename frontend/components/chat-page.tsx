@@ -2,13 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, consumeSse } from "../lib/api";
-import type { ChatDetail, ChatMessage, ChatSummary, Project, Skill, StreamEvent } from "../lib/types";
+import { copyText } from "../lib/clipboard";
+import type { ChatDetail, ChatMessage, ChatSummary, MetricChart, Project, Skill, StreamEvent } from "../lib/types";
 import { MarkdownContent } from "./markdown";
+import { MetricCharts } from "./metric-charts";
 import { Modal } from "./modal";
 import { Shell } from "./shell";
 
 type ChatMode = "agent" | "plan";
-type UiMessage = ChatMessage & { plan?: { skill: string; objective: string }[]; displayMode?: ChatMode; streaming?: boolean; error?: boolean };
+type UiMessage = ChatMessage & { plan?: { skill: string; objective: string }[]; charts?: MetricChart[]; displayMode?: ChatMode; streaming?: boolean; error?: boolean };
 
 const defaultProject = "default";
 
@@ -24,6 +26,10 @@ function scoreSkill(item: Skill, text: string) {
   const terms = [item.name.replaceAll("_", " "), ...(item.triggers || []), item.category || ""];
   const haystack = text.toLowerCase();
   return terms.reduce((score, term) => score + term.toLowerCase().split(/[\s,]+/).filter((word) => word.length > 3 && haystack.includes(word)).length, 0);
+}
+
+function messageMeta(message: ChatMessage) {
+  return message.metadata || message.meta || {};
 }
 
 export function ChatPage() {
@@ -46,6 +52,8 @@ export function ChatPage() {
   const [pendingPlan, setPendingPlan] = useState<{ messageId: string; steps: { skill: string; objective: string }[] } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ChatSummary | null>(null);
   const [deletingChat, setDeletingChat] = useState(false);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
 
@@ -73,9 +81,11 @@ export function ChatPage() {
     setChatId(id);
     setMessages((chat.messages || []).map((message) => ({
       ...message,
-      displayMode: message.metadata?.mode === "plan" ? "plan" : "agent",
+      displayMode: messageMeta(message).mode === "plan" ? "plan" : "agent",
+      charts: Array.isArray(messageMeta(message).charts) ? messageMeta(message).charts as MetricChart[] : undefined,
     })));
     setPendingPlan(null);
+    setEditingMessageId(null);
   }, []);
 
   useEffect(() => {
@@ -161,8 +171,40 @@ export function ChatPage() {
     const chat = await api<ChatSummary>(`/api/chats?project_id=${encodeURIComponent(projectId)}`, { method: "POST" });
     setChatId(chat.id);
     setMessages([]);
+    setEditingMessageId(null);
     setChats((current) => [chat, ...current]);
     inputRef.current?.focus();
+  };
+
+  const startEdit = (message: UiMessage) => {
+    if (!message.id || sending) return;
+    setEditingMessageId(message.id);
+    setInput(message.content);
+    setSlashOpen(false);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
+  const copyMessage = async (message: UiMessage) => {
+    if (!message.content) return;
+    try {
+      await copyText(message.content);
+      setCopiedMessageId(message.id || null);
+      window.setTimeout(() => setCopiedMessageId(null), 1600);
+    } catch {
+      setStatus("Clipboard unavailable");
+    }
+  };
+
+  const copyConversation = async () => {
+    if (!messages.length) return;
+    const transcript = messages.filter((message) => message.content).map((message) => `${message.role === "user" ? "You" : "Assistant"}:\n${message.content}`).join("\n\n");
+    try {
+      await copyText(transcript);
+      setCopiedMessageId("conversation");
+      window.setTimeout(() => setCopiedMessageId(null), 1600);
+    } catch {
+      setStatus("Clipboard unavailable");
+    }
   };
 
   const confirmDeleteChat = async () => {
@@ -206,7 +248,8 @@ export function ChatPage() {
         accumulated = String(event.reply || accumulated);
         const responseMode: ChatMode = event.mode === "plan" ? "plan" : "agent";
         const plan = responseMode === "plan" && Array.isArray(event.plan) ? event.plan : undefined;
-        setMessages((current) => current.map((message) => message.id === messageId ? { ...message, content: accumulated, streaming: false, displayMode: responseMode, plan } : message));
+        const charts = Array.isArray(event.charts) ? event.charts : undefined;
+        setMessages((current) => current.map((message) => message.id === messageId ? { ...message, content: accumulated, streaming: false, displayMode: responseMode, plan, charts } : message));
         if (responseMode === "plan" && plan?.length) setPendingPlan({ messageId, steps: plan });
         else setPendingPlan(null);
         setStatus(configured ? "Connected" : "Not configured");
@@ -218,15 +261,22 @@ export function ChatPage() {
   const sendMessage = async () => {
     const text = input.trim();
     if (!text || sending) return;
+    const editId = editingMessageId;
     setSlashOpen(false);
     setInput("");
+    setEditingMessageId(null);
     setPendingPlan(null);
     setSending(true);
     const userMessage: UiMessage = { id: `user-${Date.now()}`, role: "user", content: text };
     const assistantId = `assistant-${Date.now()}`;
-    setMessages((current) => [...current, userMessage, { id: assistantId, role: "assistant", content: "", streaming: true }]);
+    setMessages((current) => {
+      if (!editId) return [...current, userMessage, { id: assistantId, role: "assistant", content: "", streaming: true }];
+      const index = current.findIndex((message) => message.id === editId);
+      if (index < 0) return [...current, userMessage, { id: assistantId, role: "assistant", content: "", streaming: true }];
+      return [...current.slice(0, index), { ...current[index], content: text }, { id: assistantId, role: "assistant", content: "", streaming: true }];
+    });
     try {
-      await runStream("/api/chat/stream", { chat_id: chatId, project_id: projectId, message: text, mode, skill: skill || null, action_scope: actionScope, access_level: accessLevel }, assistantId);
+      await runStream("/api/chat/stream", { chat_id: chatId, project_id: projectId, message: text, edit_message_id: editId, mode, skill: skill || null, action_scope: actionScope, access_level: accessLevel }, assistantId);
     } catch (error) {
       setMessages((current) => current.map((message) => message.id === assistantId ? { ...message, content: error instanceof Error ? error.message : "Something went wrong reaching the server.", streaming: false, error: true } : message));
     } finally {
@@ -293,6 +343,7 @@ export function ChatPage() {
               <button className={`mode-btn${mode === "plan" ? " active" : ""}`} onClick={() => selectMode("plan")}>Plan</button>
             </div>
             <div className="toolbar-right"><div className="status"><span className={`dot${configured ? " ok" : ""}`} /><span>{status}</span></div>
+              <button type="button" className="chat-tool-btn" onClick={() => void copyConversation()} disabled={!messages.length}>{copiedMessageId === "conversation" ? "Copied" : "Copy chat"}</button>
               <div className="active-skill"><span className="active-skill-label">{skill ? prettyName(skill) : "Auto · multi-agent"}</span></div>
             </div>
           </div>
@@ -303,12 +354,18 @@ export function ChatPage() {
             {messages.map((message) => <div className={`message ${message.role}${message.error ? " error" : ""}`} key={message.id}>
               <div className="message-role">{message.role === "user" ? "You" : "Assistant"}</div>
               <div className="message-content">{message.role === "assistant" ? <MarkdownContent text={message.content || (message.streaming ? "Working…" : "")} /> : <span className="plain-message">{message.content}</span>}</div>
+              {message.role === "assistant" && <MetricCharts charts={message.charts} />}
+              {!message.streaming && <div className="message-actions">
+                <button type="button" className="message-action" onClick={() => void copyMessage(message)}>{copiedMessageId === message.id ? "Copied" : "Copy"}</button>
+                {message.role === "user" && <button type="button" className="message-action" onClick={() => startEdit(message)} disabled={sending}>Edit</button>}
+              </div>}
               {showPlanApproval(message) && <div className="plan-actions"><div className="plan-list">{message.plan?.map((step) => <div className="plan-step" key={`${step.skill}-${step.objective}`}><strong>{prettyName(step.skill)}</strong><span>{step.objective}</span></div>)}</div><button className="primary" onClick={() => void executePlan()} disabled={sending}>Approve and execute</button></div>}
             </div>)}
           </div>
           <form className="composer" onSubmit={(event) => { event.preventDefault(); void sendMessage(); }}>
             {slashOpen && slashMatches.length > 0 && <div className="slash-menu scroll">{slashMatches.map((item, index) => <button type="button" className={`slash-item${index === slashIndex ? " active" : ""}`} key={item.name} onClick={() => chooseSkill(item.name)}><strong>/{item.name}</strong><span>{item.description}</span></button>)}</div>}
             {suggestedSkill && <div className="suggest-bar"><span className="suggest-label">Suggested skill</span><button type="button" className="suggest-pill" onClick={acceptSuggestion}>{prettyName(suggestedSkill.name)}</button><span className="suggest-hint">Press Tab</span></div>}
+            {editingMessageId && <div className="edit-context"><span>Editing your question</span><button type="button" onClick={() => { setEditingMessageId(null); setInput(""); inputRef.current?.focus(); }}>Cancel</button></div>}
             <div className="composer-row"><textarea id="input" ref={inputRef} value={input} rows={1} onChange={(event) => onInput(event.target.value)} onKeyDown={onKeyDown} placeholder="Describe your task, paste a pipeline / IaC / scan output, or type / to pick a skill…" /><button id="send-btn" type="submit" disabled={sending}>{sending ? "…" : "Send"}</button></div>
             <div className="composer-controls"><label className="control"><span>Actions</span><select value={actionScope} onChange={(event) => setActionScope(event.target.value as typeof actionScope)}><option value="read_only">Read-only actions</option><option value="write">Write actions</option></select></label><label className="control"><span>Access</span><select value={accessLevel} onChange={(event) => setAccessLevel(event.target.value as typeof accessLevel)}><option value="ask_approval">Ask for approval</option><option value="auto_approve">Approve for me</option><option value="full_access">Full access</option></select></label><span className="composer-hint">{mode === "plan" ? "Plans are read-only until approved." : "Shift+Enter for a new line."}</span></div>
           </form>

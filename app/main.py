@@ -45,6 +45,7 @@ app = FastAPI(title="DevSecOps LLM Skills Suite", version=__version__, lifespan=
 class ChatRequest(BaseModel):
     message: str
     chat_id: Optional[str] = None
+    edit_message_id: Optional[str] = None
     project_id: str = DEFAULT_PROJECT_ID
     mode: Literal["agent", "plan"] = "agent"
     skill: Optional[str] = None
@@ -307,7 +308,11 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
     chat_id = request.chat_id
     if not chat_id or chats.get_chat(chat_id) is None:
         chat_id = chats.create_chat(request.message, project_id=request.project_id)["id"]
-    chats.add_message(chat_id, "user", request.message)
+    if request.edit_message_id:
+        if not chats.replace_user_message(chat_id, request.edit_message_id, request.message):
+            raise HTTPException(status_code=404, detail="User message not found")
+    else:
+        chats.add_message(chat_id, "user", request.message)
 
     def sse(event: dict[str, Any]) -> str:
         return f"data: {json.dumps(event)}\n\n"
@@ -445,7 +450,11 @@ def chat(request: ChatRequest) -> dict[str, Any]:
     if not chat_id or chats.get_chat(chat_id) is None:
         chat_id = chats.create_chat(request.message, project_id=request.project_id)["id"]
 
-    chats.add_message(chat_id, "user", request.message)
+    if request.edit_message_id:
+        if not chats.replace_user_message(chat_id, request.edit_message_id, request.message):
+            raise HTTPException(status_code=404, detail="User message not found")
+    else:
+        chats.add_message(chat_id, "user", request.message)
 
     if not config.get_azure_config().configured:
         reply = (
