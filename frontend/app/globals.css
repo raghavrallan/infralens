@@ -2158,6 +2158,14 @@ select:focus,
   color: var(--text);
 }
 
+.chart-range {
+  margin-top: 4px;
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.02em;
+}
+
 .chart-unit {
   color: var(--muted);
   text-transform: none;
@@ -2224,6 +2232,10 @@ select:focus,
   font-family: var(--font-mono);
   font-size: 11px;
 }
+
+.chart-tooltip.center { transform: translateX(-50%); }
+.chart-tooltip.left { transform: none; }
+.chart-tooltip.right { transform: translateX(-100%); }
 
 .chart-tooltip .tt-time {
   color: var(--muted);
