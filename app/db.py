@@ -23,7 +23,20 @@ def get_database_url() -> str:
     return os.environ.get("DATABASE_URL", DEFAULT_DATABASE_URL)
 
 
-engine = create_engine(get_database_url(), pool_pre_ping=True, future=True)
+# Azure Database for PostgreSQL is remote from the Container App.  A pre-ping
+# on every session checkout adds another network round-trip to every API read.
+# Recycle pooled connections instead, with an opt-in override for environments
+# where aggressive stale-connection detection is more important than latency.
+_pool_pre_ping = os.environ.get("DB_POOL_PRE_PING", "false").lower() == "true"
+engine = create_engine(
+    get_database_url(),
+    future=True,
+    pool_pre_ping=_pool_pre_ping,
+    pool_recycle=1800,
+    pool_timeout=30,
+    pool_size=5,
+    max_overflow=5,
+)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 
