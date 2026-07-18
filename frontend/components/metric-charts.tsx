@@ -6,7 +6,9 @@ import type { MetricChart, MetricPoint } from "../lib/types";
 const WIDTH = 760;
 const HEIGHT = 250;
 const PLOT = { left: 48, right: 14, top: 16, bottom: 36 };
-const COLORS = ["#f4f4f4", "#b5b5b5", "#8a8a8a", "#d99162", "#6fa8dc"];
+// Keep every series visible against the light chart surface. The first series
+// is intentionally near-black because it is the primary metric in most charts.
+const COLORS = ["#17171a", "#4b4b55", "#72727b", "#8b5e3c", "#35637d"];
 
 function formatValue(value: number) {
   if (Math.abs(value) >= 1000) return value.toLocaleString(undefined, { maximumFractionDigits: 1 });
