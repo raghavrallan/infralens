@@ -2,18 +2,18 @@
    Black / grey / white only. Bricolage Grotesque + IBM Plex Sans/Mono. */
 
 :root {
-  --bg: #0a0a0b;
-  --bg-2: #101012;
-  --panel: #141416;
-  --elev: #1b1b1e;
-  --elev-2: #222226;
-  --border: #29292d;
-  --border-strong: #3d3d43;
-  --text: #f5f5f6;
-  --muted: #9a9aa1;
-  --faint: #5f5f66;
-  --white: #ffffff;
-  --black: #000000;
+  --bg: #f4f4f5;
+  --bg-2: #ededee;
+  --panel: #ffffff;
+  --elev: #f8f8f9;
+  --elev-2: #e6e6e9;
+  --border: #d5d5da;
+  --border-strong: #a3a3ab;
+  --text: #17171a;
+  --muted: #606068;
+  --faint: #85858d;
+  --white: #000000;
+  --black: #ffffff;
 
   --font-display: "Bricolage Grotesque", Georgia, serif;
   --font-body: "IBM Plex Sans", system-ui, sans-serif;
@@ -21,7 +21,7 @@
 
   --radius: 4px;
   --radius-lg: 8px;
-  --shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+  --shadow: 0 24px 60px rgba(0, 0, 0, 0.16);
 }
 
 * {
@@ -121,7 +121,7 @@ body.scroll-page .page {
   justify-content: space-between;
   padding: 20px 40px;
   border-bottom: 1px solid var(--border);
-  background: linear-gradient(180deg, rgba(20, 20, 22, 0.6), transparent);
+  background: var(--panel);
   animation: fade-down 0.6s ease both;
 }
 
@@ -261,7 +261,7 @@ body.scroll-page .page {
 
 .icon-btn:hover {
   border-color: var(--white);
-  background: #242428;
+  background: var(--elev-2);
 }
 
 /* ---------- Modal ---------- */
@@ -453,12 +453,12 @@ body.scroll-page .page {
 }
 
 .ghost.danger {
-  color: #ff8a8a;
-  border-color: #5a2b2b;
+  color: #a52a35;
+  border-color: #d99a9a;
 }
 
 .ghost.danger:hover:not(:disabled) {
-  border-color: #ff8a8a;
+  border-color: #a52a35;
 }
 
 .ghost:disabled {
@@ -679,7 +679,7 @@ body.scroll-page .page {
 
 .dot.ok {
   background: var(--white);
-  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.12);
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.12);
 }
 
 .dot.off {
@@ -724,7 +724,7 @@ body.scroll-page .page {
   white-space: normal;
 }
 
-.message.error .message-content { color: #f28a8a; }
+.message.error .message-content { color: #a52a35; }
 .message.assistant {
   align-self: stretch;
   width: 100%;
@@ -754,7 +754,7 @@ body.scroll-page .page {
 }
 .message.assistant .message-content {
   padding: 20px 24px;
-  background: linear-gradient(135deg, rgba(28, 28, 32, 0.96), rgba(18, 18, 20, 0.96));
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(240, 240, 242, 0.98));
   border: 1px solid var(--border);
   border-left: 3px solid var(--border-strong);
   border-radius: 5px 10px 10px 10px;
@@ -859,7 +859,7 @@ body.scroll-page .page {
 .markdown-content code { background: var(--elev-2); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; font-family: var(--font-mono); font-size: 0.9em; }
 .markdown-code-wrap,
 .markdown-table-wrap { position: relative; margin: 14px 0; }
-.markdown-content pre { margin: 0; padding: 14px; overflow-x: auto; background: var(--black); border: 1px solid var(--border); border-radius: var(--radius); }
+.markdown-content pre { margin: 0; padding: 14px; overflow-x: auto; background: var(--elev-2); border: 1px solid var(--border); border-radius: var(--radius); }
 .markdown-content pre code { padding: 0; border: 0; background: transparent; white-space: pre; }
 .markdown-content .markdown-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
 .markdown-content .markdown-table-wrap table { margin: 0; min-width: 560px; }
@@ -967,7 +967,7 @@ body.scroll-page .page {
 
 .slash-item.auto-item {
   border-bottom: 1px solid var(--border-strong);
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(0, 0, 0, 0.03);
 }
 
 select,
@@ -1250,7 +1250,7 @@ select:focus,
 }
 
 .bubble pre {
-  background: var(--black);
+  background: var(--elev-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 14px;
@@ -1260,7 +1260,7 @@ select:focus,
 .bubble code {
   font-family: var(--font-mono);
   font-size: 13px;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(0, 0, 0, 0.06);
   border: 1px solid var(--border);
   padding: 1px 5px;
   border-radius: 3px;
@@ -1423,7 +1423,7 @@ select:focus,
 
 .bubble-content tbody tr:hover,
 .bubble-content tbody tr:hover {
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(0, 0, 0, 0.04);
 }
 
 .sev {
@@ -1440,15 +1440,15 @@ select:focus,
 }
 
 .sev-critical {
-  color: #ffffff;
-  background: #3a0d0d;
-  border-color: #7a1f1f;
+  color: #8a2222;
+  background: #fff0f0;
+  border-color: #d99a9a;
 }
 
 .sev-high {
-  color: #ffffff;
-  background: #2b2b2e;
-  border-color: #6a6a72;
+  color: #34343b;
+  background: #ececef;
+  border-color: #a5a5ad;
 }
 
 .sev-medium {
@@ -1913,7 +1913,7 @@ select:focus,
 }
 
 .form-msg.error {
-  color: #ff8a8a;
+  color: #a52a35;
 }
 
 /* Wiki */
@@ -1992,23 +1992,24 @@ select:focus,
 }
 
 .wiki-article p {
-  color: #d6d6d9;
+  color: var(--muted);
 }
 
 .wiki-article li {
-  color: #d6d6d9;
+  color: var(--muted);
 }
 
 .wiki-article code {
   font-family: var(--font-mono);
-  background: var(--black);
+  background: var(--elev-2);
+  border: 1px solid var(--border);
   padding: 2px 6px;
   border-radius: 3px;
   font-size: 13px;
 }
 
 .wiki-article pre {
-  background: var(--black);
+  background: var(--elev-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 14px;
@@ -2226,7 +2227,7 @@ select:focus,
   min-width: 150px;
   max-width: 260px;
   padding: 8px 10px;
-  background: rgba(10, 10, 11, 0.96);
+  background: rgba(255, 255, 255, 0.98);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
