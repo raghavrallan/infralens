@@ -2202,6 +2202,7 @@ select:focus,
 }
 
 .chart-plot {
+  position: relative;
   padding: 10px 12px 4px;
 }
 
@@ -2220,6 +2221,7 @@ select:focus,
 
 .chart-tooltip {
   position: absolute;
+  top: 18px;
   z-index: 5;
   min-width: 150px;
   max-width: 260px;

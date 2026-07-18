@@ -77,7 +77,6 @@ function ChartCard({ chart }: { chart: MetricChart }) {
   const start = timestamps.length ? Math.min(...timestamps) : null;
   const end = timestamps.length ? Math.max(...timestamps) : null;
   const hoverTimestamp = hoverRatio === null || start === null || end === null ? null : start + hoverRatio * (end - start);
-  const hoverPoints = series.map((item) => nearestPoint(item.points, hoverTimestamp));
   const tooltipPosition = hoverRatio !== null && hoverRatio < 0.18 ? "left" : hoverRatio !== null && hoverRatio > 0.82 ? "right" : "center";
   const yTicks = useMemo(() => [0, 0.25, 0.5, 0.75, 1].map((ratio) => ({ ratio, value: max * ratio })), [max]);
 
