@@ -686,6 +686,57 @@ body.scroll-page .page {
   background: var(--muted);
 }
 
+.page.scroll-page {
+  height: auto;
+  min-height: 100vh;
+  overflow: visible;
+}
+
+.message {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  max-width: 860px;
+  padding: 15px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--elev);
+  animation: fade-up 0.25s ease both;
+}
+
+.message.user {
+  align-self: flex-end;
+  background: var(--elev-2);
+  border-color: var(--border-strong);
+}
+
+.message-role {
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.message-content {
+  color: var(--text);
+  line-height: 1.65;
+  white-space: normal;
+}
+
+.message.error .message-content { color: #f28a8a; }
+.plan-actions { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
+.plan-list { display: grid; gap: 8px; margin-bottom: 12px; }
+.plan-step { display: flex; gap: 10px; font-size: 12px; color: var(--muted); }
+.plan-step strong { color: var(--text); min-width: 140px; }
+.slash-item { width: 100%; display: flex; flex-direction: column; gap: 4px; text-align: left; background: transparent; color: var(--text); }
+.slash-item strong { font-family: var(--font-mono); font-size: 12px; }
+.slash-item span { color: var(--muted); font-size: 12px; }
+.wiki-index-item, .wiki-card { font: inherit; text-align: left; cursor: pointer; }
+.wiki-index-item { width: 100%; }
+.wiki-card { width: 100%; }
+.repo-row { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-bottom: 1px solid var(--border); color: var(--muted); }
+
 .mode-toggle {
   display: inline-flex;
   border: 1px solid var(--border);

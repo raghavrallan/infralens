@@ -25,7 +25,7 @@ from app.intelligence.queue import enqueue_run
 from app.providers import github_infra
 from app.skills import WORKFLOW_SAFE, registry
 
-_STATIC_DIR = Path(__file__).parent / "static"
+_FRONTEND_DIR = Path(__file__).resolve().parents[1] / "frontend" / "out"
 
 
 @asynccontextmanager
@@ -669,24 +669,31 @@ def decide_approval(approval_id: str, body: ApprovalDecisionRequest) -> dict[str
     return decided
 
 
+def _frontend_page(name: str) -> FileResponse:
+    return FileResponse(_FRONTEND_DIR / name / "index.html")
+
+
 @app.get("/dashboard")
+@app.get("/dashboard/")
 def dashboard_page() -> FileResponse:
-    return FileResponse(_STATIC_DIR / "dashboard.html")
+    return _frontend_page("dashboard")
 
 
 @app.get("/")
 def index() -> FileResponse:
-    return FileResponse(_STATIC_DIR / "index.html")
+    return FileResponse(_FRONTEND_DIR / "index.html")
 
 
 @app.get("/settings")
+@app.get("/settings/")
 def settings_page() -> FileResponse:
-    return FileResponse(_STATIC_DIR / "settings.html")
+    return _frontend_page("settings")
 
 
 @app.get("/wiki")
+@app.get("/wiki/")
 def wiki_page() -> FileResponse:
-    return FileResponse(_STATIC_DIR / "wiki.html")
+    return _frontend_page("wiki")
 
 
-app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+app.mount("/", StaticFiles(directory=_FRONTEND_DIR, html=True), name="frontend")

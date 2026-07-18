@@ -6,6 +6,12 @@ __pycache__/
 venv/
 env/
 
+# Next.js build output
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/tsconfig.tsbuildinfo
+
 # Environment / secrets
 .env
 *.local

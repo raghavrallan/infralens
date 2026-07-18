@@ -117,7 +117,11 @@ Browser chat UI  ──▶  FastAPI (/api/chat)  ──▶  Orchestrator
 - `app/connections.py` — Postgres-backed Azure/AWS/GitHub credential store.
 - `app/azure_client.py` — the single Azure OpenAI integration point.
 - `app/main.py` — FastAPI app (chat, skills, workflows, runs, findings, config).
-- `app/static/` — chat, dashboard, wiki and settings pages.
+- `frontend/` — Next.js TypeScript app exported as static files for FastAPI.
+
+The browser frontend is built by Next.js but served by the same FastAPI/Uvicorn
+process as the API. There is no Next.js runtime server in production: `npm run
+build` creates `frontend/out`, and Uvicorn serves that export alongside `/api`.
 
 ## Storage
 
@@ -145,15 +149,21 @@ python -m venv .venv
 # 3. Install dependencies
 pip install -r requirements.txt
 
-# 4. (Optional) point at a non-default database / redis
+# 4. Build the Next.js frontend (Node 22+)
+cd frontend
+npm install
+npm run build
+cd ..
+
+# 5. (Optional) point at a non-default database / redis
 copy .env.example .env      # Windows  (cp on macOS/Linux)
 # the default DATABASE_URL already matches docker-compose.yml
 # REDIS_URL defaults to redis://localhost:6399/0 (the compose mapping)
 
-# 5. Run the API (serves chat + dashboard, schedules workflows)
+# 6. Run the single frontend + API entrypoint
 uvicorn app.main:app --reload
 
-# 6. In a second shell, run the worker that executes queued workflows.
+# 7. In a second shell, run the worker that executes queued workflows.
 # This cross-platform worker class runs in-process with a timer-based timeout,
 # so it works on Windows (no SIGALRM) as well as Linux/Docker.
 rq worker intelligence --worker-class app.intelligence.worker.Worker --url redis://localhost:6399/0
@@ -164,8 +174,9 @@ the Intelligence Layer, then go to **Settings** and add your Azure OpenAI
 endpoint, key and deployment — these are saved to Postgres. The wiki and
 Settings pages work before Azure is configured.
 
-The full stack (API + worker + Postgres + Redis) can also run entirely in
-Docker with `docker compose up --build`.
+The full stack (Next.js build + API + worker + Postgres + Redis) can also run
+entirely in Docker with `docker compose up --build`. The Docker image performs
+the frontend build in a Node stage and runs only Uvicorn in the API container.
 
 ## Adding a new skill
 
