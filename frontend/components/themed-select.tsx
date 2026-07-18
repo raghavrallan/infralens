@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 export type ThemedSelectOption = { value: string; label: string };
 
@@ -20,9 +20,35 @@ export function ThemedSelect({
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [placement, setPlacement] = useState<"down" | "up">("down");
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const selected = options.find((option) => option.value === value) || options[0];
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const reposition = () => {
+      const trigger = triggerRef.current?.getBoundingClientRect();
+      const menuElement = menuRef.current;
+      const menu = menuElement?.getBoundingClientRect();
+      if (!trigger || !menu || !menuElement) return;
+      const margin = 10;
+      const spaceBelow = window.innerHeight - trigger.bottom - margin;
+      const spaceAbove = trigger.top - margin;
+      const nextPlacement = menu.height > spaceBelow && spaceAbove > spaceBelow ? "up" : "down";
+      setPlacement(nextPlacement);
+      const availableSpace = nextPlacement === "up" ? spaceAbove : spaceBelow;
+      menuElement.style.maxHeight = `${Math.max(48, Math.min(240, availableSpace))}px`;
+    };
+    reposition();
+    window.addEventListener("resize", reposition);
+    window.addEventListener("scroll", reposition, true);
+    return () => {
+      window.removeEventListener("resize", reposition);
+      window.removeEventListener("scroll", reposition, true);
+    };
+  }, [open, options.length]);
 
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
@@ -56,7 +82,7 @@ export function ThemedSelect({
   };
 
   return (
-    <div ref={rootRef} className={`themed-select${open ? " open" : ""}${className ? ` ${className}` : ""}`}>
+    <div ref={rootRef} className={`themed-select${open ? " open" : ""}${open && placement === "up" ? " open-up" : ""}${className ? ` ${className}` : ""}`}>
       <button
         ref={triggerRef}
         type="button"
@@ -71,7 +97,7 @@ export function ThemedSelect({
         <span>{selected?.label || "Select"}</span>
       </button>
       {open && selected && (
-        <div className="themed-select-menu" role="listbox" aria-label={ariaLabel}>
+        <div ref={menuRef} className="themed-select-menu" role="listbox" aria-label={ariaLabel}>
           {options.map((option) => (
             <button
               type="button"

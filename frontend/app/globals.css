@@ -309,6 +309,11 @@ body.scroll-page .page {
   box-shadow: var(--shadow);
 }
 
+.themed-select.open-up .themed-select-menu {
+  top: auto;
+  bottom: calc(100% + 4px);
+}
+
 .themed-select-option {
   width: 100%;
   display: block;
