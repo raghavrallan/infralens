@@ -2582,13 +2582,13 @@ select:focus,
   font-size: 10px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--faint);
+  color: var(--muted);
   margin-bottom: 8px;
 }
 
 .finding-body {
   font-size: 13px;
-  color: #cfcfd3;
+  color: var(--text);
   line-height: 1.55;
 }
 
@@ -2639,24 +2639,24 @@ select:focus,
 
 .gate-autonomous,
 .gate-autonomous_logged {
-  color: #7fd0a0;
-  border-color: #2f5a43;
+  color: #237245;
+  border-color: #80b79a;
 }
 
 .gate-auto_instant_undo,
 .gate-auto_apply {
-  color: #d8c98a;
-  border-color: #5a5230;
+  color: #7b6500;
+  border-color: #c8b86a;
 }
 
 .gate-human_approval {
-  color: #e0a97c;
-  border-color: #5a3f28;
+  color: #9a581f;
+  border-color: #d2a879;
 }
 
 .gate-two_person {
-  color: #ff9a9a;
-  border-color: #6a2b2b;
+  color: #a62c35;
+  border-color: #d99a9a;
 }
 
 .workflow-list,
@@ -2743,8 +2743,8 @@ select:focus,
 }
 
 .tiny-btn.danger:hover {
-  color: #ff9a9a;
-  border-color: #6a2b2b;
+  color: #a62c35;
+  border-color: #d99a9a;
 }
 
 .run-item {
@@ -2782,16 +2782,16 @@ select:focus,
   color: var(--muted);
 }
 .run-status.running {
-  color: #d8c98a;
-  border-color: #5a5230;
+  color: #7b6500;
+  border-color: #c8b86a;
 }
 .run-status.succeeded {
-  color: #7fd0a0;
-  border-color: #2f5a43;
+  color: #237245;
+  border-color: #80b79a;
 }
 .run-status.failed {
-  color: #ff9a9a;
-  border-color: #6a2b2b;
+  color: #a62c35;
+  border-color: #d99a9a;
 }
 
 .approvals-list {
@@ -2803,7 +2803,7 @@ select:focus,
 .approval-card {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-left: 3px solid #5a3f28;
+  border-left: 3px solid #d2a879;
   border-radius: var(--radius);
   padding: 14px 16px;
 }
@@ -2838,12 +2838,12 @@ select:focus,
 }
 
 .approval-expiry.danger {
-  color: #ff9a9a;
+  color: #a62c35;
 }
 
 .approval-action {
   font-size: 12.5px;
-  color: #cfcfd3;
+  color: var(--text);
   line-height: 1.5;
   margin-bottom: 8px;
 }
