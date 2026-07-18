@@ -7,7 +7,7 @@ model is unavailable or returns nothing usable, the whole analysis becomes a
 single finding so a run never silently produces nothing.
 """
 import json
-from typing import Any
+from typing import Any, Optional
 
 from app import azure_client
 from app.intelligence import risk_engine
@@ -62,7 +62,9 @@ def _clean_title(raw: str) -> str:
     return title[:400]
 
 
-def _extract_structured(skill: str, output: str, objective: str) -> list[dict[str, Any]]:
+def _extract_structured(
+    skill: str, output: str, objective: str
+) -> Optional[list[dict[str, Any]]]:
     """Ask the model to split the analysis into discrete findings."""
     try:
         completion = azure_client.chat(
@@ -80,11 +82,13 @@ def _extract_structured(skill: str, output: str, objective: str) -> list[dict[st
             response_format={"type": "json_object"},
         )
         parsed = json.loads(completion.choices[0].message.content or "{}")
-    except Exception:  # noqa: BLE001 - fall back to a single finding on any failure
-        return []
+    except Exception:  # noqa: BLE001 - fall back to a single finding on extraction failure
+        return None
+    if not isinstance(parsed, dict):
+        return None
     items = parsed.get("findings")
     if not isinstance(items, list):
-        return []
+        return None
     findings: list[dict[str, Any]] = []
     for item in items:
         if not isinstance(item, dict):
@@ -148,6 +152,8 @@ def build_findings(
     if not output or not output.strip():
         return []
     extracted = _extract_structured(skill, output, objective)
-    if not extracted:
+    if extracted is None:
         extracted = [_fallback_finding(skill, output, objective)]
+    if not extracted:
+        return []
     return [_apply_gate(skill, module, item, environment) for item in extracted]

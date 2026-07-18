@@ -555,7 +555,19 @@ _CONTAINER_APP_TYPE = "microsoft.app/containerapps"
 
 # Raw-text fallbacks used when the caller didn't pass a structured resource hint.
 _TYPE_KEYWORDS: list[tuple[tuple[str, ...], str]] = [
-    (("container app", "containerapp", "container-app", "aca"), "container_app"),
+    (
+        (
+            "container app",
+            "containerapp",
+            "container-app",
+            "connected app",
+            "connected apps",
+            "my app",
+            "my apps",
+            "aca",
+        ),
+        "container_app",
+    ),
     (("postgres", "postgre", "psql"), "postgresql"),
     (("mysql",), "mysql"),
     (("mariadb",), "mariadb"),
@@ -644,6 +656,30 @@ def _infer_resource_types(text: str):
         if any(k in lowered for k in keywords):
             return _RESOURCE_TYPES[key], key
     return None, None
+
+
+_GENERIC_RESOURCE_NAMES = {
+    "app",
+    "apps",
+    "my app",
+    "my apps",
+    "the app",
+    "the apps",
+    "connected app",
+    "connected apps",
+    "the connected app",
+    "the connected apps",
+    "container app",
+    "container apps",
+}
+
+
+def _specific_resource_name(value: Any) -> Optional[str]:
+    """Ignore natural-language collection labels returned as resource names."""
+    if not isinstance(value, str):
+        return None
+    name = re.sub(r"\s+", " ", value).strip()
+    return None if name.lower() in _GENERIC_RESOURCE_NAMES else name or None
 
 
 # Names that make a good generic default when the user asks broadly for "metrics".
@@ -874,6 +910,7 @@ def build_metrics_report(
     if azure_types is None:
         azure_types, _ = _infer_resource_types(task)
 
+    resource_name = _specific_resource_name(resource_name)
     resources = _discover_resources(token, subs, azure_types, resource_name)
     if not resources and resource_name:
         resources = _run_query(
