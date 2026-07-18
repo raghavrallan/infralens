@@ -987,6 +987,24 @@ select:focus,
   border-color: var(--border-strong);
 }
 
+/* Keep native option popups aligned with the light monochrome theme. */
+select,
+.modal-select {
+  color-scheme: light;
+}
+
+select option,
+select optgroup {
+  background-color: var(--panel);
+  color: var(--text);
+}
+
+select option:checked,
+select option:hover {
+  background: var(--elev-2) linear-gradient(0deg, var(--elev-2), var(--elev-2));
+  color: var(--text);
+}
+
 .ghost {
   background: transparent;
   border: 1px solid var(--border);
