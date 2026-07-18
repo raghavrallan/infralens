@@ -136,7 +136,7 @@ Only the Postgres connection string (`DATABASE_URL`) comes from the environment.
 ## Quick start
 
 ```bash
-# 1. Start Postgres + Redis (Docker)
+# 1. Start only Postgres + Redis (Docker)
 docker compose up -d postgres redis
 
 # 2. Create a virtual environment
@@ -160,7 +160,7 @@ copy .env.example .env      # Windows  (cp on macOS/Linux)
 # the default DATABASE_URL already matches docker-compose.yml
 # REDIS_URL defaults to redis://localhost:6399/0 (the compose mapping)
 
-# 6. Run the single frontend + API entrypoint
+# 6. Run the single local frontend + API entrypoint
 uvicorn app.main:app --reload
 
 # 7. In a second shell, run the worker that executes queued workflows.
@@ -174,9 +174,10 @@ the Intelligence Layer, then go to **Settings** and add your Azure OpenAI
 endpoint, key and deployment — these are saved to Postgres. The wiki and
 Settings pages work before Azure is configured.
 
-The full stack (Next.js build + API + worker + Postgres + Redis) can also run
-entirely in Docker with `docker compose up --build`. The Docker image performs
-the frontend build in a Node stage and runs only Uvicorn in the API container.
+The default Compose startup intentionally runs only Postgres and Redis. The API,
+frontend export, and worker run locally using the commands above. The optional
+containerized app stack is available with `docker compose --profile container-app
+up --build`.
 
 ## Adding a new skill
 

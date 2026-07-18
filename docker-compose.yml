@@ -32,6 +32,7 @@ services:
       retries: 10
 
   api:
+    profiles: ["container-app"]
     build: .
     container_name: devsecops-api
     restart: unless-stopped
@@ -48,6 +49,7 @@ services:
         condition: service_healthy
 
   worker:
+    profiles: ["container-app"]
     build: .
     container_name: devsecops-worker
     restart: unless-stopped
