@@ -19,6 +19,11 @@ frontend/out/
 !.env.example
 terminals/
 assets/
+*.png
+*.jpg
+*.jpeg
+~/
+~/**
 *.md
 tests/
 .vscode/

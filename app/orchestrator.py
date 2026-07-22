@@ -11,11 +11,13 @@ Each step in a task is handled by one skill acting as an independent agent with
 its own specialised system prompt (see app/skills/*).
 """
 import json
+import os
 import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Iterator, Literal, Optional
 
 from app import azure_client
+from app.execution.chat_actions import provider_status_text
 from app.providers import aws_infra, azure_infra, github_infra
 from app.skills import registry
 
@@ -126,7 +128,11 @@ _SCOPE_POLICY = {
     "write": (
         "OPERATING SCOPE: WRITE. You may produce concrete, ready-to-apply change "
         "artifacts (pipelines, IaC, policies, commands). Still call out "
-        "irreversible or high-blast-radius actions explicitly."
+        "irreversible or high-blast-radius actions explicitly. For provider "
+        "changes, use the structured CLI action path: identify the exact "
+        "provider, target, arguments, preflight, postcondition and rollback "
+        "boundary. Never claim a live change happened unless an executor result "
+        "confirms it."
     ),
 }
 _ACCESS_POLICY = {
@@ -578,7 +584,10 @@ _METRIC_INTENT_PROMPT = (
     "restarts, errors, transactions, tokens, input_tokens, output_tokens, calls. "
     "Use input_tokens/output_tokens/tokens for Azure OpenAI token usage. Include "
     "every metric they mention (e.g. both input_tokens and output_tokens). Leave "
-    "empty if they don't name one."
+    "empty if they don't name one. The input may include recent chat context. "
+    "When the current request says this, that, same, or another follow-up, "
+    "resolve it from the earlier concrete user or assistant turn instead of "
+    "returning null or asking which service the user means."
 )
 
 
@@ -915,6 +924,7 @@ def _skill_args(
     objective: str,
     policy: str,
     live_context: Optional[str],
+    conversation_context: Optional[str] = None,
 ) -> dict[str, Any]:
     """Build arguments that match each skill's declared evidence contract."""
     args: dict[str, Any] = {
@@ -922,6 +932,8 @@ def _skill_args(
         "objective": objective,
         "operating_policy": policy,
     }
+    if conversation_context:
+        args["conversation_memory"] = conversation_context
     if skill_name not in _SECURITY_SKILLS:
         return _augment_args(args, live_context)
 
@@ -962,9 +974,13 @@ ORCHESTRATOR_SYSTEM_PROMPT = (
     "incident, or writing a report), briefly say so and tell the user they can "
     "paste the relevant artefact or type '/' to invoke that skill. Never "
     "fabricate scan data, CVEs, or metrics the user did not provide, and always "
-    "keep security and least-privilege front of mind. In agent mode, report the "
-    "work performed and its results; do not add an approval checkpoint or defer "
-    "the response into a second plan."
+    "keep security and least-privilege front of mind. Provider deployment and "
+    "resource-change requests are handled as structured az/aws/gh CLI actions, "
+    "not as plain-text commands: preserve the user's target and conversation "
+    "context, ask only for missing deployment inputs, and never invent an image, "
+    "repository, region, file, or subscription. In agent mode, report the work "
+    "performed and its results; do not add an approval checkpoint or defer the "
+    "response into a second plan."
 )
 
 
@@ -1014,6 +1030,35 @@ def _last_user_message(messages: list[dict[str, Any]]) -> str:
         if message.get("role") == "user":
             return message.get("content", "")
     return ""
+
+
+def _memory_context_text(messages: list[dict[str, Any]]) -> str:
+    """Extract bounded same-chat context already prepared by the API."""
+    return "\n\n".join(
+        str(message.get("content", ""))
+        for message in messages
+        if message.get("role") == "system"
+        and (
+            "CHAT MEMORY" in str(message.get("content", ""))
+            or "RECENT CHAT TURNS" in str(message.get("content", ""))
+        )
+    )[:10000]
+
+
+def _contextual_task(messages: list[dict[str, Any]]) -> str:
+    """Combine the current request with bounded context for data routing.
+
+    Skills still receive the current user request as their objective. This
+    richer form is used for resolving references and fetching live data, where
+    a follow-up like "show that for one hour" needs prior details.
+    """
+    task = _last_user_message(messages)
+    context = _memory_context_text(messages)
+    if not context:
+        return task
+    # Put the current request first so parsers prefer its new time window or
+    # metric qualifier; the context supplies omitted resource names and scope.
+    return f"CURRENT USER REQUEST:\n{task}\n\nCONVERSATION CONTEXT:\n{context}"[:18000]
 
 
 def _skill_catalog_text() -> str:
@@ -1094,8 +1139,11 @@ def _build_plan(
             "role": "system",
             "content": system_content,
         },
-        {"role": "user", "content": _last_user_message(messages)},
     ]
+    memory_context = _memory_context_text(messages)
+    if memory_context:
+        planning_messages.append({"role": "system", "content": memory_context})
+    planning_messages.append({"role": "user", "content": _last_user_message(messages)})
     completion = azure_client.chat(
         messages=planning_messages,
         temperature=0.1,
@@ -1174,8 +1222,11 @@ def _build_detailed_plan(
         )
     planning_messages = [
         {"role": "system", "content": system_content},
-        {"role": "user", "content": _last_user_message(messages)},
     ]
+    memory_context = _memory_context_text(messages)
+    if memory_context:
+        planning_messages.append({"role": "system", "content": memory_context})
+    planning_messages.append({"role": "user", "content": _last_user_message(messages)})
     completion = azure_client.chat(
         messages=planning_messages,
         temperature=0.2,
@@ -1200,7 +1251,11 @@ def _build_detailed_plan(
 
 
 def _run_single_skill(
-    skill_name: str, task: str, policy: str, live_context: Optional[str]
+    skill_name: str,
+    task: str,
+    policy: str,
+    live_context: Optional[str],
+    conversation_context: Optional[str] = None,
 ) -> ChatTurn:
     """Run one forced skill directly against the user's message."""
     skill = registry.get(skill_name)
@@ -1209,7 +1264,9 @@ def _run_single_skill(
             mode="agent",
             reply=f"Skill '{skill_name}' was not found.",
         )
-    args = _skill_args(skill_name, task, task, policy, live_context)
+    args = _skill_args(
+        skill_name, task, task, policy, live_context, conversation_context
+    )
     result = skill.run(args)
     return ChatTurn(
         mode="agent",
@@ -1287,7 +1344,14 @@ def _run_multi_agent(
         skill = registry.get(step.skill)
         if skill is None:
             continue
-        args = _skill_args(step.skill, task, step.objective, policy, live_context)
+        args = _skill_args(
+            step.skill,
+            task,
+            step.objective,
+            policy,
+            live_context,
+            _memory_context_text(messages),
+        )
         result = skill.run(args)
         runs.append(
             AgentRun(skill=step.skill, objective=step.objective, output=result.content)
@@ -1383,8 +1447,9 @@ def run_chat(
     """
     policy = build_agent_policy(action_scope, access_level) if mode == "agent" else build_policy(action_scope, access_level)
     task = _last_user_message(messages)
+    contextual_task = _contextual_task(messages)
     live_context, charts = _gather_live_context(
-        task,
+        contextual_task,
         project_id,
         force=(skill == "cloud_posture"),
         force_cost=(skill == "cost_analyzer"),
@@ -1392,11 +1457,15 @@ def run_chat(
         force_logs=(skill == "log_analyzer"),
         force_security=(skill in _SECURITY_SKILLS or _is_security_task(task)),
     )
+    status_context = provider_status_text(project_id, action_scope)
+    live_context = f"{live_context}\n\n---\n\n{status_context}" if live_context else status_context
     if mode == "plan":
         turn = _run_plan_mode(messages, live_context)
         turn.charts = charts
     elif skill:
-        turn = _run_single_skill(skill, task, policy, live_context)
+        turn = _run_single_skill(
+            skill, task, policy, live_context, _memory_context_text(messages)
+        )
         turn.charts = charts
     else:
         turn = _run_multi_agent(messages, policy, live_context, project_id, charts)
@@ -1458,7 +1527,14 @@ def _stream_steps(
         step = steps[0]
         sk = registry.get(step.skill)
         yield {"type": "status", "text": f"Running {_pretty(step.skill)}"}
-        args = _skill_args(step.skill, task, step.objective, policy, live_context)
+        args = _skill_args(
+            step.skill,
+            task,
+            step.objective,
+            policy,
+            live_context,
+            _memory_context_text(messages),
+        )
         content = yield from _stream_and_collect(_skill_deltas(sk, args))
         turn = ChatTurn(
             mode="agent",
@@ -1476,7 +1552,14 @@ def _stream_steps(
         if sk is None:
             continue
         yield {"type": "status", "text": f"Running {_pretty(step.skill)}"}
-        args = _skill_args(step.skill, task, step.objective, policy, live_context)
+        args = _skill_args(
+            step.skill,
+            task,
+            step.objective,
+            policy,
+            live_context,
+            _memory_context_text(messages),
+        )
         result = sk.run(args)
         runs.append(
             AgentRun(skill=step.skill, objective=step.objective, output=result.content)
@@ -1528,8 +1611,9 @@ def run_chat_stream(
     """
     policy = build_agent_policy(action_scope, access_level) if mode == "agent" else build_policy(action_scope, access_level)
     task = _last_user_message(messages)
+    contextual_task = _contextual_task(messages)
     live_context, charts = _gather_live_context(
-        task,
+        contextual_task,
         project_id,
         force=(skill == "cloud_posture"),
         force_cost=(skill == "cost_analyzer"),
@@ -1537,6 +1621,8 @@ def run_chat_stream(
         force_logs=(skill == "log_analyzer"),
         force_security=(skill in _SECURITY_SKILLS or _is_security_task(task)),
     )
+    status_context = provider_status_text(project_id, action_scope)
+    live_context = f"{live_context}\n\n---\n\n{status_context}" if live_context else status_context
 
     if mode == "plan":
         yield {"type": "status", "text": "Planning"}
@@ -1554,7 +1640,9 @@ def run_chat_stream(
             yield {"type": "final", **turn.to_dict()}
             return
         yield {"type": "status", "text": _pretty(skill)}
-        args = _skill_args(skill, task, task, policy, live_context)
+        args = _skill_args(
+            skill, task, task, policy, live_context, _memory_context_text(messages)
+        )
         content = yield from _stream_and_collect(_skill_deltas(sk, args))
         turn = ChatTurn(
             mode="agent",
@@ -1569,7 +1657,7 @@ def run_chat_stream(
     yield {"type": "status", "text": "Analyzing request"}
     _summary, steps = _build_plan(messages, live_context)
     live_context, charts = _ensure_planned_context(
-        task, project_id, steps, live_context, charts
+        contextual_task, project_id, steps, live_context, charts
     )
     yield from _stream_steps(task, messages, steps, policy, live_context, charts)
 
@@ -1589,6 +1677,7 @@ def execute_plan_stream(
     """
     policy = build_agent_policy(action_scope, access_level)
     task = _last_user_message(messages)
+    contextual_task = _contextual_task(messages)
     valid = [step for step in steps if registry.get(step.skill) is not None]
     if not valid:
         turn = ChatTurn(
@@ -1597,9 +1686,9 @@ def execute_plan_stream(
         )
         yield {"type": "final", **turn.to_dict()}
         return
-    live_context, charts = _gather_live_context(task, project_id)
+    live_context, charts = _gather_live_context(contextual_task, project_id)
     live_context, charts = _ensure_planned_context(
-        task, project_id, valid, live_context, charts
+        contextual_task, project_id, valid, live_context, charts
     )
     yield {"type": "status", "text": "Executing plan"}
     yield from _stream_steps(task, messages, valid, policy, live_context, charts)

@@ -13,7 +13,14 @@ FROM python:3.12-slim
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+ARG PIP_TRUSTED_HOSTS=""
+RUN if [ -n "$PIP_TRUSTED_HOSTS" ]; then \
+      TRUSTED_ARGS=""; \
+      for host in $PIP_TRUSTED_HOSTS; do TRUSTED_ARGS="$TRUSTED_ARGS --trusted-host $host"; done; \
+      pip install $TRUSTED_ARGS --no-cache-dir -r requirements.txt; \
+    else \
+      pip install --no-cache-dir -r requirements.txt; \
+    fi
 
 COPY app ./app
 COPY --from=frontend-builder /build/frontend/out ./frontend/out

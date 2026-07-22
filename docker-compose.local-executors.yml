@@ -1,0 +1,42 @@
+services:
+  azure-executor:
+    build:
+      context: .
+      dockerfile: executors/azure/Dockerfile
+      args:
+        PIP_TRUSTED_HOSTS: ${PIP_TRUSTED_HOSTS:-}
+    container_name: devsecops-local-azure-executor
+    restart: unless-stopped
+    environment:
+      REDIS_URL: redis://host.docker.internal:6399/0
+      CONTROL_PLANE_URL: http://host.docker.internal:8000
+      EXECUTOR_SERVICE_KEY: dev-executor-key
+      EXECUTOR_PROVIDER: azure
+
+  aws-executor:
+    build:
+      context: .
+      dockerfile: executors/aws/Dockerfile
+      args:
+        PIP_TRUSTED_HOSTS: ${PIP_TRUSTED_HOSTS:-}
+    container_name: devsecops-local-aws-executor
+    restart: unless-stopped
+    environment:
+      REDIS_URL: redis://host.docker.internal:6399/0
+      CONTROL_PLANE_URL: http://host.docker.internal:8000
+      EXECUTOR_SERVICE_KEY: dev-executor-key
+      EXECUTOR_PROVIDER: aws
+
+  github-executor:
+    build:
+      context: .
+      dockerfile: executors/github/Dockerfile
+      args:
+        PIP_TRUSTED_HOSTS: ${PIP_TRUSTED_HOSTS:-}
+    container_name: devsecops-local-github-executor
+    restart: unless-stopped
+    environment:
+      REDIS_URL: redis://host.docker.internal:6399/0
+      CONTROL_PLANE_URL: http://host.docker.internal:8000
+      EXECUTOR_SERVICE_KEY: dev-executor-key
+      EXECUTOR_PROVIDER: github

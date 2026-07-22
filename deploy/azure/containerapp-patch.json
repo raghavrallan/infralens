@@ -1,0 +1,49 @@
+{
+  "properties": {
+    "template": {
+      "containers": [
+        {
+          "name": "api",
+          "image": "eqacrregistrydeveastus001.azurecr.io/devsecops-suite:codex-20260722-custom-date-2",
+          "env": [
+            {"name": "DATABASE_URL", "secretRef": "db-conn"},
+            {"name": "REDIS_URL", "value": "redis://localhost:6379/0"},
+            {"name": "PYTHONUNBUFFERED", "value": "1"}
+          ],
+          "resources": {"cpu": 0.75, "memory": "1.5Gi", "ephemeralStorage": "4Gi"}
+        },
+        {
+          "name": "worker",
+          "image": "eqacrregistrydeveastus001.azurecr.io/devsecops-suite:codex-20260722-custom-date-2",
+          "command": ["rq"],
+          "args": ["worker", "intelligence", "--worker-class", "app.intelligence.worker.Worker", "--url", "redis://localhost:6379/0"],
+          "env": [
+            {"name": "DATABASE_URL", "secretRef": "db-conn"},
+            {"name": "REDIS_URL", "value": "redis://localhost:6379/0"},
+            {"name": "PYTHONUNBUFFERED", "value": "1"}
+          ],
+          "resources": {"cpu": 0.75, "memory": "1.5Gi", "ephemeralStorage": "4Gi"}
+        },
+        {
+          "name": "redis",
+          "image": "redis:7-alpine",
+          "resources": {"cpu": 0.25, "memory": "0.5Gi", "ephemeralStorage": "1Gi"}
+        },
+        {
+          "name": "azure-executor",
+          "image": "eqacrregistrydeveastus001.azurecr.io/devsecops-suite-azure-executor:codex-20260720-165715",
+          "command": ["python3", "-c", "from rq.cli import main; main()"],
+          "args": ["worker", "provider.azure.read", "provider.azure.write", "--worker-class", "executors.common.worker.Worker", "--url", "redis://localhost:6379/0"],
+          "env": [
+            {"name": "REDIS_URL", "value": "redis://localhost:6379/0"},
+            {"name": "CONTROL_PLANE_URL", "value": "http://localhost:8000"},
+            {"name": "EXECUTOR_SERVICE_KEY", "value": "dev-executor-key"},
+            {"name": "EXECUTOR_PROVIDER", "value": "azure"}
+          ],
+          "resources": {"cpu": 0.75, "memory": "1.5Gi", "ephemeralStorage": "4Gi"}
+        }
+      ],
+      "scale": {"minReplicas": 1, "maxReplicas": 1}
+    }
+  }
+}

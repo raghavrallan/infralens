@@ -1,10 +1,13 @@
 """FastAPI application: chatbot, skill catalog, wiki and connection settings."""
 import json
+import hmac
+import os
 from contextlib import asynccontextmanager
+from datetime import date
 from pathlib import Path
 from typing import Any, Literal, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -12,6 +15,7 @@ from pydantic import BaseModel
 from app import (
     __version__,
     azure_client,
+    chat_memory,
     chats,
     config,
     connections,
@@ -19,6 +23,8 @@ from app import (
     projects,
 )
 from app.db import DEFAULT_PROJECT_ID, init_db
+from app.execution import chat_actions
+from app.execution import service as execution
 from app.intelligence import scheduler as intel_scheduler
 from app.intelligence import workflows as intel
 from app.intelligence.queue import enqueue_run
@@ -42,6 +48,14 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="DevSecOps LLM Skills Suite", version=__version__, lifespan=lifespan)
 
 
+def _refresh_chat_memory(chat_id: str) -> None:
+    """Memory is best-effort; a failed refresh must not fail the chat turn."""
+    try:
+        chat_memory.refresh_memory(chat_id)
+    except Exception:
+        return
+
+
 class ChatRequest(BaseModel):
     message: str
     chat_id: Optional[str] = None
@@ -58,12 +72,47 @@ class PlanStepRequest(BaseModel):
     objective: str = ""
 
 
+class ActionRequest(BaseModel):
+    project_id: str = DEFAULT_PROJECT_ID
+    provider: Literal["azure", "aws", "github"]
+    executable: Literal["az", "aws", "gh"]
+    args: list[str] = []
+    target: str = ""
+    access_scope: Literal["read_only", "write"] = "read_only"
+    access_level: Literal["ask_approval", "auto_approve", "full_access"] = "ask_approval"
+    expected_result: str = ""
+    risk: str = ""
+    rollback: str = ""
+    preflight: list[str] = []
+    preflight_expect: str = ""
+    verify: list[str] = []
+    steps: list[dict[str, Any]] = []
+    requested_by: str = "user"
+
+
 class ExecutePlanRequest(BaseModel):
     chat_id: str
     project_id: str = DEFAULT_PROJECT_ID
     steps: list[PlanStepRequest] = []
     action_scope: Literal["read_only", "write"] = "read_only"
     access_level: Literal["ask_approval", "auto_approve", "full_access"] = "ask_approval"
+    actions: list[ActionRequest] = []
+
+
+class ActionDecisionRequest(BaseModel):
+    approver: str = "user"
+    reason: str = ""
+
+
+class ExecutorEventRequest(BaseModel):
+    type: str
+    payload: dict[str, Any] = {}
+
+
+class ExecutorResultRequest(BaseModel):
+    status: Literal["succeeded", "failed", "verification_failed", "rolled_back", "canceled"]
+    result: dict[str, Any] = {}
+    error: str = ""
 
 
 class RenameRequest(BaseModel):
@@ -119,6 +168,8 @@ def health() -> dict[str, Any]:
         "azure_configured": azure.configured,
         "deployment": azure.deployment,
         "skill_count": len(registry.all()),
+        "write_actions_enabled": True,
+        "write_actions_controlled_by_ui": True,
     }
 
 
@@ -201,6 +252,15 @@ def rename_project(project_id: str, body: ProjectRequest) -> dict[str, Any]:
     return project
 
 
+@app.put("/api/projects/{project_id}/default")
+def set_default_project(project_id: str) -> dict[str, Any]:
+    """Set the sole persisted default project used on a fresh page load."""
+    project = projects.set_default(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+
 @app.delete("/api/projects/{project_id}")
 def delete_project(project_id: str) -> dict[str, bool]:
     """Delete a project and everything scoped to it (the default cannot be deleted)."""
@@ -245,6 +305,13 @@ def get_connections(project_id: str) -> list[dict[str, Any]]:
     return connections.all_status(project_id)
 
 
+@app.get("/api/projects/{project_id}/provider-status")
+def get_provider_status(project_id: str, action_scope: Literal["read_only", "write"] = "read_only") -> list[dict[str, Any]]:
+    """Return the selected project's provider readiness without secrets."""
+    _require_project(project_id)
+    return chat_actions.provider_status(project_id, action_scope)
+
+
 @app.put("/api/projects/{project_id}/connections/{provider}")
 def put_connection(project_id: str, provider: str, body: ConnectionRequest) -> dict[str, Any]:
     """Save or update a provider connection within a project."""
@@ -261,6 +328,197 @@ def delete_connection(project_id: str, provider: str) -> dict[str, Any]:
     if provider not in connections.PROVIDERS:
         raise HTTPException(status_code=404, detail=f"Unknown provider: {provider}")
     return connections.remove_connection(project_id, provider)
+
+
+def _action_values(body: ActionRequest) -> dict[str, Any]:
+    return {
+        "project_id": body.project_id,
+        "provider": body.provider,
+        "executable": body.executable,
+        "args": body.args,
+        "target": body.target,
+        "access_scope": body.access_scope,
+        "access_level": body.access_level,
+        "expected_result": body.expected_result,
+        "risk": body.risk,
+        "rollback": body.rollback,
+        "preflight": body.preflight,
+        "preflight_expect": body.preflight_expect,
+        "verify": body.verify,
+        "steps": body.steps,
+        "requested_by": body.requested_by,
+    }
+
+
+@app.post("/api/actions/preview")
+def preview_action(body: ActionRequest) -> dict[str, Any]:
+    """Validate a structured provider operation without dispatching it."""
+    _require_project(body.project_id)
+    if body.provider == "github" and "/" in body.target:
+        mapped = {repo.lower() for repo in projects.get_repos(body.project_id)}
+        if body.target.lower() not in mapped:
+            raise HTTPException(status_code=400, detail="GitHub action target is outside the repositories mapped to this project")
+    try:
+        from app.execution.validation import command_preview, operation_hash, validate_operation
+
+        operation = validate_operation(
+            body.provider, body.executable, body.args, body.target, body.access_scope,
+            body.preflight, body.verify,
+        )
+        operation.update({"expected_result": body.expected_result[:1000], "risk": body.risk[:1000], "rollback": body.rollback[:1000]})
+        return {
+            "provider": body.provider,
+            "target": body.target,
+            "access_scope": body.access_scope,
+            "operation": operation,
+            "command_preview": command_preview(operation),
+            "operation_hash": operation_hash(operation, body.access_scope),
+            "approval_required": body.access_scope == "write",
+            "write_enabled": True,
+            "write_control": "ui",
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/actions")
+def create_action(body: ActionRequest) -> dict[str, Any]:
+    """Persist and dispatch a safe read action, or create a write approval."""
+    _require_project(body.project_id)
+    try:
+        return execution.create_action(**_action_values(body))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/actions/{action_id}")
+def get_action(action_id: str) -> dict[str, Any]:
+    try:
+        return execution.get_action(action_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/api/actions/{action_id}/events")
+def get_action_events(action_id: str) -> list[dict[str, Any]]:
+    try:
+        return execution.list_events(action_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/api/actions/{action_id}/diagnostics")
+def diagnose_action(action_id: str) -> dict[str, Any]:
+    try:
+        return execution.diagnose_action(action_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/actions/{action_id}/approve")
+def approve_action(action_id: str, body: ActionDecisionRequest) -> dict[str, Any]:
+    try:
+        return execution.approve_action(action_id, body.approver)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/actions/{action_id}/reject")
+def reject_action(action_id: str, body: ActionDecisionRequest) -> dict[str, Any]:
+    try:
+        return execution.reject_action(action_id, body.approver, body.reason)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/actions/{action_id}/cancel")
+def cancel_action(action_id: str, body: ActionDecisionRequest) -> dict[str, Any]:
+    try:
+        return execution.cancel_action(action_id, body.approver)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+def _require_executor(key: Optional[str], provider: Optional[str]) -> str:
+    expected = os.environ.get("EXECUTOR_SERVICE_KEY", "dev-executor-key")
+    if not key or not hmac.compare_digest(key, expected):
+        raise HTTPException(status_code=403, detail="Invalid executor credentials")
+    if provider not in {"azure", "aws", "github"}:
+        raise HTTPException(status_code=403, detail="Invalid executor provider")
+    return provider
+
+
+@app.get("/internal/execution/jobs/{action_id}/claim")
+def claim_action_for_executor(
+    action_id: str, provider: str, x_executor_key: Optional[str] = Header(default=None),
+    x_executor_provider: Optional[str] = Header(default=None),
+) -> dict[str, Any]:
+    """Private control-plane endpoint; credentials are never returned publicly."""
+    if _require_executor(x_executor_key, x_executor_provider) != provider:
+        raise HTTPException(status_code=403, detail="Executor provider mismatch")
+    try:
+        return execution.claim_for_executor(action_id, provider)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/internal/execution/jobs/{action_id}/events")
+def record_executor_event(
+    action_id: str, body: ExecutorEventRequest, x_executor_key: Optional[str] = Header(default=None),
+    x_executor_provider: Optional[str] = Header(default=None),
+) -> dict[str, bool]:
+    provider = _require_executor(x_executor_key, x_executor_provider)
+    if body.type not in {"action_output", "action_verified"}:
+        raise HTTPException(status_code=400, detail="Unsupported executor event")
+    try:
+        execution.validate_executor_provider(action_id, provider)
+        execution.append_event(action_id, body.type, body.payload)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return {"recorded": True}
+
+
+@app.get("/internal/execution/jobs/{action_id}/canceled")
+def check_executor_cancellation(
+    action_id: str, provider: str, x_executor_key: Optional[str] = Header(default=None),
+    x_executor_provider: Optional[str] = Header(default=None),
+) -> dict[str, bool]:
+    if _require_executor(x_executor_key, x_executor_provider) != provider:
+        raise HTTPException(status_code=403, detail="Executor provider mismatch")
+    try:
+        return {"canceled": execution.is_canceled(action_id, provider)}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+@app.post("/internal/execution/jobs/{action_id}/result")
+def record_executor_result(
+    action_id: str, body: ExecutorResultRequest, x_executor_key: Optional[str] = Header(default=None),
+    x_executor_provider: Optional[str] = Header(default=None),
+) -> dict[str, bool]:
+    provider = _require_executor(x_executor_key, x_executor_provider)
+    try:
+        execution.validate_executor_provider(action_id, provider)
+        execution.mark_result(action_id, body.status, body.result, body.error)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return {"recorded": True}
 
 
 @app.get("/api/chats")
@@ -314,24 +572,78 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
     else:
         chats.add_message(chat_id, "user", request.message)
 
+    special_action: Optional[dict[str, Any]] = None
+    if request.mode == "agent":
+        try:
+            special_action = chat_actions.handle_turn(
+                chat_id, request.project_id, request.message, request.action_scope, request.access_level
+            )
+        except ValueError as exc:
+            special_action = {
+                "reply": f"I could not prepare that Azure action: {exc}",
+                "action": None,
+                "event_type": "action_failed",
+            }
+
     def sse(event: dict[str, Any]) -> str:
         return f"data: {json.dumps(event)}\n\n"
 
     def generate() -> Any:
         yield sse({"type": "chat", "chat_id": chat_id})
 
+        if special_action is not None:
+            action = special_action.get("action")
+            if action:
+                yield sse({
+                    "type": "action_planned",
+                    "action_id": action["id"],
+                    "action": action,
+                })
+                yield sse({
+                    "type": special_action.get("event_type", "approval_required"),
+                    "action_id": action["id"],
+                    "action": action,
+                })
+            reply = str(special_action.get("reply", ""))
+            yield sse({"type": "delta", "text": reply})
+            meta = {"mode": "agent"}
+            if action:
+                meta.update({"action_id": action["id"], "action_status": action.get("status")})
+            if special_action.get("pending_resource_group_name"):
+                meta["pending_resource_group_name"] = special_action["pending_resource_group_name"]
+            if special_action.get("pending_action_spec"):
+                meta["pending_action_spec"] = special_action["pending_action_spec"]
+            chats.add_message(chat_id, "assistant", reply, meta)
+            _refresh_chat_memory(chat_id)
+            yield sse({
+                "type": "final",
+                "mode": "agent",
+                "reply": reply,
+                "chat_id": chat_id,
+                **({"required_action_scope": special_action["required_action_scope"]} if special_action.get("required_action_scope") else {}),
+                **({"action_id": action["id"], "action": action} if action else {}),
+            })
+            return
+
         if not config.get_azure_config().configured:
             reply = (
                 "Azure OpenAI is not configured yet. Open Settings and add your "
                 "Azure OpenAI endpoint and key. Chats, skills and wiki work "
-                "offline so you can still preview the suite."
+                "offline so you can still preview the suite.\n\n"
+                + chat_actions.provider_status_text(request.project_id, request.action_scope)
             )
             yield sse({"type": "delta", "text": reply})
             chats.add_message(chat_id, "assistant", reply, {"mode": request.mode})
+            _refresh_chat_memory(chat_id)
             yield sse({"type": "final", "mode": request.mode, "reply": reply, "chat_id": chat_id})
             return
 
-        history = chats.get_history(chat_id)
+        history = chat_memory.get_model_context(
+            chat_id, request.message, project_id=request.project_id
+        )
+        diagnostic_context = chat_actions.action_diagnostic_context(chat_id, request.message)
+        if diagnostic_context:
+            history.insert(0, {"role": "system", "content": diagnostic_context})
         final: dict[str, Any] = {}
         try:
             for event in orchestrator.run_chat_stream(
@@ -365,6 +677,7 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
                 "charts": final.get("charts", []),
             },
         )
+        _refresh_chat_memory(chat_id)
         final["chat_id"] = chat_id
         yield sse({"type": "final", **final})
 
@@ -383,7 +696,17 @@ def execute_plan(request: ExecutePlanRequest) -> StreamingResponse:
         for s in request.steps
         if registry.get(s.skill) is not None
     ]
-    if not steps:
+    action_jobs: list[dict[str, Any]] = []
+    for action in request.actions:
+        if action.project_id != request.project_id:
+            raise HTTPException(status_code=400, detail="Action project does not match the plan project")
+        if request.action_scope != action.access_scope:
+            raise HTTPException(status_code=400, detail="Action scope does not match the plan scope")
+        try:
+            action_jobs.append(execution.create_action(**_action_values(action)))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not steps and not action_jobs:
         raise HTTPException(status_code=400, detail="No runnable steps in the plan")
 
     chat_id = request.chat_id
@@ -393,15 +716,27 @@ def execute_plan(request: ExecutePlanRequest) -> StreamingResponse:
 
     def generate() -> Any:
         yield sse({"type": "chat", "chat_id": chat_id})
+        for action in action_jobs:
+            yield sse({"type": "action_planned", "action_id": action["id"], "action": action})
+            if action["status"] == "awaiting_approval":
+                yield sse({"type": "approval_required", "action_id": action["id"], "action": action})
+            else:
+                yield sse({"type": "action_queued", "action_id": action["id"], "action": action})
 
         if not config.get_azure_config().configured:
             reply = "Azure OpenAI is not configured yet. Open Settings to run plans."
             yield sse({"type": "delta", "text": reply})
             chats.add_message(chat_id, "assistant", reply, {"mode": "agent"})
+            _refresh_chat_memory(chat_id)
             yield sse({"type": "final", "mode": "agent", "reply": reply, "chat_id": chat_id})
             return
 
-        history = chats.get_history(chat_id)
+        history = chat_memory.get_model_context(
+            chat_id, project_id=request.project_id
+        )
+        diagnostic_context = chat_actions.action_diagnostic_context(chat_id)
+        if diagnostic_context:
+            history.insert(0, {"role": "system", "content": diagnostic_context})
         final: dict[str, Any] = {}
         try:
             for event in orchestrator.execute_plan_stream(
@@ -434,6 +769,7 @@ def execute_plan(request: ExecutePlanRequest) -> StreamingResponse:
                 "charts": final.get("charts", []),
             },
         )
+        _refresh_chat_memory(chat_id)
         final["chat_id"] = chat_id
         yield sse({"type": "final", **final})
 
@@ -456,19 +792,52 @@ def chat(request: ChatRequest) -> dict[str, Any]:
     else:
         chats.add_message(chat_id, "user", request.message)
 
+    if request.mode == "agent":
+        try:
+            special_action = chat_actions.handle_turn(
+                chat_id, request.project_id, request.message, request.action_scope, request.access_level
+            )
+        except ValueError as exc:
+            special_action = {"reply": f"I could not prepare that Azure action: {exc}", "action": None}
+        if special_action is not None:
+            reply = str(special_action.get("reply", ""))
+            action = special_action.get("action")
+            meta = {"mode": "agent"}
+            if action:
+                meta.update({"action_id": action["id"], "action_status": action.get("status")})
+            if special_action.get("pending_resource_group_name"):
+                meta["pending_resource_group_name"] = special_action["pending_resource_group_name"]
+            if special_action.get("pending_action_spec"):
+                meta["pending_action_spec"] = special_action["pending_action_spec"]
+            chats.add_message(chat_id, "assistant", reply, meta)
+            _refresh_chat_memory(chat_id)
+            result = {"mode": "agent", "reply": reply, "chat_id": chat_id}
+            if special_action.get("required_action_scope"):
+                result["required_action_scope"] = special_action["required_action_scope"]
+            if action:
+                result.update({"action_id": action["id"], "action": action})
+            return result
+
     if not config.get_azure_config().configured:
         reply = (
             "Azure OpenAI is not configured yet. Open Settings and add your "
             "Azure OpenAI endpoint and key. Chats, skills and wiki work offline "
-            "so you can still preview the suite."
+            "so you can still preview the suite.\n\n"
+            + chat_actions.provider_status_text(request.project_id, request.action_scope)
         )
         turn = orchestrator.ChatTurn(mode=request.mode, reply=reply)
         chats.add_message(chat_id, "assistant", reply, {"mode": request.mode})
+        _refresh_chat_memory(chat_id)
         result = turn.to_dict()
         result["chat_id"] = chat_id
         return result
 
-    history = chats.get_history(chat_id)
+    history = chat_memory.get_model_context(
+        chat_id, request.message, project_id=request.project_id
+    )
+    diagnostic_context = chat_actions.action_diagnostic_context(chat_id, request.message)
+    if diagnostic_context:
+        history.insert(0, {"role": "system", "content": diagnostic_context})
     try:
         turn = orchestrator.run_chat(
             history,
@@ -487,6 +856,7 @@ def chat(request: ChatRequest) -> dict[str, Any]:
         turn.reply,
         {"mode": turn.mode, "skills_used": turn.skills_used, "charts": turn.charts},
     )
+    _refresh_chat_memory(chat_id)
     result = turn.to_dict()
     result["chat_id"] = chat_id
     return result
@@ -536,17 +906,31 @@ def intelligence_catalog() -> dict[str, Any]:
 
 
 @app.get("/api/dashboard/summary")
-def dashboard_summary(project_id: str = DEFAULT_PROJECT_ID) -> dict[str, Any]:
+def dashboard_summary(
+    project_id: str = DEFAULT_PROJECT_ID,
+    time_range: str = "all",
+    module: Optional[str] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+) -> dict[str, Any]:
     """Aggregate counts for the dashboard tiles."""
     _require_project(project_id)
-    return intel.dashboard_summary(project_id)
+    return intel.dashboard_summary(
+        project_id,
+        time_range=time_range,
+        module=module,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
 
 @app.get("/api/workflows")
-def list_workflows(project_id: str = DEFAULT_PROJECT_ID) -> list[dict[str, Any]]:
+def list_workflows(
+    project_id: str = DEFAULT_PROJECT_ID, module: Optional[str] = None
+) -> list[dict[str, Any]]:
     """List the workflows configured for a project."""
     _require_project(project_id)
-    return intel.list_workflows(project_id)
+    return intel.list_workflows(project_id, module=module)
 
 
 @app.post("/api/workflows")
@@ -610,10 +994,24 @@ def run_workflow_now(workflow_id: str) -> dict[str, Any]:
 
 
 @app.get("/api/runs")
-def list_runs(project_id: str = DEFAULT_PROJECT_ID, limit: int = 30) -> list[dict[str, Any]]:
+def list_runs(
+    project_id: str = DEFAULT_PROJECT_ID,
+    limit: int = 30,
+    time_range: str = "all",
+    module: Optional[str] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+) -> list[dict[str, Any]]:
     """List recent workflow runs for a project."""
     _require_project(project_id)
-    return intel.list_runs(project_id, limit=limit)
+    return intel.list_runs(
+        project_id,
+        limit=limit,
+        module=module,
+        time_range=time_range,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
 
 @app.get("/api/runs/{run_id}")
@@ -633,6 +1031,9 @@ def list_findings(
     module: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = 100,
+    time_range: str = "all",
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
 ) -> list[dict[str, Any]]:
     """List findings for a project, optionally filtered."""
     _require_project(project_id)
@@ -643,6 +1044,9 @@ def list_findings(
         module=module,
         status=status,
         limit=limit,
+        time_range=time_range,
+        start_date=start_date,
+        end_date=end_date,
     )
 
 
@@ -662,11 +1066,25 @@ class ApprovalDecisionRequest(BaseModel):
 
 @app.get("/api/approvals")
 def list_approvals(
-    project_id: str = DEFAULT_PROJECT_ID, status: str = "pending", limit: int = 100
+    project_id: str = DEFAULT_PROJECT_ID,
+    status: str = "pending",
+    limit: int = 100,
+    time_range: str = "all",
+    module: Optional[str] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
 ) -> list[dict[str, Any]]:
     """List gated findings awaiting a decision (default: pending), with lineage."""
     _require_project(project_id)
-    return intel.list_approvals(project_id, status=status, limit=limit)
+    return intel.list_approvals(
+        project_id,
+        status=status,
+        limit=limit,
+        module=module,
+        time_range=time_range,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
 
 @app.post("/api/approvals/{approval_id}/decide")

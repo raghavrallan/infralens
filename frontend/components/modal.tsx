@@ -13,7 +13,16 @@ export function Modal({ title, eyebrow, description, children, onClose, wide = f
   useEffect(() => {
     const handler = (event: KeyboardEvent) => event.key === "Escape" && onClose();
     document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
+    const previousOverflow = document.body.style.overflow;
+    const previousPaddingRight = document.body.style.paddingRight;
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+    document.body.style.overflow = "hidden";
+    if (scrollbarWidth > 0) document.body.style.paddingRight = `${scrollbarWidth}px`;
+    return () => {
+      document.removeEventListener("keydown", handler);
+      document.body.style.overflow = previousOverflow;
+      document.body.style.paddingRight = previousPaddingRight;
+    };
   }, [onClose]);
   return (
     <div className="modal-overlay open" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>

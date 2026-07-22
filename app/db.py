@@ -17,6 +17,7 @@ DEFAULT_DATABASE_URL = (
 )
 
 DEFAULT_PROJECT_ID = "default"
+DEFAULT_PROJECT_CONFIG_KEY = "default_project_id"
 
 
 def get_database_url() -> str:
@@ -111,6 +112,25 @@ class Message(Base):
     content: Mapped[str] = mapped_column(String, default="")
     meta: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class ChatMemory(Base):
+    """Compact, project-scoped memory used for same-chat follow-ups."""
+
+    __tablename__ = "chat_memories"
+
+    chat_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(String(36), index=True)
+    summary: Mapped[str] = mapped_column(String, default="")
+    facts: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    references: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    unresolved: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    source_message_count: Mapped[int] = mapped_column(default=0)
+    version: Mapped[int] = mapped_column(default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
 
 
 class Workflow(Base):
@@ -212,6 +232,56 @@ class EngineeringMemory(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class ExecutionJob(Base):
+    """A provider CLI operation tracked independently from chat output."""
+
+    __tablename__ = "execution_jobs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(String(36), index=True)
+    provider: Mapped[str] = mapped_column(String(16), index=True)
+    operation: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    target: Mapped[str] = mapped_column(String(400), default="")
+    access_scope: Mapped[str] = mapped_column(String(16), default="read_only")
+    status: Mapped[str] = mapped_column(String(32), index=True, default="planned")
+    requested_by: Mapped[str] = mapped_column(String(120), default="user")
+    command_preview: Mapped[str] = mapped_column(String, default="")
+    operation_hash: Mapped[str] = mapped_column(String(64), default="")
+    result: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    error: Mapped[str] = mapped_column(String, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    queued_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ExecutionEvent(Base):
+    """Append-only lifecycle event or redacted CLI output for an action."""
+
+    __tablename__ = "execution_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    action_id: Mapped[str] = mapped_column(String(36), index=True)
+    event_type: Mapped[str] = mapped_column(String(32), index=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class ExecutionApproval(Base):
+    """Approval bound to the exact structured operation hash."""
+
+    __tablename__ = "execution_approvals"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    action_id: Mapped[str] = mapped_column(String(36), index=True)
+    decision: Mapped[str] = mapped_column(String(16), default="pending")
+    approver: Mapped[str] = mapped_column(String(120), default="")
+    approved_operation_hash: Mapped[str] = mapped_column(String(64), default="")
+    confirmation_count: Mapped[int] = mapped_column(default=0)
+    decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 def _pk_columns(conn: Any, table: str) -> list[str]:
     rows = conn.execute(
         text(
@@ -231,15 +301,47 @@ def _migrate() -> None:
     tables = set(inspector.get_table_names())
 
     with engine.begin() as conn:
-        # Ensure a default project exists to hold pre-existing data.
-        conn.execute(
-            text(
-                "INSERT INTO projects (id, name, repos, created_at, updated_at) "
-                "VALUES (:id, :name, '[]'::jsonb, now(), now()) "
-                "ON CONFLICT (id) DO NOTHING"
-            ),
-            {"id": DEFAULT_PROJECT_ID, "name": "Default project"},
-        )
+        if "projects" in tables:
+            project_columns = {c["name"] for c in inspector.get_columns("projects")}
+            # Older deployments may have created this table under a different
+            # database role. Do not ALTER it during API startup. The existing
+            # app_config table is writable by the application role and stores
+            # the selected default without requiring table ownership.
+            default_id = None
+            if "is_default" in project_columns:
+                default_id = conn.execute(
+                    text(
+                        "SELECT id FROM projects WHERE is_default = TRUE "
+                        "ORDER BY created_at ASC, id ASC LIMIT 1"
+                    )
+                ).scalar()
+            if default_id is None:
+                default_id = conn.execute(
+                    text(
+                        "SELECT id FROM projects ORDER BY "
+                        "CASE WHEN id = :default_id THEN 0 ELSE 1 END, "
+                        "created_at ASC, id ASC LIMIT 1"
+                    ),
+                    {"default_id": DEFAULT_PROJECT_ID},
+                ).scalar()
+            if default_id is None:
+                conn.execute(
+                    text(
+                        "INSERT INTO projects (id, name, repos, created_at, updated_at) "
+                        "VALUES (:id, :name, '[]'::jsonb, now(), now()) "
+                        "ON CONFLICT (id) DO NOTHING"
+                    ),
+                    {"id": DEFAULT_PROJECT_ID, "name": "Default project"},
+                )
+                default_id = DEFAULT_PROJECT_ID
+
+            conn.execute(
+                text(
+                    "INSERT INTO app_config (key, value) VALUES (:key, :value) "
+                    "ON CONFLICT (key) DO NOTHING"
+                ),
+                {"key": DEFAULT_PROJECT_CONFIG_KEY, "value": default_id},
+            )
 
         if "connections" in tables:
             cols = {c["name"] for c in inspector.get_columns("connections")}
@@ -274,6 +376,16 @@ def _migrate() -> None:
                 text("UPDATE chats SET project_id = :pid WHERE project_id IS NULL"),
                 {"pid": DEFAULT_PROJECT_ID},
             )
+
+        if "execution_approvals" in tables:
+            approval_columns = {c["name"] for c in inspector.get_columns("execution_approvals")}
+            if "confirmation_count" not in approval_columns:
+                conn.execute(
+                    text(
+                        "ALTER TABLE execution_approvals "
+                        "ADD COLUMN confirmation_count INTEGER NOT NULL DEFAULT 0"
+                    )
+                )
 
 
 def init_db() -> None:

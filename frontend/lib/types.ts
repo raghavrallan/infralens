@@ -1,6 +1,6 @@
 export type JsonObject = Record<string, unknown>;
 
-export type Project = { id: string; name: string };
+export type Project = { id: string; name: string; is_default?: boolean };
 
 export type Skill = {
   name: string;
@@ -40,7 +40,7 @@ export type ChatDetail = ChatSummary & { messages: ChatMessage[] };
 
 export type Catalog = {
   skills: Skill[];
-  modules: { key: string; label: string; description?: string }[];
+  modules: { key: string; label: string; description?: string; skills?: string[] }[];
 };
 
 export type Finding = {
@@ -96,6 +96,8 @@ export type Run = {
 export type ConnectionStatus = {
   provider: string;
   connected: boolean;
+  actions_available?: boolean;
+  action_scope?: "read_only" | "write";
   method?: string;
   identity?: string;
   hint?: string;
@@ -111,4 +113,34 @@ export type StreamEvent = JsonObject & {
   mode?: string;
   plan?: { skill: string; objective: string }[];
   charts?: MetricChart[];
+  action_id?: string;
+  action?: Action;
+  required_action_scope?: "read_only" | "write";
+};
+
+export type Action = {
+  id: string;
+  project_id?: string;
+  provider: "azure" | "aws" | "github";
+  target?: string;
+  access_scope?: "read_only" | "write";
+  access_level?: "ask_approval" | "auto_approve" | "full_access";
+  status: string;
+  command_preview?: string;
+  operation_hash?: string;
+  expected_result?: string;
+  risk?: string;
+  rollback?: string;
+  error?: string;
+  approval?: {
+    decision?: string;
+    confirmation_count?: number;
+  } | null;
+};
+
+export type ActionEvent = {
+  id: string;
+  type: string;
+  payload: JsonObject;
+  created_at?: string;
 };

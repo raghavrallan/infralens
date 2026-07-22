@@ -19,6 +19,7 @@ from app.skills.cost_analyzer import skill as cost_analyzer
 from app.skills.drift_auditor import skill as drift_auditor
 from app.skills.iac_reviewer import skill as iac_reviewer
 from app.skills.incident_analyzer import skill as incident_analyzer
+from app.skills.infrastructure_architect import skill as infrastructure_architect
 from app.skills.log_analyzer import skill as log_analyzer
 from app.skills.metrics_analyzer import skill as metrics_analyzer
 from app.skills.pipeline_auditor import skill as pipeline_auditor
@@ -41,6 +42,7 @@ for _skill in (
     vuln_triage,
     compliance_mapper,
     incident_analyzer,
+    infrastructure_architect,
     report_writer,
 ):
     registry.register(_skill)

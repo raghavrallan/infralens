@@ -6,7 +6,7 @@ finding it produces carries the Risk Engine gate decided at write time. Findings
 are grouped under the six agent modules from the design.
 """
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Optional
 
 from sqlalchemy import delete, func, select
@@ -26,6 +26,12 @@ from app.skills import is_workflow_safe
 # Change-producing findings wait this long for a decision; nothing auto-executes.
 _APPROVAL_TTL_HOURS = 72
 _APPROVAL_GATES = ("human_approval", "two_person")
+TIME_RANGE_DURATIONS = {
+    "24h": timedelta(hours=24),
+    "7d": timedelta(days=7),
+    "30d": timedelta(days=30),
+    "90d": timedelta(days=90),
+}
 
 # The six agent modules from the design, each backed by diagnose skills.
 MODULES: dict[str, dict[str, Any]] = {
@@ -107,6 +113,28 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def time_range_bounds(
+    time_range: str = "all",
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+) -> tuple[Optional[datetime], Optional[datetime]]:
+    """Return inclusive UTC date bounds for a preset or custom range."""
+    if start_date is not None or end_date is not None or time_range == "custom":
+        since = (
+            datetime.combine(start_date, time.min, tzinfo=timezone.utc)
+            if start_date is not None
+            else None
+        )
+        until = (
+            datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=timezone.utc)
+            if end_date is not None
+            else None
+        )
+        return since, until
+    duration = TIME_RANGE_DURATIONS.get((time_range or "all").lower())
+    return (_now() - duration if duration else None), None
+
+
 def _safe_skills(skills: list[str]) -> list[str]:
     """Keep only registered, workflow-safe (read-only) skills."""
     seen: list[str] = []
@@ -183,12 +211,15 @@ def _finding_dict(row: Finding) -> dict[str, Any]:
 
 # ---------- Workflows ----------
 
-def list_workflows(project_id: str) -> list[dict[str, Any]]:
+def list_workflows(project_id: str, module: Optional[str] = None) -> list[dict[str, Any]]:
     with SessionLocal() as session:
+        filters = [Workflow.project_id == project_id]
+        if module:
+            filters.append(Workflow.module == module)
         rows = list(
             session.execute(
                 select(Workflow)
-                .where(Workflow.project_id == project_id)
+                .where(*filters)
                 .order_by(Workflow.created_at.asc())
             ).scalars()
         )
@@ -384,12 +415,27 @@ def get_run(run_id: str) -> Optional[dict[str, Any]]:
         return payload
 
 
-def list_runs(project_id: str, limit: int = 30) -> list[dict[str, Any]]:
+def list_runs(
+    project_id: str,
+    limit: int = 30,
+    time_range: str = "all",
+    module: Optional[str] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+) -> list[dict[str, Any]]:
+    since, until = time_range_bounds(time_range, start_date, end_date)
     with SessionLocal() as session:
+        filters = [WorkflowRun.project_id == project_id]
+        if since is not None:
+            filters.append(WorkflowRun.created_at >= since)
+        if until is not None:
+            filters.append(WorkflowRun.created_at < until)
+        if module:
+            filters.append(Workflow.module == module)
         rows = session.execute(
             select(WorkflowRun, Workflow.name)
             .join(Workflow, Workflow.id == WorkflowRun.workflow_id, isouter=True)
-            .where(WorkflowRun.project_id == project_id)
+            .where(*filters)
             .order_by(WorkflowRun.created_at.desc())
             .limit(limit)
         ).all()
@@ -451,9 +497,17 @@ def list_findings(
     module: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = 100,
+    time_range: str = "all",
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
 ) -> list[dict[str, Any]]:
+    since, until = time_range_bounds(time_range, start_date, end_date)
     with SessionLocal() as session:
         query = select(Finding).where(Finding.project_id == project_id)
+        if since is not None:
+            query = query.where(Finding.created_at >= since)
+        if until is not None:
+            query = query.where(Finding.created_at < until)
         if severity:
             query = query.where(Finding.severity == severity)
         if skill:
@@ -503,15 +557,28 @@ def _approval_dict(approval: Approval, finding: Optional[Finding]) -> dict[str, 
 
 
 def list_approvals(
-    project_id: str, status: str = "pending", limit: int = 100
+    project_id: str,
+    status: str = "pending",
+    limit: int = 100,
+    module: Optional[str] = None,
+    time_range: str = "all",
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
 ) -> list[dict[str, Any]]:
     """Approvals for a project, joined to their finding. Default: pending only."""
+    since, until = time_range_bounds(time_range, start_date, end_date)
     with SessionLocal() as session:
         query = (
             select(Approval, Finding)
             .join(Finding, Finding.id == Approval.finding_id, isouter=True)
             .where(Approval.project_id == project_id)
         )
+        if since is not None:
+            query = query.where(Approval.created_at >= since)
+        if until is not None:
+            query = query.where(Approval.created_at < until)
+        if module:
+            query = query.where(Finding.module == module)
         if status and status != "all":
             query = query.where(Approval.decision == status)
         query = query.order_by(Approval.created_at.desc()).limit(limit)
@@ -573,7 +640,36 @@ def _pending_approvals(session: Any, project_id: str) -> int:
 
 # ---------- Dashboard ----------
 
-def dashboard_summary(project_id: str) -> dict[str, Any]:
+def dashboard_summary(
+    project_id: str,
+    time_range: str = "all",
+    module: Optional[str] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+) -> dict[str, Any]:
+    since, until = time_range_bounds(time_range, start_date, end_date)
+    date_filter = []
+    if module:
+        date_filter.append(Finding.module == module)
+    if since is not None:
+        date_filter.append(Finding.created_at >= since)
+    if until is not None:
+        date_filter.append(Finding.created_at < until)
+    approval_date_filter = []
+    if since is not None:
+        approval_date_filter.append(Approval.created_at >= since)
+    if until is not None:
+        approval_date_filter.append(Approval.created_at < until)
+    workflow_date_filter = []
+    if since is not None:
+        workflow_date_filter.append(Workflow.created_at >= since)
+    if until is not None:
+        workflow_date_filter.append(Workflow.created_at < until)
+    run_date_filter = []
+    if since is not None:
+        run_date_filter.append(WorkflowRun.created_at >= since)
+    if until is not None:
+        run_date_filter.append(WorkflowRun.created_at < until)
     with SessionLocal() as session:
         # Conditional aggregates keep the dashboard count payload to one DB
         # round-trip instead of one query per tile/filter group.
@@ -600,22 +696,40 @@ def dashboard_summary(project_id: str) -> dict[str, Any]:
             .label("two_person"),
         )
 
+        approval_filter = [
+            Approval.project_id == project_id,
+            Approval.decision == "pending",
+            *approval_date_filter,
+        ]
+        if module:
+            approval_filter.append(
+                Approval.finding_id.in_(
+                    select(Finding.id).where(
+                        Finding.project_id == project_id, Finding.module == module
+                    )
+                )
+            )
         pending_approvals = (
             select(func.count())
             .select_from(Approval)
-            .where(Approval.project_id == project_id, Approval.decision == "pending")
+            .where(*approval_filter)
             .scalar_subquery()
         )
+        workflow_filter = [Workflow.project_id == project_id]
+        if module:
+            workflow_filter.append(Workflow.module == module)
         workflow_total = (
             select(func.count())
             .select_from(Workflow)
-            .where(Workflow.project_id == project_id)
+            .where(*workflow_filter)
+            .where(*workflow_date_filter)
             .scalar_subquery()
         )
         workflow_enabled = (
             select(func.count())
             .select_from(Workflow)
-            .where(Workflow.project_id == project_id, Workflow.enabled.is_(True))
+            .where(*workflow_filter, Workflow.enabled.is_(True))
+            .where(*workflow_date_filter)
             .scalar_subquery()
         )
         run_counts = {
@@ -625,7 +739,17 @@ def dashboard_summary(project_id: str) -> dict[str, Any]:
                 .where(
                     WorkflowRun.project_id == project_id,
                     WorkflowRun.status == status,
+                    *(
+                        [
+                            WorkflowRun.workflow_id.in_(
+                                select(Workflow.id).where(*workflow_filter)
+                            )
+                        ]
+                        if module
+                        else []
+                    ),
                 )
+                .where(*run_date_filter)
                 .scalar_subquery()
             )
             for status in ("queued", "running", "succeeded", "failed")
@@ -637,7 +761,10 @@ def dashboard_summary(project_id: str) -> dict[str, Any]:
                 workflow_enabled.label("workflow_enabled"),
                 pending_approvals.label("pending_approvals"),
                 *(value.label(f"runs_{status}") for status, value in run_counts.items()),
-            ).select_from(Finding).where(Finding.project_id == project_id)
+        ).select_from(Finding).where(
+            Finding.project_id == project_id,
+            *date_filter,
+        )
         ).one()._mapping
         by_severity = {
             severity: int(dashboard_counts[severity])

@@ -512,15 +512,25 @@ def parse_metrics_window(text: str, now: Optional[datetime] = None):
     """
     now = now or datetime.now(timezone.utc)
     lowered = (text or "").lower()
-    match = re.search(
-        r"(\d+)\s*(minutes?|mins?|hours?|hrs?|days?|weeks?|months?)", lowered
-    )
-    if match:
-        base = match.group(2).rstrip("s")
-        return _window_from(int(match.group(1)), base, now)
-    for base in ("minute", "hour", "day", "week", "month"):
-        if base in lowered:
-            return _window_from(1, base, now)
+    # Contextual follow-ups place the current request before this marker. Try
+    # that segment first so an older "last 24 hours" does not override a new
+    # request such as "this particular hour".
+    candidates = [lowered]
+    current_marker = "current user request:"
+    context_marker = "conversation context:"
+    if current_marker in lowered and context_marker in lowered:
+        current = lowered.split(current_marker, 1)[1].split(context_marker, 1)[0]
+        candidates.insert(0, current)
+    for candidate in candidates:
+        match = re.search(
+            r"(\d+)\s*(minutes?|mins?|hours?|hrs?|days?|weeks?|months?)", candidate
+        )
+        if match:
+            base = match.group(2).rstrip("s")
+            return _window_from(int(match.group(1)), base, now)
+        for base in ("minute", "hour", "day", "week", "month"):
+            if base in candidate:
+                return _window_from(1, base, now)
     return now - timedelta(hours=24), now, "PT15M", "last 24 hours"
 
 

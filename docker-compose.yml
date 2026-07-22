@@ -33,7 +33,12 @@ services:
 
   api:
     profiles: ["container-app"]
-    build: .
+    # Set PIP_TRUSTED_HOSTS only for a workstation whose Docker proxy CA is
+    # not installed. Production builds use normal certificate validation.
+    build:
+      context: .
+      args:
+        PIP_TRUSTED_HOSTS: ${PIP_TRUSTED_HOSTS:-}
     container_name: devsecops-api
     restart: unless-stopped
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
@@ -42,6 +47,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg2://devsecops:devsecops@postgres:5432/devsecops
       REDIS_URL: redis://redis:6379/0
+      EXECUTOR_SERVICE_KEY: dev-executor-key
     depends_on:
       postgres:
         condition: service_healthy
@@ -50,7 +56,10 @@ services:
 
   worker:
     profiles: ["container-app"]
-    build: .
+    build:
+      context: .
+      args:
+        PIP_TRUSTED_HOSTS: ${PIP_TRUSTED_HOSTS:-}
     container_name: devsecops-worker
     restart: unless-stopped
     command: rq worker intelligence --worker-class app.intelligence.worker.Worker --url redis://redis:6379/0
@@ -60,6 +69,63 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  azure-executor:
+    profiles: ["container-app"]
+    build:
+      context: .
+      dockerfile: executors/azure/Dockerfile
+      args:
+        PIP_TRUSTED_HOSTS: ${PIP_TRUSTED_HOSTS:-}
+    container_name: devsecops-azure-executor
+    restart: unless-stopped
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      CONTROL_PLANE_URL: http://api:8000
+      EXECUTOR_SERVICE_KEY: dev-executor-key
+    depends_on:
+      api:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
+  aws-executor:
+    profiles: ["container-app"]
+    build:
+      context: .
+      dockerfile: executors/aws/Dockerfile
+      args:
+        PIP_TRUSTED_HOSTS: ${PIP_TRUSTED_HOSTS:-}
+    container_name: devsecops-aws-executor
+    restart: unless-stopped
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      CONTROL_PLANE_URL: http://api:8000
+      EXECUTOR_SERVICE_KEY: dev-executor-key
+    depends_on:
+      api:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
+  github-executor:
+    profiles: ["container-app"]
+    build:
+      context: .
+      dockerfile: executors/github/Dockerfile
+      args:
+        PIP_TRUSTED_HOSTS: ${PIP_TRUSTED_HOSTS:-}
+    container_name: devsecops-github-executor
+    restart: unless-stopped
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      CONTROL_PLANE_URL: http://api:8000
+      EXECUTOR_SERVICE_KEY: dev-executor-key
+    depends_on:
+      api:
+        condition: service_started
       redis:
         condition: service_healthy
 

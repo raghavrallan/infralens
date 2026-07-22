@@ -127,6 +127,11 @@ def replace_user_message(chat_id: str, message_id: str, content: str) -> bool:
             session.delete(stale)
         target.content = content
         session.commit()
+        # Rebuild immediately so the edited turn cannot leave stale facts in
+        # the compact context used by the next request.
+        from app import chat_memory
+
+        chat_memory.rebuild_memory(chat_id)
         return True
 
 
@@ -148,4 +153,7 @@ def delete_chat(chat_id: str) -> bool:
         session.execute(delete(Message).where(Message.chat_id == chat_id))
         session.delete(chat)
         session.commit()
+        from app import chat_memory
+
+        chat_memory.delete_memory(chat_id)
         return True

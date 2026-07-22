@@ -175,9 +175,40 @@ endpoint, key and deployment — these are saved to Postgres. The wiki and
 Settings pages work before Azure is configured.
 
 The default Compose startup intentionally runs only Postgres and Redis. The API,
-frontend export, and worker run locally using the commands above. The optional
-containerized app stack is available with `docker compose --profile container-app
-up --build`.
+frontend export, and intelligence worker run locally using the commands above.
+Provider write/read actions require an RQ provider executor; they are not
+consumed by the intelligence worker. To start the complete containerized stack
+with the API, intelligence worker, and all provider executors together, use:
+
+```powershell
+docker compose --profile container-app up --build
+```
+
+The provider executor containers start their `az`, `aws`, or `gh` CLI check and
+RQ worker automatically. No manual provider worker command is needed when the
+containerized stack is running.
+
+When Uvicorn is running on the host and only Postgres/Redis are containerized,
+start the isolated provider executors with one command:
+
+```powershell
+docker compose -f docker-compose.local-executors.yml up --build
+```
+
+Those workers connect to the host API at `127.0.0.1:8000` through Docker
+Desktop's `host.docker.internal` address and consume approved actions from the
+same Redis instance.
+
+If Docker Desktop's corporate proxy certificate is not trusted inside Linux
+build containers, use this workstation-only build setting:
+
+```powershell
+$env:PIP_TRUSTED_HOSTS = "pypi.org files.pythonhosted.org"
+docker compose -f docker-compose.local-executors.yml up --build -d
+```
+
+Leave `PIP_TRUSTED_HOSTS` unset in production; normal certificate validation
+is the default.
 
 ## Adding a new skill
 

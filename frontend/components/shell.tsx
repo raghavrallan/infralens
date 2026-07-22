@@ -18,8 +18,8 @@ export function Shell({ children, subtitle = "Skills Suite", scroll = false }: {
           <div><h1>DevSecOps</h1><p>{subtitle}</p></div>
         </div>
         <nav className="nav">
-          <a href="/" className={`nav-item${pathname === "/" ? " active" : ""}`}>Chat</a>
           <a href="/dashboard" className={`nav-item${pathname.startsWith("/dashboard") ? " active" : ""}`}>Dashboard</a>
+          <a href="/" className={`nav-item${pathname === "/" ? " active" : ""}`}>Chat</a>
           <a href="/wiki" className={`nav-item${pathname.startsWith("/wiki") ? " active" : ""}`}>Wiki</a>
           <a href="/settings" className={`nav-item${pathname.startsWith("/settings") ? " active" : ""}`}>Settings</a>
         </nav>
