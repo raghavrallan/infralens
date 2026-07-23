@@ -1,7 +1,9 @@
 # DevSecOps Skills Suite - local run helper (Windows PowerShell)
 #
+# Requires Python 3.12 (preferred). Falls back to 3.11. Never uses 3.14.
+#
 # Usage:
-#   .\start-local.ps1 setup     # one-time: venv, pip, frontend build
+#   .\start-local.ps1 setup     # one-time: Python 3.12 venv, pip, frontend build
 #   .\start-local.ps1 start     # Postgres+Redis (Docker) + API + worker
 #   .\start-local.ps1 stop      # stop API/worker windows + Docker infra
 #   .\start-local.ps1 status    # show what is running
@@ -11,6 +13,7 @@
 #   .\start-local.ps1 start -SkipDocker
 #   .\start-local.ps1 start -WithExecutors
 #   .\start-local.ps1 setup -SkipFrontendBuild
+#   .\start-local.ps1 start -ResetWinNat
 
 param(
     [Parameter(Position = 0)]
@@ -85,25 +88,40 @@ function Assert-Venv {
     }
 }
 
-function Get-PreferredPython {
+function Get-SupportedPython {
+    # Prefer 3.12 (required on machines that also have 3.14).
+    # Allow 3.11 as fallback. Never use 3.13/3.14 (missing/broken wheels).
     $candidates = @(
-        "py -3.12",
-        "py -3.11",
-        "py -3.13",
-        "python",
-        "py"
+        @{ Exe = "py"; Args = @("-3.12"); Minor = 12 },
+        @{ Exe = "python3.12"; Args = @(); Minor = 12 },
+        @{ Exe = "$env:LocalAppData\Programs\Python\Python312\python.exe"; Args = @(); Minor = 12 },
+        @{ Exe = "C:\Python312\python.exe"; Args = @(); Minor = 12 },
+        @{ Exe = "py"; Args = @("-3.11"); Minor = 11 },
+        @{ Exe = "python3.11"; Args = @(); Minor = 11 },
+        @{ Exe = "$env:LocalAppData\Programs\Python\Python311\python.exe"; Args = @(); Minor = 11 }
     )
-    foreach ($cmd in $candidates) {
+
+    foreach ($c in $candidates) {
         try {
-            $parts = $cmd -split " "
-            $exe = $parts[0]
-            $args = @($parts | Select-Object -Skip 1) + @("-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-            $ver = & $exe @args 2>$null
+            if ($c.Exe -notmatch '[\\/]' -and -not (Get-Command $c.Exe -ErrorAction SilentlyContinue)) {
+                continue
+            }
+            if ($c.Exe -match '[\\/]' -and -not (Test-Path $c.Exe)) {
+                continue
+            }
+
+            $checkArgs = $c.Args + @(
+                "-c",
+                ("import sys; assert sys.version_info[:2] == (3, {0}); print(f'{{sys.version_info.major}}.{{sys.version_info.minor}}.{{sys.version_info.micro}}')" -f $c.Minor)
+            )
+            $ver = & $c.Exe @checkArgs 2>$null
             if ($LASTEXITCODE -ne 0 -or -not $ver) { continue }
-            $ver = $ver.Trim()
-            $major, $minor = $ver.Split(".") | ForEach-Object { [int]$_ }
-            if ($major -eq 3 -and $minor -ge 10 -and $minor -le 14) {
-                return @{ Command = $cmd; Version = $ver }
+            return @{
+                Exe = $c.Exe
+                Args = $c.Args
+                Minor = $c.Minor
+                Version = $ver.Trim()
+                Display = (($c.Exe + " " + ($c.Args -join " ")).Trim())
             }
         }
         catch { }
@@ -111,28 +129,61 @@ function Get-PreferredPython {
     return $null
 }
 
+function Get-VenvPythonMinor {
+    if (-not (Test-Path $VenvPython)) { return $null }
+    try {
+        $ver = & $VenvPython -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $ver) { return $null }
+        return $ver.Trim()
+    }
+    catch {
+        return $null
+    }
+}
+
 function Invoke-Setup {
-    Write-Host "==> Creating / updating virtualenv"
+    Write-Host "==> Ensuring Python 3.12 virtualenv (3.11 fallback; never 3.14)"
+    $py = Get-SupportedPython
+    if (-not $py) {
+        throw @"
+Python 3.12 is required (3.11 also accepted). Do not use Python 3.14.
+Install 3.12 from https://www.python.org/downloads/release/python-31210/
+Enable 'Add python.exe to PATH' and the py launcher, then re-run:
+  .\start-local.ps1 setup
+"@
+    }
+
+    if ($py.Minor -ne 12) {
+        Write-Host ("    Python 3.12 not found; using fallback Python " + $py.Version)
+        Write-Host "    Recommended: install Python 3.12 so setup matches other machines."
+    }
+
+    $existingMinor = Get-VenvPythonMinor
+    $allowed = @("3.11", "3.12")
+    if ($existingMinor -and ($allowed -notcontains $existingMinor)) {
+        Write-Host ("    Existing .venv is Python " + $existingMinor + " - recreating with " + $py.Version)
+        Remove-Item -Recurse -Force (Join-Path $Root ".venv")
+    }
+    elseif ($existingMinor -and $py.Minor -eq 12 -and $existingMinor -ne "3.12") {
+        Write-Host ("    Existing .venv is Python " + $existingMinor + " - upgrading to 3.12")
+        Remove-Item -Recurse -Force (Join-Path $Root ".venv")
+    }
+
     if (-not (Test-Path $VenvPython)) {
-        $py = Get-PreferredPython
-        if (-not $py) {
-            throw "Need Python 3.10-3.14 on PATH. Install from https://www.python.org/downloads/ (check 'Add to PATH')."
-        }
-        Write-Host ("    Using Python " + $py.Version + " (" + $py.Command + ")")
-        $parts = $py.Command -split " "
-        if ($parts.Count -eq 1) {
-            & $parts[0] -m venv .venv
-        }
-        else {
-            & $parts[0] @($parts | Select-Object -Skip 1) -m venv .venv
-        }
-        if (-not (Test-Path $VenvPython)) {
-            throw "Failed to create .venv"
+        Write-Host ("    Creating .venv with Python " + $py.Version + " (" + $py.Display + ")")
+        & $py.Exe @($py.Args + @("-m", "venv", ".venv"))
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $VenvPython)) {
+            throw ("Failed to create .venv with Python " + $py.Version)
         }
     }
     else {
         $ver = & $VenvPython -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')"
-        Write-Host ("    Existing venv Python " + $ver.Trim())
+        Write-Host ("    Using existing Python " + $ver.Trim() + " venv")
+    }
+
+    $confirm = Get-VenvPythonMinor
+    if ($allowed -notcontains $confirm) {
+        throw ("Expected .venv Python 3.11/3.12 but found " + $confirm + ". Delete .venv and re-run setup.")
     }
 
     Write-Host "==> Installing Python dependencies"
@@ -146,9 +197,7 @@ function Invoke-Setup {
     if ($LASTEXITCODE -ne 0) {
         throw @"
 Failed to install Python dependencies.
-Common cause: Python too new/old for pinned wheels (use 3.11 or 3.12), or offline/proxy blocking PyPI.
-If you see 'pg_config executable not found', pip tried to compile psycopg2 from source.
-Fix: upgrade pip, use Python 3.11/3.12, then re-run:
+If you see 'pg_config executable not found', delete .venv and use Python 3.12:
   Remove-Item -Recurse -Force .venv
   .\start-local.ps1 setup
 "@
@@ -176,7 +225,7 @@ Fix: upgrade pip, use Python 3.11/3.12, then re-run:
 
     Load-DotEnv
     Write-Host ""
-    Write-Host "Setup complete. Next: .\start-local.ps1 start"
+    Write-Host ("Setup complete (Python " + $confirm + "). Next: .\start-local.ps1 start")
 }
 
 function Start-Infra {
