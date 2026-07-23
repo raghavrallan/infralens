@@ -465,13 +465,15 @@ function Stop-PortProcessTree {
 }
 
 function Stop-MatchingAppProcesses {
+    # Only stop API/worker runtimes. Never match start-local.ps1 itself or the
+    # helper scripts, or we kill the current setup/start process mid-run.
     Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
         Where-Object {
             $_.CommandLine -and (
                 ($_.CommandLine -like "*uvicorn*app.main:app*") -or
                 ($_.CommandLine -like "*uvicorn.exe*app.main:app*") -or
-                ($_.CommandLine -like "*\start-local.ps1*") -or
-                ($_.CommandLine -like "*run-api.ps1*")
+                ($_.CommandLine -like "*rq.exe*worker*intelligence*") -or
+                ($_.CommandLine -like "*rq worker intelligence*")
             )
         } |
         ForEach-Object {
@@ -593,6 +595,15 @@ function Clear-ListenPort {
     return $false
 }
 
+function Write-Utf8NoBomFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string[]]$Lines
+    )
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllLines($Path, $Lines, $utf8NoBom)
+}
+
 function Write-ChildScripts {
     param(
         [string]$HostName,
@@ -605,6 +616,7 @@ function Write-ChildScripts {
 
     $apiLines = @(
         '$ErrorActionPreference = "Stop"'
+        ('Set-Content -Path "' + $ApiPidFile + '" -Value $PID')
         ('Set-Location "' + $Root + '"')
         ('$env:DATABASE_URL = "' + $DbUrl + '"')
         ('$env:REDIS_URL = "' + $RedisUrl + '"')
@@ -612,20 +624,50 @@ function Write-ChildScripts {
         ('$env:CONTROL_PLANE_URL = "' + $ControlPlane + '"')
         ('$env:APP_HOST = "' + $HostName + '"')
         ('$env:APP_PORT = "' + $Port + '"')
+        'Write-Host "DevSecOps API window - leave this open"'
         ('Write-Host "API listening on http://' + $HostName + ':' + $Port + '"')
         ('& "' + $UvicornExe + '" app.main:app --reload --host ' + $HostName + ' --port ' + $Port)
+        'Write-Host ""'
+        'Write-Host "API process exited. Window kept open for logs. Press Enter to close."'
+        'Read-Host'
     )
-    Set-Content -Path $ApiScriptFile -Value $apiLines -Encoding UTF8
+    Write-Utf8NoBomFile -Path $ApiScriptFile -Lines $apiLines
 
     $workerLines = @(
         '$ErrorActionPreference = "Stop"'
+        ('Set-Content -Path "' + $WorkerPidFile + '" -Value $PID')
         ('Set-Location "' + $Root + '"')
         ('$env:DATABASE_URL = "' + $DbUrl + '"')
         ('$env:REDIS_URL = "' + $RedisUrl + '"')
+        'Write-Host "DevSecOps worker window - leave this open"'
         'Write-Host "RQ worker listening on queue: intelligence"'
         ('& "' + $RqExe + '" worker intelligence --worker-class app.intelligence.worker.Worker --url ' + $RedisUrl)
+        'Write-Host ""'
+        'Write-Host "Worker process exited. Window kept open for logs. Press Enter to close."'
+        'Read-Host'
     )
-    Set-Content -Path $WorkerScriptFile -Value $workerLines -Encoding UTF8
+    Write-Utf8NoBomFile -Path $WorkerScriptFile -Lines $workerLines
+}
+
+function Start-DetachedScriptWindow {
+    param(
+        [Parameter(Mandatory = $true)][string]$Title,
+        [Parameter(Mandatory = $true)][string]$ScriptPath
+    )
+
+    # Launch through cmd's START so the new console is NOT attached to the
+    # current terminal job (Cursor/VS Code/Windows Terminal often kill child
+    # consoles when the parent script exits).
+    $psExe = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+    if (-not (Test-Path $psExe)) {
+        $psExe = (Get-Command powershell.exe -ErrorAction Stop).Source
+    }
+
+    $cmdline = 'start "' + $Title + '" "' + $psExe + '" -NoExit -ExecutionPolicy Bypass -File "' + $ScriptPath + '"'
+    $oldEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    & cmd.exe /c $cmdline
+    $ErrorActionPreference = $oldEap
 }
 
 function Start-AppProcesses {
@@ -661,21 +703,14 @@ function Start-AppProcesses {
 
     Write-ChildScripts -HostName $hostName -Port ([string]$port) -DbUrl $dbUrl -RedisUrl $redisUrl -ExecutorKey $executorKey -ControlPlane $controlPlane
 
-    Write-Host "==> Starting API window"
-    $apiProc = Start-Process powershell -PassThru -ArgumentList @(
-        "-NoExit",
-        "-ExecutionPolicy", "Bypass",
-        "-File", $ApiScriptFile
-    )
-    Set-Content -Path $ApiPidFile -Value $apiProc.Id
+    Write-Host "==> Starting detached API window"
+    Start-DetachedScriptWindow -Title "DevSecOps API" -ScriptPath $ApiScriptFile
 
-    Write-Host "==> Starting worker window"
-    $workerProc = Start-Process powershell -PassThru -ArgumentList @(
-        "-NoExit",
-        "-ExecutionPolicy", "Bypass",
-        "-File", $WorkerScriptFile
-    )
-    Set-Content -Path $WorkerPidFile -Value $workerProc.Id
+    Write-Host "==> Starting detached worker window"
+    Start-DetachedScriptWindow -Title "DevSecOps Worker" -ScriptPath $WorkerScriptFile
+
+    # Give child windows a moment to write pid files
+    Start-Sleep -Seconds 2
 
     if ($WithExecutors) {
         Write-Host "==> Starting provider executors (Docker)"
@@ -683,10 +718,12 @@ function Start-AppProcesses {
     }
 
     Write-Host ""
-    Write-Host "Local stack is up."
+    Write-Host "Local stack is up (API + worker run in separate windows)."
     Write-Host ("  Chat:      http://" + $hostName + ":" + $port)
     Write-Host ("  Dashboard: http://" + $hostName + ":" + $port + "/dashboard")
     Write-Host ("  Settings:  http://" + $hostName + ":" + $port + "/settings")
+    Write-Host ""
+    Write-Host "Keep those two windows open. Closing them stops the app."
     if ($port -ne $preferredPort) {
         Write-Host ""
         Write-Host ("Note: preferred port " + $preferredPort + " is a Windows/Docker ghost binding.")
@@ -709,9 +746,7 @@ function Stop-ProcessFromPidFile {
     if ($procId -and ($procId -as [int])) {
         $proc = Get-Process -Id ([int]$procId) -ErrorAction SilentlyContinue
         if ($proc) {
-            Get-CimInstance Win32_Process -Filter ("ParentProcessId = " + $procId) -ErrorAction SilentlyContinue |
-                ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-            Stop-Process -Id ([int]$procId) -Force -ErrorAction SilentlyContinue
+            Stop-PortProcessTree -ProcId ([int]$procId)
             if (-not $Quiet) { Write-Host ("Stopped " + $Label + " (pid " + $procId + ")") }
         }
         elseif (-not $Quiet) {
