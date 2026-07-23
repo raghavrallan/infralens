@@ -1,6 +1,7 @@
 # DevSecOps Skills Suite - local run helper (Windows PowerShell)
 #
-# Requires Python 3.12 (preferred). Falls back to 3.11. Never uses 3.14.
+# Setup always uses Python 3.12 for .venv. If the PC only has 3.13/3.14,
+# the script installs Python 3.12 automatically (winget, then official installer).
 #
 # Usage:
 #   .\start-local.ps1 setup     # one-time: Python 3.12 venv, pip, frontend build
@@ -88,17 +89,15 @@ function Assert-Venv {
     }
 }
 
-function Get-SupportedPython {
-    # Prefer 3.12 (required on machines that also have 3.14).
-    # Allow 3.11 as fallback. Never use 3.13/3.14 (missing/broken wheels).
+function Get-PythonByMinor {
+    param([Parameter(Mandatory = $true)][int]$Minor)
+
     $candidates = @(
-        @{ Exe = "py"; Args = @("-3.12"); Minor = 12 },
-        @{ Exe = "python3.12"; Args = @(); Minor = 12 },
-        @{ Exe = "$env:LocalAppData\Programs\Python\Python312\python.exe"; Args = @(); Minor = 12 },
-        @{ Exe = "C:\Python312\python.exe"; Args = @(); Minor = 12 },
-        @{ Exe = "py"; Args = @("-3.11"); Minor = 11 },
-        @{ Exe = "python3.11"; Args = @(); Minor = 11 },
-        @{ Exe = "$env:LocalAppData\Programs\Python\Python311\python.exe"; Args = @(); Minor = 11 }
+        @{ Exe = "py"; Args = @("-3.$Minor") },
+        @{ Exe = "python3.$Minor"; Args = @() },
+        @{ Exe = "$env:LocalAppData\Programs\Python\Python3$Minor\python.exe"; Args = @() },
+        @{ Exe = "${env:ProgramFiles}\Python3$Minor\python.exe"; Args = @() },
+        @{ Exe = "C:\Python3$Minor\python.exe"; Args = @() }
     )
 
     foreach ($c in $candidates) {
@@ -112,14 +111,14 @@ function Get-SupportedPython {
 
             $checkArgs = $c.Args + @(
                 "-c",
-                ("import sys; assert sys.version_info[:2] == (3, {0}); print(f'{{sys.version_info.major}}.{{sys.version_info.minor}}.{{sys.version_info.micro}}')" -f $c.Minor)
+                ("import sys; assert sys.version_info[:2] == (3, {0}); print(f'{{sys.version_info.major}}.{{sys.version_info.minor}}.{{sys.version_info.micro}}')" -f $Minor)
             )
             $ver = & $c.Exe @checkArgs 2>$null
             if ($LASTEXITCODE -ne 0 -or -not $ver) { continue }
             return @{
                 Exe = $c.Exe
                 Args = $c.Args
-                Minor = $c.Minor
+                Minor = $Minor
                 Version = $ver.Trim()
                 Display = (($c.Exe + " " + ($c.Args -join " ")).Trim())
             }
@@ -127,6 +126,88 @@ function Get-SupportedPython {
         catch { }
     }
     return $null
+}
+
+function Refresh-ProcessPath {
+    $machine = [Environment]::GetEnvironmentVariable("Path", "Machine")
+    $user = [Environment]::GetEnvironmentVariable("Path", "User")
+    $env:Path = ($machine + ";" + $user)
+}
+
+function Install-Python312 {
+    Write-Host "==> Python 3.12 not found - installing it automatically"
+
+    # 1) winget (preferred on modern Windows)
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        Write-Host "    Installing Python.Python.3.12 via winget..."
+        $oldEap = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        & winget install -e --id Python.Python.3.12 `
+            --accept-package-agreements `
+            --accept-source-agreements `
+            --disable-interactivity
+        $wingetCode = $LASTEXITCODE
+        $ErrorActionPreference = $oldEap
+        Write-Host ("    winget exit code: " + $wingetCode)
+        Refresh-ProcessPath
+        Start-Sleep -Seconds 2
+        $py = Get-PythonByMinor -Minor 12
+        if ($py) { return $py }
+    }
+    else {
+        Write-Host "    winget not available - trying official installer download"
+    }
+
+    # 2) Official silent installer fallback
+    $installerUrl = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
+    $installerPath = Join-Path $env:TEMP "python-3.12.10-amd64.exe"
+    Write-Host ("    Downloading " + $installerUrl)
+    try {
+        Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing
+        Write-Host "    Running silent Python 3.12 installer..."
+        $proc = Start-Process -FilePath $installerPath -ArgumentList @(
+            "/quiet",
+            "InstallAllUsers=0",
+            "PrependPath=1",
+            "Include_launcher=1",
+            "Include_pip=1",
+            "Include_test=0"
+        ) -Wait -PassThru
+        Refresh-ProcessPath
+        Start-Sleep -Seconds 2
+        $py = Get-PythonByMinor -Minor 12
+        if ($py) { return $py }
+        Write-Host ("    Installer exited with code " + $proc.ExitCode)
+    }
+    catch {
+        Write-Host ("    Official installer failed: " + $_.Exception.Message)
+    }
+
+    return $null
+}
+
+function Ensure-Python312 {
+    $py = Get-PythonByMinor -Minor 12
+    if ($py) { return $py }
+
+    $py = Install-Python312
+    if ($py) {
+        Write-Host ("    Python " + $py.Version + " is ready (" + $py.Display + ")")
+        return $py
+    }
+
+    # Last resort only if install failed hard
+    $fallback = Get-PythonByMinor -Minor 11
+    if ($fallback) {
+        Write-Host "    WARNING: could not install Python 3.12; falling back to 3.11"
+        return $fallback
+    }
+
+    throw @"
+Could not find or install Python 3.12 automatically.
+Install winget / allow the installer, or install Python 3.12 manually, then re-run:
+  .\start-local.ps1 setup
+"@
 }
 
 function Get-VenvPythonMinor {
@@ -142,21 +223,8 @@ function Get-VenvPythonMinor {
 }
 
 function Invoke-Setup {
-    Write-Host "==> Ensuring Python 3.12 virtualenv (3.11 fallback; never 3.14)"
-    $py = Get-SupportedPython
-    if (-not $py) {
-        throw @"
-Python 3.12 is required (3.11 also accepted). Do not use Python 3.14.
-Install 3.12 from https://www.python.org/downloads/release/python-31210/
-Enable 'Add python.exe to PATH' and the py launcher, then re-run:
-  .\start-local.ps1 setup
-"@
-    }
-
-    if ($py.Minor -ne 12) {
-        Write-Host ("    Python 3.12 not found; using fallback Python " + $py.Version)
-        Write-Host "    Recommended: install Python 3.12 so setup matches other machines."
-    }
+    Write-Host "==> Ensuring Python 3.12 for .venv (auto-installs if system has 3.13/3.14 only)"
+    $py = Ensure-Python312
 
     $existingMinor = Get-VenvPythonMinor
     $allowed = @("3.11", "3.12")
@@ -197,7 +265,7 @@ Enable 'Add python.exe to PATH' and the py launcher, then re-run:
     if ($LASTEXITCODE -ne 0) {
         throw @"
 Failed to install Python dependencies.
-If you see 'pg_config executable not found', delete .venv and use Python 3.12:
+If you see 'pg_config executable not found', delete .venv and re-run setup with Python 3.12:
   Remove-Item -Recurse -Force .venv
   .\start-local.ps1 setup
 "@
