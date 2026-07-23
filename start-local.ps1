@@ -85,15 +85,74 @@ function Assert-Venv {
     }
 }
 
+function Get-PreferredPython {
+    $candidates = @(
+        "py -3.12",
+        "py -3.11",
+        "py -3.13",
+        "python",
+        "py"
+    )
+    foreach ($cmd in $candidates) {
+        try {
+            $parts = $cmd -split " "
+            $exe = $parts[0]
+            $args = @($parts | Select-Object -Skip 1) + @("-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+            $ver = & $exe @args 2>$null
+            if ($LASTEXITCODE -ne 0 -or -not $ver) { continue }
+            $ver = $ver.Trim()
+            $major, $minor = $ver.Split(".") | ForEach-Object { [int]$_ }
+            if ($major -eq 3 -and $minor -ge 10 -and $minor -le 14) {
+                return @{ Command = $cmd; Version = $ver }
+            }
+        }
+        catch { }
+    }
+    return $null
+}
+
 function Invoke-Setup {
     Write-Host "==> Creating / updating virtualenv"
     if (-not (Test-Path $VenvPython)) {
-        python -m venv .venv
+        $py = Get-PreferredPython
+        if (-not $py) {
+            throw "Need Python 3.10-3.14 on PATH. Install from https://www.python.org/downloads/ (check 'Add to PATH')."
+        }
+        Write-Host ("    Using Python " + $py.Version + " (" + $py.Command + ")")
+        $parts = $py.Command -split " "
+        if ($parts.Count -eq 1) {
+            & $parts[0] -m venv .venv
+        }
+        else {
+            & $parts[0] @($parts | Select-Object -Skip 1) -m venv .venv
+        }
+        if (-not (Test-Path $VenvPython)) {
+            throw "Failed to create .venv"
+        }
+    }
+    else {
+        $ver = & $VenvPython -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')"
+        Write-Host ("    Existing venv Python " + $ver.Trim())
     }
 
     Write-Host "==> Installing Python dependencies"
-    & $VenvPython -m pip install --upgrade pip
-    & $VenvPython -m pip install -r (Join-Path $Root "requirements.txt")
+    & $VenvPython -m pip install --upgrade pip setuptools wheel
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to upgrade pip/setuptools/wheel"
+    }
+
+    # Prefer wheels so psycopg2-binary does not try to compile (needs pg_config).
+    & $VenvPython -m pip install --prefer-binary -r (Join-Path $Root "requirements.txt")
+    if ($LASTEXITCODE -ne 0) {
+        throw @"
+Failed to install Python dependencies.
+Common cause: Python too new/old for pinned wheels (use 3.11 or 3.12), or offline/proxy blocking PyPI.
+If you see 'pg_config executable not found', pip tried to compile psycopg2 from source.
+Fix: upgrade pip, use Python 3.11/3.12, then re-run:
+  Remove-Item -Recurse -Force .venv
+  .\start-local.ps1 setup
+"@
+    }
 
     if (-not $SkipFrontendBuild) {
         Write-Host "==> Building Next.js frontend"
@@ -103,6 +162,9 @@ function Invoke-Setup {
                 npm install
             }
             npm run build
+            if ($LASTEXITCODE -ne 0) {
+                throw "Frontend build failed"
+            }
         }
         finally {
             Pop-Location

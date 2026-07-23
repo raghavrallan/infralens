@@ -5,7 +5,7 @@ pydantic==2.10.4
 pydantic-settings==2.7.1
 python-dotenv==1.0.1
 SQLAlchemy==2.0.36
-psycopg2-binary==2.9.10
+psycopg2-binary==2.9.12
 httpx==0.28.1
 boto3==1.43.0
 redis==5.2.1
