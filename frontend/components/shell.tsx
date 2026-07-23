@@ -3,15 +3,18 @@
 /* Static export navigation must be handled by FastAPI's HTML fallback. */
 /* eslint-disable @next/next/no-html-link-for-pages */
 import { usePathname } from "next/navigation";
+import { GlobalLoader } from "./global-loader";
 
-export function Shell({ children, subtitle = "Skills Suite", scroll = false }: {
+export function Shell({ children, subtitle = "Skills Suite", scroll = false, loading = false }: {
   children: React.ReactNode;
   subtitle?: string;
   scroll?: boolean;
+  loading?: boolean;
 }) {
   const pathname = usePathname();
   return (
     <div className={`page${scroll ? " scroll-page" : ""}`}>
+      <GlobalLoader active={loading} />
       <header className="topbar">
         <div className="brand">
           <div className="brand-mark">DS</div>

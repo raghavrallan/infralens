@@ -899,7 +899,12 @@ def intelligence_catalog() -> dict[str, Any]:
         if s.name in WORKFLOW_SAFE
     ]
     modules = [
-        {"key": key, "label": spec["label"], "skills": spec["skills"]}
+        {
+            "key": key,
+            "label": spec["label"],
+            "description": spec["description"],
+            "skills": spec["skills"],
+        }
         for key, spec in intel.MODULES.items()
     ]
     return {"skills": safe, "modules": modules}

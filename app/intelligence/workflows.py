@@ -37,26 +37,50 @@ TIME_RANGE_DURATIONS = {
 MODULES: dict[str, dict[str, Any]] = {
     "pipeline_intelligence": {
         "label": "Pipeline Intelligence",
+        "description": (
+            "Inspect CI/CD pipelines and application code for delivery, dependency, "
+            "and engineering-quality risks before release."
+        ),
         "skills": ["pipeline_auditor", "code_reviewer"],
     },
     "release_confidence": {
         "label": "Release Confidence",
+        "description": (
+            "Combine service metrics, logs, and reporting to judge release health, "
+            "stability, and operational readiness."
+        ),
         "skills": ["metrics_analyzer", "log_analyzer", "report_writer"],
     },
     "iac": {
         "label": "Infrastructure as Code",
+        "description": (
+            "Compare live cloud resources with infrastructure code to detect drift "
+            "and missing guardrails."
+        ),
         "skills": ["drift_auditor", "iac_reviewer"],
     },
     "incident_response": {
         "label": "Incident Response",
+        "description": (
+            "Correlate logs, metrics, and incident signals to identify likely causes "
+            "and guide response."
+        ),
         "skills": ["log_analyzer", "metrics_analyzer", "incident_analyzer"],
     },
     "security_patch": {
         "label": "Security & Patch",
+        "description": (
+            "Prioritize vulnerabilities and map security evidence to remediation "
+            "and compliance controls."
+        ),
         "skills": ["vuln_triage", "compliance_mapper"],
     },
     "finops": {
         "label": "FinOps",
+        "description": (
+            "Analyze cloud spend and utilization to surface anomalies and "
+            "rightsizing opportunities."
+        ),
         "skills": ["cost_analyzer", "metrics_analyzer"],
     },
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../lib/api";
 import type { Approval, Catalog, Finding, Project, Run, Workflow } from "../lib/types";
 import { Modal, useToast } from "./modal";
@@ -50,6 +50,8 @@ export function DashboardPage() {
   const [module, setModule] = useState("");
   const [timeRange, setTimeRange] = useState("all");
   const [updated, setUpdated] = useState<Date | null>(null);
+  const [loading, setLoading] = useState(true);
+  const requestRef = useRef(0);
   const [workflowModal, setWorkflowModal] = useState<Workflow | null | undefined>(undefined);
   const [runModal, setRunModal] = useState<Run | null>(null);
   const { showToast, Toast } = useToast();
@@ -62,9 +64,12 @@ export function DashboardPage() {
       ? saved
       : list.find((project) => project.is_default)?.id || list[0]?.id || null;
     setProjectId(selected);
+    if (!selected) setLoading(false);
   }, []);
-  const loadData = useCallback(async () => {
-    if (!projectId) return;
+  const loadData = useCallback(async (showLoader = true) => {
+    if (!projectId) { setLoading(false); return; }
+    const requestId = ++requestRef.current;
+    if (showLoader) setLoading(true);
     const query = new URLSearchParams({ project_id: projectId });
     if (severity) query.set("severity", severity);
     if (status) query.set("status", status);
@@ -72,20 +77,26 @@ export function DashboardPage() {
     query.set("time_range", timeRange);
     const timeParams = new URLSearchParams({ time_range: timeRange });
     if (module) timeParams.set("module", module);
-    const [nextSummary, nextFindings, nextApprovals, nextWorkflows, nextRuns] = await Promise.all([
-      api<Summary>(`/api/dashboard/summary?project_id=${encodeURIComponent(projectId)}&${timeParams}`),
-      api<Finding[]>(`/api/findings?${query}`),
-      api<Approval[]>(`/api/approvals?project_id=${encodeURIComponent(projectId)}&status=pending&${timeParams}`),
-      api<Workflow[]>(`/api/workflows?project_id=${encodeURIComponent(projectId)}${module ? `&module=${encodeURIComponent(module)}` : ""}`),
-      api<Run[]>(`/api/runs?project_id=${encodeURIComponent(projectId)}&limit=12&${timeParams}`),
-    ]);
-    setSummary(nextSummary); setFindings(nextFindings); setApprovals(nextApprovals); setWorkflows(nextWorkflows); setRuns(nextRuns); setUpdated(new Date());
+    try {
+      const [nextSummary, nextFindings, nextApprovals, nextWorkflows, nextRuns] = await Promise.all([
+        api<Summary>(`/api/dashboard/summary?project_id=${encodeURIComponent(projectId)}&${timeParams}`),
+        api<Finding[]>(`/api/findings?${query}`),
+        api<Approval[]>(`/api/approvals?project_id=${encodeURIComponent(projectId)}&status=pending&${timeParams}`),
+        api<Workflow[]>(`/api/workflows?project_id=${encodeURIComponent(projectId)}${module ? `&module=${encodeURIComponent(module)}` : ""}`),
+        api<Run[]>(`/api/runs?project_id=${encodeURIComponent(projectId)}&limit=12&${timeParams}`),
+      ]);
+      if (requestId !== requestRef.current) return;
+      setSummary(nextSummary); setFindings(nextFindings); setApprovals(nextApprovals); setWorkflows(nextWorkflows); setRuns(nextRuns); setUpdated(new Date());
+    } finally {
+      if (requestId === requestRef.current) setLoading(false);
+    }
   }, [module, projectId, severity, status, timeRange]);
 
   useEffect(() => { void Promise.all([loadProjects(), api<Catalog>("/api/intelligence/catalog").then(setCatalog)]); }, [loadProjects]);
-  useEffect(() => { void loadData(); const timer = window.setInterval(() => { if (!document.hidden) void loadData(); }, 15000); return () => window.clearInterval(timer); }, [loadData]);
+  useEffect(() => { void loadData(true); const timer = window.setInterval(() => { if (!document.hidden) void loadData(false); }, 15000); return () => window.clearInterval(timer); }, [loadData]);
 
-  const selectProject = (id: string) => { setSummary({}); setFindings([]); setApprovals([]); setWorkflows([]); setRuns([]); setUpdated(null); setProjectId(id); window.localStorage.setItem("projectId", id); };
+  const selectProject = (id: string) => { setSummary({}); setFindings([]); setApprovals([]); setWorkflows([]); setRuns([]); setUpdated(null); setLoading(true); setProjectId(id); window.localStorage.setItem("projectId", id); };
+  const selectModule = (value: string) => { setLoading(true); setModule(value); };
   const updateFinding = async (id: string, nextStatus: Finding["status"]) => { try { await api(`/api/findings/${id}`, { method: "PATCH", body: JSON.stringify({ status: nextStatus }) }); await loadData(); } catch (error) { showToast(error instanceof Error ? error.message : "Could not update finding", "error"); } };
   const decideApproval = async (approval: Approval, decision: "approved" | "rejected") => {
     const label = decision === "approved" ? "Approve" : "Reject";
@@ -109,14 +120,17 @@ export function DashboardPage() {
   const runTotal = Object.values(runCounts).reduce<number>((total, value) => total + numberValue(value), 0);
   const modules = useMemo(() => catalog.modules || [], [catalog.modules]);
   const activeModuleLabel = module ? modules.find((item) => item.key === module)?.label || prettyName(module) : "All modules";
-  const moduleTabs = [{ key: "", label: "All modules" }, ...modules];
+  const moduleTabs = [{ key: "", label: "All modules", description: "View findings, approvals, workflows, and runs across every intelligence module." }, ...modules];
+  const activeModule = modules.find((item) => item.key === module);
+  const activeModuleDescription = activeModule?.description || "View findings, approvals, workflows, and runs across every intelligence module.";
 
-  return <Shell subtitle="Intelligence Layer" scroll>
+  return <Shell subtitle="Intelligence Layer" scroll loading={loading}>
     <main className="dash">
       <div className="dash-head"><div className="dash-context"><span className="dash-context-label">Dashboard module</span><strong>{activeModuleLabel}</strong></div>
         <div className="dash-head-controls"><label className="control"><span>Project</span><ThemedSelect className="project-select" value={projectId || ""} ariaLabel="Project" onChange={selectProject} options={projects.map((project) => ({ value: project.id, label: `${project.name}${project.is_default ? " (default)" : ""}` }))} /></label><label className="control"><span>Time</span><ThemedSelect className="time-select" value={timeRange} ariaLabel="Time range" onChange={setTimeRange} options={TIME_RANGES} /></label><span className="updated-note">{updated ? `Updated ${timeAgo(updated.toISOString())}` : projectId ? "Loading" : "Selecting project"}</span><button className="ghost" onClick={() => void loadData()} disabled={!projectId}>Refresh</button><button className="primary" onClick={() => setWorkflowModal(null)} disabled={!projectId}>+ Workflow</button></div>
       </div>
-      <nav className="module-tabs" aria-label="Dashboard modules" role="tablist">{moduleTabs.map((item) => <button type="button" role="tab" key={item.key || "all"} className={`module-tab${module === item.key ? " active" : ""}`} aria-selected={module === item.key} onClick={() => setModule(item.key)}>{item.label}</button>)}</nav>
+      <nav className="module-tabs" aria-label="Dashboard modules" role="tablist">{moduleTabs.map((item) => <button type="button" role="tab" key={item.key || "all"} className={`module-tab${module === item.key ? " active" : ""}`} aria-selected={module === item.key} title={item.description || "All intelligence modules"} onClick={() => selectModule(item.key)}>{item.label}</button>)}</nav>
+      <section className="module-definition" aria-live="polite"><div className="module-definition-heading"><span className="dash-context-label">What this module covers</span><strong>{activeModuleLabel}</strong></div><p>{activeModuleDescription}</p>{activeModule?.skills?.length ? <div className="module-definition-skills">{activeModule.skills.map((skill) => <span className="mini-pill" key={skill}>{prettyName(skill)}</span>)}</div> : null}</section>
       <section className="dash-tiles"><div className="tile"><div className="tile-label">Open findings</div><div className="tile-value">{numberValue(summary.open_findings)}</div><div className="tile-sub">Unresolved across workflows</div><div className="tile-breakdown"><span className="sev sev-critical">{numberValue(severityCounts.critical)} crit</span><span className="sev sev-high">{numberValue(severityCounts.high)} high</span><span className="sev sev-medium">{numberValue(severityCounts.medium)} med</span><span className="sev sev-low">{numberValue(severityCounts.low)} low</span></div></div><div className={`tile${pendingLive ? " tile-warn" : ""}`}><div className="tile-label">Awaiting approval</div><div className="tile-value">{pendingLive}</div><div className="tile-sub">Gated: human or two-person</div></div><div className="tile"><div className="tile-label">Workflows</div><div className="tile-value">{numberValue(summary.workflows_enabled)}/{numberValue(summary.workflows_total)}</div><div className="tile-sub">Enabled / total</div></div><div className={`tile${numberValue(runCounts.failed) ? " tile-warn" : ""}`}><div className="tile-label">Runs</div><div className="tile-value">{runTotal}</div><div className="tile-sub">{numberValue(runCounts.running)} running · {numberValue(runCounts.failed)} failed</div></div></section>
       <div className="dash-grid"><section className="dash-col"><div className="dash-section-head"><h3>Findings</h3><div className="filter-stack"><div className="filter-row">{["", "critical", "high", "medium", "low"].map((value) => <button key={value || "all"} className={`chip${severity === value ? " active" : ""}`} onClick={() => setSeverity(value)}>{value ? prettyName(value) : "All severities"}</button>)}</div><div className="filter-row">{["open", "acknowledged", "resolved", ""].map((value) => <button key={value || "all"} className={`chip${status === value ? " active" : ""}`} onClick={() => setStatus(value)}>{value ? prettyName(value) : "All"}</button>)}<ThemedSelect className="mini-select" value={module} ariaLabel="Module" onChange={setModule} options={[{ value: "", label: "All modules" }, ...modules.map((item) => ({ value: item.key, label: item.label }))]} /></div></div></div><div className="findings-feed">{!findings.length ? <div className="empty-note">No findings match this filter. Run a workflow to populate the dashboard.</div> : findings.map((finding) => <div className={`finding-card sev-${finding.severity}${finding.status === "resolved" ? " resolved" : ""}`} key={finding.id}><div className="finding-top"><span className={`sev sev-${finding.severity}`}>{finding.severity}</span><span className={`gate-badge gate-${finding.gate_decision}`}>{finding.gate_label}</span>{finding.module_label && <span className="mini-pill">{finding.module_label}</span>}{finding.status !== "open" && <span className={`mini-pill status-${finding.status}`}>{finding.status}</span>}</div><div className="finding-title">{finding.title}</div><div className="finding-meta"><span>{prettyName(finding.skill)}</span>{finding.resource && <span title={finding.resource}>{finding.resource}</span>}<span>blast: {finding.blast_radius || "—"}</span></div><div className="finding-body">{finding.evidence && <><span className="label">Evidence</span>{finding.evidence}</>}{finding.recommended_action && <><span className="label">Recommended action</span>{finding.recommended_action}</>}</div><div className="finding-actions"><button className="tiny-btn" onClick={() => explain(finding)}>Explain in chat</button>{finding.status === "open" && <button className="tiny-btn" onClick={() => void updateFinding(finding.id, "acknowledged")}>Acknowledge</button>}{finding.status !== "resolved" ? <button className="tiny-btn solid" onClick={() => void updateFinding(finding.id, "resolved")}>Resolve</button> : <button className="tiny-btn" onClick={() => void updateFinding(finding.id, "open")}>Reopen</button>}</div></div>)}</div></section>
         <aside className="dash-col dash-side"><div className="dash-section-head"><h3>Approvals</h3><span className={`pill ${pendingLive ? "warn" : "off"}`}>{pendingLive} pending</span></div><div className="approvals-list">{!approvals.length ? <div className="empty-note">No approvals waiting. Change-producing findings land here, time-boxed.</div> : approvals.map((approval) => <div className={`approval-card${approval.expired ? " expired" : ""}`} key={approval.id}><div className="approval-top"><span className={`gate-badge gate-${approval.gate}`}>{approval.gate_label}</span><span className={`sev sev-${approval.finding?.severity}`}>{approval.finding?.severity}</span><span className="approval-expiry">{approval.expired ? "expired" : timeUntil(approval.expires_in_seconds)}</span></div><div className="approval-title">{approval.finding?.title || "Finding"}</div><div className="finding-meta"><span>{prettyName(approval.finding?.skill)}</span><span>blast: {approval.finding?.blast_radius || "—"}</span></div><div className="approval-note">{approval.gate_label} required — approving records intent only; nothing is executed.</div><div className="finding-actions"><button className="tiny-btn" onClick={() => explain(approval.finding)}>Explain in chat</button><button className="tiny-btn danger" onClick={() => void decideApproval(approval, "rejected")}>Reject</button><button className="tiny-btn solid" onClick={() => void decideApproval(approval, "approved")}>Approve</button></div></div>)}</div>
