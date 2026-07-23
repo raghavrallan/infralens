@@ -89,42 +89,93 @@ function Assert-Venv {
     }
 }
 
+function Invoke-Native {
+    # Run a native exe with args via cmd.exe so PowerShell cannot mangle
+    # values like -3.12 into numbers / split options.
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [string[]]$ArgumentList = @()
+    )
+
+    $argLine = ($ArgumentList | ForEach-Object {
+        $a = [string]$_
+        if ($a -match '[\s"]') { '"' + ($a -replace '"', '\"') + '"' } else { $a }
+    }) -join " "
+
+    $cmd = '"' + $FilePath + '"'
+    if ($argLine) { $cmd = $cmd + " " + $argLine }
+
+    $oldEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $output = & cmd.exe /c $cmd 2>&1
+    $code = $LASTEXITCODE
+    $ErrorActionPreference = $oldEap
+
+    return @{
+        ExitCode = $code
+        Output = (($output | Out-String).Trim())
+    }
+}
+
 function Get-PythonByMinor {
     param([Parameter(Mandatory = $true)][int]$Minor)
 
-    $candidates = @(
-        @{ Exe = "py"; Args = @("-3.$Minor") },
-        @{ Exe = "python3.$Minor"; Args = @() },
-        @{ Exe = "$env:LocalAppData\Programs\Python\Python3$Minor\python.exe"; Args = @() },
-        @{ Exe = "${env:ProgramFiles}\Python3$Minor\python.exe"; Args = @() },
-        @{ Exe = "C:\Python3$Minor\python.exe"; Args = @() }
+    # Always return a real python.exe path. Never return "py -3.12" because
+    # PowerShell parses -3.12 as a number and ends up calling the wrong Python.
+    $pathCandidates = @(
+        "$env:LocalAppData\Programs\Python\Python3$Minor\python.exe",
+        "$env:LocalAppData\Python\pythoncore-3.$Minor-64\python.exe",
+        "$env:LocalAppData\Python\pythoncore-3.$Minor-32\python.exe",
+        "${env:ProgramFiles}\Python3$Minor\python.exe",
+        "${env:ProgramFiles}\Python\Python3$Minor\python.exe",
+        "C:\Python3$Minor\python.exe"
     )
 
-    foreach ($c in $candidates) {
-        try {
-            if ($c.Exe -notmatch '[\\/]' -and -not (Get-Command $c.Exe -ErrorAction SilentlyContinue)) {
-                continue
-            }
-            if ($c.Exe -match '[\\/]' -and -not (Test-Path $c.Exe)) {
-                continue
-            }
-
-            $checkArgs = $c.Args + @(
-                "-c",
-                ("import sys; assert sys.version_info[:2] == (3, {0}); print(f'{{sys.version_info.major}}.{{sys.version_info.minor}}.{{sys.version_info.micro}}')" -f $Minor)
-            )
-            $ver = & $c.Exe @checkArgs 2>$null
-            if ($LASTEXITCODE -ne 0 -or -not $ver) { continue }
+    foreach ($path in $pathCandidates) {
+        if (-not (Test-Path $path)) { continue }
+        $result = Invoke-Native -FilePath $path -ArgumentList @(
+            "-c",
+            ("import sys; assert sys.version_info[:2]==(3,{0}); print('%s.%s.%s' % sys.version_info[:3])" -f $Minor)
+        )
+        if ($result.ExitCode -eq 0 -and $result.Output) {
             return @{
-                Exe = $c.Exe
-                Args = $c.Args
+                Exe = $path
+                Args = @()
                 Minor = $Minor
-                Version = $ver.Trim()
-                Display = (($c.Exe + " " + ($c.Args -join " ")).Trim())
+                Version = ($result.Output -split "`r?`n" | Select-Object -Last 1).Trim()
+                Display = $path
             }
         }
-        catch { }
     }
+
+    # Ask the py launcher for the absolute interpreter path (via cmd, not PS splat)
+    $pyCmd = Get-Command py.exe -ErrorAction SilentlyContinue
+    if (-not $pyCmd) { $pyCmd = Get-Command py -ErrorAction SilentlyContinue }
+    if ($pyCmd) {
+        $launcher = $pyCmd.Source
+        $result = Invoke-Native -FilePath $launcher -ArgumentList @(
+            "-3.$Minor",
+            "-c",
+            "import sys; print(sys.executable); print('%s.%s.%s' % sys.version_info[:3])"
+        )
+        if ($result.ExitCode -eq 0 -and $result.Output) {
+            $lines = @($result.Output -split "`r?`n" | Where-Object { $_.Trim() })
+            if ($lines.Count -ge 2) {
+                $exePath = $lines[0].Trim()
+                $ver = $lines[1].Trim()
+                if ((Test-Path $exePath) -and $ver.StartsWith("3.$Minor")) {
+                    return @{
+                        Exe = $exePath
+                        Args = @()
+                        Minor = $Minor
+                        Version = $ver
+                        Display = $exePath
+                    }
+                }
+            }
+        }
+    }
+
     return $null
 }
 
@@ -150,7 +201,7 @@ function Install-Python312 {
         $ErrorActionPreference = $oldEap
         Write-Host ("    winget exit code: " + $wingetCode)
         Refresh-ProcessPath
-        Start-Sleep -Seconds 2
+        Start-Sleep -Seconds 3
         $py = Get-PythonByMinor -Minor 12
         if ($py) { return $py }
     }
@@ -174,7 +225,7 @@ function Install-Python312 {
             "Include_test=0"
         ) -Wait -PassThru
         Refresh-ProcessPath
-        Start-Sleep -Seconds 2
+        Start-Sleep -Seconds 3
         $py = Get-PythonByMinor -Minor 12
         if ($py) { return $py }
         Write-Host ("    Installer exited with code " + $proc.ExitCode)
@@ -188,11 +239,14 @@ function Install-Python312 {
 
 function Ensure-Python312 {
     $py = Get-PythonByMinor -Minor 12
-    if ($py) { return $py }
+    if ($py) {
+        Write-Host ("    Found Python " + $py.Version + " at " + $py.Exe)
+        return $py
+    }
 
     $py = Install-Python312
     if ($py) {
-        Write-Host ("    Python " + $py.Version + " is ready (" + $py.Display + ")")
+        Write-Host ("    Python " + $py.Version + " is ready at " + $py.Exe)
         return $py
     }
 
@@ -213,9 +267,12 @@ Install winget / allow the installer, or install Python 3.12 manually, then re-r
 function Get-VenvPythonMinor {
     if (-not (Test-Path $VenvPython)) { return $null }
     try {
-        $ver = & $VenvPython -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
-        if ($LASTEXITCODE -ne 0 -or -not $ver) { return $null }
-        return $ver.Trim()
+        $result = Invoke-Native -FilePath $VenvPython -ArgumentList @(
+            "-c",
+            "import sys; print('%s.%s' % sys.version_info[:2])"
+        )
+        if ($result.ExitCode -ne 0 -or -not $result.Output) { return $null }
+        return ($result.Output -split "`r?`n" | Select-Object -Last 1).Trim()
     }
     catch {
         return $null
@@ -238,15 +295,20 @@ function Invoke-Setup {
     }
 
     if (-not (Test-Path $VenvPython)) {
-        Write-Host ("    Creating .venv with Python " + $py.Version + " (" + $py.Display + ")")
-        & $py.Exe @($py.Args + @("-m", "venv", ".venv"))
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $VenvPython)) {
-            throw ("Failed to create .venv with Python " + $py.Version)
+        Write-Host ("    Creating .venv with Python " + $py.Version)
+        Write-Host ("    Interpreter: " + $py.Exe)
+        $create = Invoke-Native -FilePath $py.Exe -ArgumentList @("-m", "venv", ".venv")
+        if ($create.ExitCode -ne 0 -or -not (Test-Path $VenvPython)) {
+            if ($create.Output) { Write-Host $create.Output }
+            throw ("Failed to create .venv with Python " + $py.Version + " (" + $py.Exe + ")")
         }
     }
     else {
-        $ver = & $VenvPython -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')"
-        Write-Host ("    Using existing Python " + $ver.Trim() + " venv")
+        $verResult = Invoke-Native -FilePath $VenvPython -ArgumentList @(
+            "-c",
+            "import sys; print('%s.%s.%s' % sys.version_info[:3])"
+        )
+        Write-Host ("    Using existing Python " + $verResult.Output + " venv")
     }
 
     $confirm = Get-VenvPythonMinor
@@ -255,14 +317,19 @@ function Invoke-Setup {
     }
 
     Write-Host "==> Installing Python dependencies"
-    & $VenvPython -m pip install --upgrade pip setuptools wheel
-    if ($LASTEXITCODE -ne 0) {
+    $pipUpgrade = Invoke-Native -FilePath $VenvPython -ArgumentList @("-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel")
+    if ($pipUpgrade.ExitCode -ne 0) {
+        if ($pipUpgrade.Output) { Write-Host $pipUpgrade.Output }
         throw "Failed to upgrade pip/setuptools/wheel"
     }
 
     # Prefer wheels so psycopg2-binary does not try to compile (needs pg_config).
-    & $VenvPython -m pip install --prefer-binary -r (Join-Path $Root "requirements.txt")
-    if ($LASTEXITCODE -ne 0) {
+    $reqFile = Join-Path $Root "requirements.txt"
+    $pipInstall = Invoke-Native -FilePath $VenvPython -ArgumentList @(
+        "-m", "pip", "install", "--prefer-binary", "-r", $reqFile
+    )
+    if ($pipInstall.ExitCode -ne 0) {
+        if ($pipInstall.Output) { Write-Host $pipInstall.Output }
         throw @"
 Failed to install Python dependencies.
 If you see 'pg_config executable not found', delete .venv and re-run setup with Python 3.12:
