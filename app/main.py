@@ -48,19 +48,11 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="DevSecOps LLM Skills Suite", version=__version__, lifespan=lifespan)
 
-# Allow the Next.js dev server (live HMR on :3000) to call the API on :8000.
-_cors_origins = [
-    origin.strip()
-    for origin in os.environ.get(
-        "CORS_ORIGINS",
-        "http://127.0.0.1:3000,http://localhost:3000",
-    ).split(",")
-    if origin.strip()
-]
+# Allow browser clients (Next.js live UI on :3000, static export on :8000, etc.).
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_cors_origins,
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
