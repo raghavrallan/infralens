@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, consumeSse } from "../lib/api";
+import { api, apiUrl, consumeSse } from "../lib/api";
 import { copyText } from "../lib/clipboard";
 import type { Action, ActionEvent, ChatDetail, ChatMessage, ChatSummary, ConnectionStatus, MetricChart, Project, Skill, StreamEvent } from "../lib/types";
 import { MarkdownContent } from "./markdown";
@@ -337,7 +337,7 @@ export function ChatPage() {
   );
 
   const runStream = async (url: string, body: Record<string, unknown>, messageId: string) => {
-    const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const response = await fetch(apiUrl(url), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     if (!response.ok) throw new Error("The stream failed to start.");
     let accumulated = "";
     await consumeSse(response, (event: StreamEvent) => {

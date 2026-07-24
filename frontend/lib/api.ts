@@ -1,7 +1,18 @@
 import type { JsonObject, StreamEvent } from "./types";
 
+/**
+ * In local `next dev`, point at the FastAPI origin so /api calls do not go
+ * through Next trailingSlash/rewrites (those were 404ing as /api/projects/).
+ * In production static export served by FastAPI, keep relative /api paths.
+ */
+export function apiUrl(path: string): string {
+  const base = (process.env.NEXT_PUBLIC_API_BASE || "").replace(/\/$/, "");
+  if (!path.startsWith("/")) return `${base}/${path}`;
+  return `${base}${path}`;
+}
+
 export async function api<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
+  const response = await fetch(apiUrl(url), {
     ...options,
     headers: { ...(options?.body ? { "Content-Type": "application/json" } : {}), ...options?.headers },
   });
