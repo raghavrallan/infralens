@@ -627,6 +627,43 @@ function Escape-CmdSetValue {
     return ($Value -replace '([&|<>^])', '^$1')
 }
 
+function Get-NodeExe {
+    $candidates = @(
+        (Get-Command node.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source),
+        "$env:ProgramFiles\nodejs\node.exe",
+        "${env:ProgramFiles(x86)}\nodejs\node.exe",
+        "$env:LOCALAPPDATA\Programs\node\node.exe"
+    ) | Where-Object { $_ }
+    foreach ($path in $candidates) {
+        if (Test-Path $path) { return $path }
+    }
+    throw "node.exe not found. Install Node.js 20+ from https://nodejs.org/ and re-run setup."
+}
+
+function Wait-HttpReady {
+    param(
+        [Parameter(Mandatory = $true)][string]$Url,
+        [string]$Label = "service",
+        [int]$TimeoutSec = 60
+    )
+    Write-Host ("==> Waiting for " + $Label + " at " + $Url)
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $resp = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 2
+            if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 500) {
+                Write-Host ("    " + $Label + " is up")
+                return $true
+            }
+        }
+        catch {
+            Start-Sleep -Milliseconds 800
+        }
+    }
+    Write-Host ("    WARNING: " + $Label + " did not become ready within " + $TimeoutSec + "s")
+    return $false
+}
+
 function Write-ChildScripts {
     param(
         [string]$HostName,
@@ -647,6 +684,12 @@ function Write-ChildScripts {
     $cp = Escape-CmdSetValue $ControlPlane
     $cors = Escape-CmdSetValue $CorsOrigins
     $devApi = Escape-CmdSetValue $DevApiOrigin
+
+    $nodeExe = Get-NodeExe
+    $nextCli = Join-Path $FrontendDir "node_modules\next\dist\bin\next"
+    if (-not (Test-Path $nextCli)) {
+        throw "Next.js is not installed in frontend\node_modules. Run: .\start-local.ps1 setup"
+    }
 
     $apiLines = @(
         "@echo off"
@@ -685,18 +728,27 @@ function Write-ChildScripts {
     )
     Write-Utf8NoBomFile -Path $WorkerScriptFile -Lines $workerLines
 
+    # Use absolute node.exe + next CLI so detached CMD works even when npm is not on PATH.
     $frontendLines = @(
         "@echo off"
         "title DevSecOps Frontend"
         "cd /d `"$FrontendDir`""
         "set `"DEV_API_ORIGIN=$devApi`""
+        "set `"NODE_ENV=development`""
         "echo DevSecOps Frontend (Next.js live reload) - leave this CMD window open"
         "echo UI with hot reload: http://${FrontendHost}:${FrontendPort}"
         "echo API proxied to: $devApi"
+        "echo Node: $nodeExe"
         "echo."
-        "call npm.cmd run dev -- --hostname $FrontendHost --port $FrontendPort"
+        "if not exist `"node_modules\next\dist\bin\next`" ("
+        "  echo ERROR: frontend dependencies missing. Run: .\start-local.ps1 setup"
+        "  pause"
+        "  exit /b 1"
+        ")"
+        "`"$nodeExe`" `"$nextCli`" dev --hostname $FrontendHost --port $FrontendPort"
         "echo."
-        "echo Frontend exited. Press any key to close this window."
+        "echo Frontend exited. If this failed, check Node/Next install and re-run setup."
+        "echo Press any key to close this window."
         "pause >nul"
     )
     Write-Utf8NoBomFile -Path $FrontendScriptFile -Lines $frontendLines
@@ -782,6 +834,8 @@ function Start-AppProcesses {
     Start-DetachedCmdWindow -Title "DevSecOps Frontend" -ScriptPath $FrontendScriptFile
 
     Start-Sleep -Seconds 2
+    $apiReady = Wait-HttpReady -Url ("http://" + $hostName + ":" + $port + "/api/health") -Label "API" -TimeoutSec 45
+    $uiReady = Wait-HttpReady -Url ("http://" + $frontendHost + ":" + $frontendPort + "/") -Label "Frontend" -TimeoutSec 90
 
     if ($WithExecutors) {
         Write-Host "==> Starting provider executors (Docker)"
@@ -789,10 +843,20 @@ function Start-AppProcesses {
     }
 
     Write-Host ""
-    Write-Host "Local stack is up in separate CMD windows."
+    if ($uiReady) {
+        Write-Host "Local stack is up in separate CMD windows."
+    }
+    else {
+        Write-Host "API/worker may be up, but the Frontend window failed to become ready."
+        Write-Host "Open the 'DevSecOps Frontend' CMD window and read the error."
+        Write-Host "Common fix: .\start-local.ps1 setup   then   .\start-local.ps1 start"
+    }
     Write-Host ("  UI (live):  http://" + $frontendHost + ":" + $frontendPort)
     Write-Host ("  API:        http://" + $hostName + ":" + $port)
     Write-Host ("  Dashboard:  http://" + $frontendHost + ":" + $frontendPort + "/dashboard")
+    if (-not $apiReady) {
+        Write-Host "  WARNING: API health check did not succeed yet - check the API CMD window."
+    }
     Write-Host ""
     Write-Host "Edit frontend or Python code - changes reload automatically."
     Write-Host "Keep the three CMD windows open. Closing them stops the app."
