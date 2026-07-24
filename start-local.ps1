@@ -3,10 +3,15 @@
 # Setup always uses Python 3.12 for .venv. If the PC only has 3.13/3.14,
 # the script installs Python 3.12 automatically (winget, then official installer).
 #
+# `start` runs live reload:
+#   - API (uvicorn --reload) in a CMD window
+#   - RQ worker in a CMD window
+#   - Next.js `next dev` (HMR) in a CMD window  -> open FRONTEND_PORT (3000)
+#
 # Usage:
-#   .\start-local.ps1 setup     # one-time: Python 3.12 venv, pip, frontend build
-#   .\start-local.ps1 start     # Postgres+Redis (Docker) + API + worker
-#   .\start-local.ps1 stop      # stop API/worker windows + Docker infra
+#   .\start-local.ps1 setup     # one-time: Python 3.12 venv, pip, frontend deps/build
+#   .\start-local.ps1 start     # Postgres+Redis + live API/worker/frontend (CMD windows)
+#   .\start-local.ps1 stop      # stop CMD windows + Docker infra
 #   .\start-local.ps1 status    # show what is running
 #   .\start-local.ps1 restart   # stop then start
 #
@@ -34,12 +39,15 @@ Set-Location $Root
 $VenvPython = Join-Path $Root ".venv\Scripts\python.exe"
 $RqExe = Join-Path $Root ".venv\Scripts\rq.exe"
 $UvicornExe = Join-Path $Root ".venv\Scripts\uvicorn.exe"
+$FrontendDir = Join-Path $Root "frontend"
 $FrontendOut = Join-Path $Root "frontend\out"
 $PidDir = Join-Path $Root ".local-run"
 $ApiPidFile = Join-Path $PidDir "api.pid"
 $WorkerPidFile = Join-Path $PidDir "worker.pid"
-$ApiScriptFile = Join-Path $PidDir "run-api.ps1"
-$WorkerScriptFile = Join-Path $PidDir "run-worker.ps1"
+$FrontendPidFile = Join-Path $PidDir "frontend.pid"
+$ApiScriptFile = Join-Path $PidDir "run-api.cmd"
+$WorkerScriptFile = Join-Path $PidDir "run-worker.cmd"
+$FrontendScriptFile = Join-Path $PidDir "run-frontend.cmd"
 
 $DefaultDatabaseUrl = "postgresql+psycopg2://devsecops:devsecops@localhost:5544/devsecops"
 $DefaultRedisUrl = "redis://localhost:6399/0"
@@ -81,6 +89,14 @@ function Ensure-EnvDefaults {
     if (-not $env:CONTROL_PLANE_URL) { $env:CONTROL_PLANE_URL = "http://127.0.0.1:8000" }
     if (-not $env:APP_HOST) { $env:APP_HOST = "127.0.0.1" }
     if (-not $env:APP_PORT) { $env:APP_PORT = "8000" }
+    if (-not $env:FRONTEND_HOST) { $env:FRONTEND_HOST = "127.0.0.1" }
+    if (-not $env:FRONTEND_PORT) { $env:FRONTEND_PORT = "3000" }
+    if (-not $env:DEV_API_ORIGIN) {
+        $env:DEV_API_ORIGIN = ("http://" + $env:APP_HOST + ":" + $env:APP_PORT)
+    }
+    if (-not $env:CORS_ORIGINS) {
+        $env:CORS_ORIGINS = ("http://" + $env:FRONTEND_HOST + ":" + $env:FRONTEND_PORT + ",http://localhost:" + $env:FRONTEND_PORT)
+    }
 }
 
 function Assert-Venv {
@@ -604,66 +620,96 @@ function Write-Utf8NoBomFile {
     [System.IO.File]::WriteAllLines($Path, $Lines, $utf8NoBom)
 }
 
+function Escape-CmdSetValue {
+    param([string]$Value)
+    if ($null -eq $Value) { return "" }
+    # cmd set values: escape special chars that break the line
+    return ($Value -replace '([&|<>^])', '^$1')
+}
+
 function Write-ChildScripts {
     param(
         [string]$HostName,
         [string]$Port,
+        [string]$FrontendHost,
+        [string]$FrontendPort,
         [string]$DbUrl,
         [string]$RedisUrl,
         [string]$ExecutorKey,
-        [string]$ControlPlane
+        [string]$ControlPlane,
+        [string]$DevApiOrigin,
+        [string]$CorsOrigins
     )
 
+    $db = Escape-CmdSetValue $DbUrl
+    $redis = Escape-CmdSetValue $RedisUrl
+    $execKey = Escape-CmdSetValue $ExecutorKey
+    $cp = Escape-CmdSetValue $ControlPlane
+    $cors = Escape-CmdSetValue $CorsOrigins
+    $devApi = Escape-CmdSetValue $DevApiOrigin
+
     $apiLines = @(
-        '$ErrorActionPreference = "Stop"'
-        ('Set-Content -Path "' + $ApiPidFile + '" -Value $PID')
-        ('Set-Location "' + $Root + '"')
-        ('$env:DATABASE_URL = "' + $DbUrl + '"')
-        ('$env:REDIS_URL = "' + $RedisUrl + '"')
-        ('$env:EXECUTOR_SERVICE_KEY = "' + $ExecutorKey + '"')
-        ('$env:CONTROL_PLANE_URL = "' + $ControlPlane + '"')
-        ('$env:APP_HOST = "' + $HostName + '"')
-        ('$env:APP_PORT = "' + $Port + '"')
-        'Write-Host "DevSecOps API window - leave this open"'
-        ('Write-Host "API listening on http://' + $HostName + ':' + $Port + '"')
-        ('& "' + $UvicornExe + '" app.main:app --reload --host ' + $HostName + ' --port ' + $Port)
-        'Write-Host ""'
-        'Write-Host "API process exited. Window kept open for logs. Press Enter to close."'
-        'Read-Host'
+        "@echo off"
+        "title DevSecOps API"
+        "cd /d `"$Root`""
+        "set `"DATABASE_URL=$db`""
+        "set `"REDIS_URL=$redis`""
+        "set `"EXECUTOR_SERVICE_KEY=$execKey`""
+        "set `"CONTROL_PLANE_URL=$cp`""
+        "set `"CORS_ORIGINS=$cors`""
+        "set `"APP_HOST=$HostName`""
+        "set `"APP_PORT=$Port`""
+        "echo DevSecOps API - leave this CMD window open"
+        "echo API (hot reload) on http://${HostName}:${Port}"
+        "echo."
+        "`"$UvicornExe`" app.main:app --reload --host $HostName --port $Port"
+        "echo."
+        "echo API exited. Press any key to close this window."
+        "pause >nul"
     )
     Write-Utf8NoBomFile -Path $ApiScriptFile -Lines $apiLines
 
     $workerLines = @(
-        '$ErrorActionPreference = "Stop"'
-        ('Set-Content -Path "' + $WorkerPidFile + '" -Value $PID')
-        ('Set-Location "' + $Root + '"')
-        ('$env:DATABASE_URL = "' + $DbUrl + '"')
-        ('$env:REDIS_URL = "' + $RedisUrl + '"')
-        'Write-Host "DevSecOps worker window - leave this open"'
-        'Write-Host "RQ worker listening on queue: intelligence"'
-        ('& "' + $RqExe + '" worker intelligence --worker-class app.intelligence.worker.Worker --url ' + $RedisUrl)
-        'Write-Host ""'
-        'Write-Host "Worker process exited. Window kept open for logs. Press Enter to close."'
-        'Read-Host'
+        "@echo off"
+        "title DevSecOps Worker"
+        "cd /d `"$Root`""
+        "set `"DATABASE_URL=$db`""
+        "set `"REDIS_URL=$redis`""
+        "echo DevSecOps Worker - leave this CMD window open"
+        "echo RQ worker listening on queue: intelligence"
+        "echo."
+        "`"$RqExe`" worker intelligence --worker-class app.intelligence.worker.Worker --url $redis"
+        "echo."
+        "echo Worker exited. Press any key to close this window."
+        "pause >nul"
     )
     Write-Utf8NoBomFile -Path $WorkerScriptFile -Lines $workerLines
+
+    $frontendLines = @(
+        "@echo off"
+        "title DevSecOps Frontend"
+        "cd /d `"$FrontendDir`""
+        "set `"DEV_API_ORIGIN=$devApi`""
+        "echo DevSecOps Frontend (Next.js live reload) - leave this CMD window open"
+        "echo UI with hot reload: http://${FrontendHost}:${FrontendPort}"
+        "echo API proxied to: $devApi"
+        "echo."
+        "call npm.cmd run dev -- --hostname $FrontendHost --port $FrontendPort"
+        "echo."
+        "echo Frontend exited. Press any key to close this window."
+        "pause >nul"
+    )
+    Write-Utf8NoBomFile -Path $FrontendScriptFile -Lines $frontendLines
 }
 
-function Start-DetachedScriptWindow {
+function Start-DetachedCmdWindow {
     param(
         [Parameter(Mandatory = $true)][string]$Title,
         [Parameter(Mandatory = $true)][string]$ScriptPath
     )
 
-    # Launch through cmd's START so the new console is NOT attached to the
-    # current terminal job (Cursor/VS Code/Windows Terminal often kill child
-    # consoles when the parent script exits).
-    $psExe = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
-    if (-not (Test-Path $psExe)) {
-        $psExe = (Get-Command powershell.exe -ErrorAction Stop).Source
-    }
-
-    $cmdline = 'start "' + $Title + '" "' + $psExe + '" -NoExit -ExecutionPolicy Bypass -File "' + $ScriptPath + '"'
+    # Fully detach a CMD window from Cursor/VS Code/Windows Terminal job objects.
+    $cmdline = 'start "' + $Title + '" cmd.exe /k call "' + $ScriptPath + '"'
     $oldEap = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     & cmd.exe /c $cmdline
@@ -676,15 +722,19 @@ function Start-AppProcesses {
     Ensure-EnvDefaults
     Ensure-PidDir
 
-    if (-not (Test-Path $FrontendOut)) {
-        throw "frontend\out is missing. Run: .\start-local.ps1 setup"
+    $nodeModules = Join-Path $FrontendDir "node_modules"
+    if (-not (Test-Path $nodeModules)) {
+        throw "frontend\node_modules is missing. Run: .\start-local.ps1 setup"
     }
 
     $hostName = $env:APP_HOST
     $preferredPort = [int]$env:APP_PORT
+    $frontendHost = $env:FRONTEND_HOST
+    $frontendPort = [int]$env:FRONTEND_PORT
     $dbUrl = $env:DATABASE_URL
     $redisUrl = $env:REDIS_URL
     $executorKey = $env:EXECUTOR_SERVICE_KEY
+    $corsOrigins = $env:CORS_ORIGINS
 
     Stop-AppProcesses -Quiet
 
@@ -694,22 +744,43 @@ function Start-AppProcesses {
     }
     else {
         $port = Find-FreePort -PreferredPort $preferredPort
-        Write-Host ("==> Using fallback port " + $port + " because " + $preferredPort + " is stuck")
+        Write-Host ("==> Using fallback API port " + $port + " because " + $preferredPort + " is stuck")
+    }
+
+    if (-not (Test-PortFree -Port $frontendPort)) {
+        Write-Host ("==> Frontend port " + $frontendPort + " is busy - freeing it")
+        Clear-ListenPort -Port $frontendPort | Out-Null
+        if (-not (Test-PortFree -Port $frontendPort)) {
+            $frontendPort = Find-FreePort -PreferredPort $frontendPort -Candidates @(3000, 3001, 3002, 3010, 3030)
+            Write-Host ("==> Using fallback frontend port " + $frontendPort)
+        }
     }
 
     $env:APP_PORT = [string]$port
+    $env:FRONTEND_PORT = [string]$frontendPort
     $controlPlane = "http://" + $hostName + ":" + $port
     $env:CONTROL_PLANE_URL = $controlPlane
+    $devApiOrigin = "http://" + $hostName + ":" + $port
+    $env:DEV_API_ORIGIN = $devApiOrigin
+    $env:CORS_ORIGINS = ("http://" + $frontendHost + ":" + $frontendPort + ",http://localhost:" + $frontendPort)
 
-    Write-ChildScripts -HostName $hostName -Port ([string]$port) -DbUrl $dbUrl -RedisUrl $redisUrl -ExecutorKey $executorKey -ControlPlane $controlPlane
+    Write-ChildScripts `
+        -HostName $hostName `
+        -Port ([string]$port) `
+        -FrontendHost $frontendHost `
+        -FrontendPort ([string]$frontendPort) `
+        -DbUrl $dbUrl `
+        -RedisUrl $redisUrl `
+        -ExecutorKey $executorKey `
+        -ControlPlane $controlPlane `
+        -DevApiOrigin $devApiOrigin `
+        -CorsOrigins $env:CORS_ORIGINS
 
-    Write-Host "==> Starting detached API window"
-    Start-DetachedScriptWindow -Title "DevSecOps API" -ScriptPath $ApiScriptFile
+    Write-Host "==> Starting detached CMD windows (API + worker + live frontend)"
+    Start-DetachedCmdWindow -Title "DevSecOps API" -ScriptPath $ApiScriptFile
+    Start-DetachedCmdWindow -Title "DevSecOps Worker" -ScriptPath $WorkerScriptFile
+    Start-DetachedCmdWindow -Title "DevSecOps Frontend" -ScriptPath $FrontendScriptFile
 
-    Write-Host "==> Starting detached worker window"
-    Start-DetachedScriptWindow -Title "DevSecOps Worker" -ScriptPath $WorkerScriptFile
-
-    # Give child windows a moment to write pid files
     Start-Sleep -Seconds 2
 
     if ($WithExecutors) {
@@ -718,17 +789,17 @@ function Start-AppProcesses {
     }
 
     Write-Host ""
-    Write-Host "Local stack is up (API + worker run in separate windows)."
-    Write-Host ("  Chat:      http://" + $hostName + ":" + $port)
-    Write-Host ("  Dashboard: http://" + $hostName + ":" + $port + "/dashboard")
-    Write-Host ("  Settings:  http://" + $hostName + ":" + $port + "/settings")
+    Write-Host "Local stack is up in separate CMD windows."
+    Write-Host ("  UI (live):  http://" + $frontendHost + ":" + $frontendPort)
+    Write-Host ("  API:        http://" + $hostName + ":" + $port)
+    Write-Host ("  Dashboard:  http://" + $frontendHost + ":" + $frontendPort + "/dashboard")
     Write-Host ""
-    Write-Host "Keep those two windows open. Closing them stops the app."
+    Write-Host "Edit frontend or Python code - changes reload automatically."
+    Write-Host "Keep the three CMD windows open. Closing them stops the app."
     if ($port -ne $preferredPort) {
         Write-Host ""
-        Write-Host ("Note: preferred port " + $preferredPort + " is a Windows/Docker ghost binding.")
+        Write-Host ("Note: preferred API port " + $preferredPort + " is a Windows/Docker ghost binding.")
         Write-Host "To reclaim it later (Admin PowerShell): net stop winnat & net start winnat"
-        Write-Host "Or restart Docker Desktop / reboot."
     }
     Write-Host ""
     Write-Host "Stop with: .\start-local.ps1 stop"
@@ -761,22 +832,42 @@ function Stop-AppProcesses {
 
     Stop-ProcessFromPidFile -Path $ApiPidFile -Label "API" -Quiet:$Quiet
     Stop-ProcessFromPidFile -Path $WorkerPidFile -Label "worker" -Quiet:$Quiet
+    Stop-ProcessFromPidFile -Path $FrontendPidFile -Label "frontend" -Quiet:$Quiet
 
     Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
         Where-Object {
             $_.CommandLine -and (
                 ($_.CommandLine -like "*uvicorn*app.main:app*") -or
-                ($_.CommandLine -like "*rq.exe*worker*intelligence*")
+                ($_.CommandLine -like "*rq.exe*worker*intelligence*") -or
+                ($_.CommandLine -like "*rq worker intelligence*") -or
+                ($_.CommandLine -like "*run-api.cmd*") -or
+                ($_.CommandLine -like "*run-worker.cmd*") -or
+                ($_.CommandLine -like "*run-frontend.cmd*") -or
+                (
+                    ($_.CommandLine -like "*next*dev*") -and
+                    ($_.CommandLine -like "*frontend*")
+                )
             )
         } |
         ForEach-Object {
-            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+            Stop-PortProcessTree -ProcId ([int]$_.ProcessId)
             if (-not $Quiet) { Write-Host ("Stopped leftover process " + $_.ProcessId) }
         }
+
+    # Also close titled CMD windows if still around
+    Get-Process -Name cmd -ErrorAction SilentlyContinue | ForEach-Object {
+        try {
+            if ($_.MainWindowTitle -match '^DevSecOps (API|Worker|Frontend)') {
+                Stop-PortProcessTree -ProcId $_.Id
+                if (-not $Quiet) { Write-Host ("Stopped CMD window: " + $_.MainWindowTitle) }
+            }
+        }
+        catch { }
+    }
 }
 
 function Invoke-Stop {
-    Write-Host "==> Stopping local API / worker"
+    Write-Host "==> Stopping local API / worker / frontend"
     Stop-AppProcesses
 
     if (-not $SkipDocker) {
@@ -796,25 +887,22 @@ function Invoke-Status {
     Write-Host ("Project: " + $Root)
     Write-Host ""
 
-    if (Test-Path $VenvPython) { Write-Host "venv:          ok" } else { Write-Host "venv:          missing (run setup)" }
-    if (Test-Path $FrontendOut) { Write-Host "frontend/out:  ok" } else { Write-Host "frontend/out:  missing (run setup)" }
+    if (Test-Path $VenvPython) { Write-Host "venv:              ok" } else { Write-Host "venv:              missing (run setup)" }
+    if (Test-Path (Join-Path $FrontendDir "node_modules")) { Write-Host "frontend deps:     ok" } else { Write-Host "frontend deps:     missing (run setup)" }
+    if (Test-Path $FrontendOut) { Write-Host "frontend/out:      ok (static build)" } else { Write-Host "frontend/out:      not built (optional for live start)" }
 
-    foreach ($pair in @(
-        @{ Name = "API"; File = $ApiPidFile },
-        @{ Name = "worker"; File = $WorkerPidFile }
-    )) {
-        if (Test-Path $pair.File) {
-            $procId = (Get-Content $pair.File | Select-Object -First 1).Trim()
-            $alive = Get-Process -Id ([int]$procId) -ErrorAction SilentlyContinue
-            if ($alive) {
-                Write-Host ((" {0,-13} running (pid {1})" -f ($pair.Name + ":"), $procId).TrimStart())
-            }
-            else {
-                Write-Host ((" {0,-13} stale pid file ({1})" -f ($pair.Name + ":"), $procId).TrimStart())
-            }
+    $titles = @{}
+    Get-Process -Name cmd -ErrorAction SilentlyContinue | ForEach-Object {
+        if ($_.MainWindowTitle -match '^DevSecOps (API|Worker|Frontend)') {
+            $titles[$_.MainWindowTitle] = $_.Id
+        }
+    }
+    foreach ($name in @("DevSecOps API", "DevSecOps Worker", "DevSecOps Frontend")) {
+        if ($titles.ContainsKey($name)) {
+            Write-Host ("{0,-18} running (pid {1})" -f ($name + ":"), $titles[$name])
         }
         else {
-            Write-Host ((" {0,-13} not managed" -f ($pair.Name + ":")).TrimStart())
+            Write-Host ("{0,-18} not running" -f ($name + ":"))
         }
     }
 
