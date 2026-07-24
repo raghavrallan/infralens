@@ -94,9 +94,6 @@ function Ensure-EnvDefaults {
     if (-not $env:DEV_API_ORIGIN) {
         $env:DEV_API_ORIGIN = ("http://" + $env:APP_HOST + ":" + $env:APP_PORT)
     }
-    if (-not $env:CORS_ORIGINS) {
-        $env:CORS_ORIGINS = ("http://" + $env:FRONTEND_HOST + ":" + $env:FRONTEND_PORT + ",http://localhost:" + $env:FRONTEND_PORT)
-    }
 }
 
 function Assert-Venv {
@@ -674,15 +671,13 @@ function Write-ChildScripts {
         [string]$RedisUrl,
         [string]$ExecutorKey,
         [string]$ControlPlane,
-        [string]$DevApiOrigin,
-        [string]$CorsOrigins
+        [string]$DevApiOrigin
     )
 
     $db = Escape-CmdSetValue $DbUrl
     $redis = Escape-CmdSetValue $RedisUrl
     $execKey = Escape-CmdSetValue $ExecutorKey
     $cp = Escape-CmdSetValue $ControlPlane
-    $cors = Escape-CmdSetValue $CorsOrigins
     $devApi = Escape-CmdSetValue $DevApiOrigin
 
     $nodeExe = Get-NodeExe
@@ -699,7 +694,6 @@ function Write-ChildScripts {
         "set `"REDIS_URL=$redis`""
         "set `"EXECUTOR_SERVICE_KEY=$execKey`""
         "set `"CONTROL_PLANE_URL=$cp`""
-        "set `"CORS_ORIGINS=$cors`""
         "set `"APP_HOST=$HostName`""
         "set `"APP_PORT=$Port`""
         "echo DevSecOps API - leave this CMD window open"
@@ -787,7 +781,6 @@ function Start-AppProcesses {
     $dbUrl = $env:DATABASE_URL
     $redisUrl = $env:REDIS_URL
     $executorKey = $env:EXECUTOR_SERVICE_KEY
-    $corsOrigins = $env:CORS_ORIGINS
 
     Stop-AppProcesses -Quiet
 
@@ -815,7 +808,6 @@ function Start-AppProcesses {
     $env:CONTROL_PLANE_URL = $controlPlane
     $devApiOrigin = "http://" + $hostName + ":" + $port
     $env:DEV_API_ORIGIN = $devApiOrigin
-    $env:CORS_ORIGINS = ("http://" + $frontendHost + ":" + $frontendPort + ",http://localhost:" + $frontendPort)
 
     Write-ChildScripts `
         -HostName $hostName `
@@ -826,8 +818,7 @@ function Start-AppProcesses {
         -RedisUrl $redisUrl `
         -ExecutorKey $executorKey `
         -ControlPlane $controlPlane `
-        -DevApiOrigin $devApiOrigin `
-        -CorsOrigins $env:CORS_ORIGINS
+        -DevApiOrigin $devApiOrigin
 
     Write-Host "==> Starting detached CMD windows (API + worker + live frontend)"
     Start-DetachedCmdWindow -Title "DevSecOps API" -ScriptPath $ApiScriptFile
