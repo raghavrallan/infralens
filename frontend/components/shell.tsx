@@ -17,8 +17,8 @@ export function Shell({ children, subtitle = "Skills Suite", scroll = false, loa
       <GlobalLoader active={loading} />
       <header className="topbar">
         <div className="brand">
-          <div className="brand-mark">DS</div>
-          <div><h1>DevSecOps</h1><p>{subtitle}</p></div>
+          <div className="brand-mark">IL</div>
+          <div><h1>InfraLens</h1><p>{subtitle}</p></div>
         </div>
         <nav className="nav">
           <a href="/dashboard" className={`nav-item${pathname.startsWith("/dashboard") ? " active" : ""}`}>Dashboard</a>
