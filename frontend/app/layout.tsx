@@ -10,8 +10,8 @@ const poppins = Poppins({
 });
 
 export const metadata: Metadata = {
-  title: "DevSecOps Skills Suite",
-  description: "DevSecOps intelligence and skills workspace",
+  title: "InfraLens Skills Suite",
+  description: "InfraLens intelligence and skills workspace",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
