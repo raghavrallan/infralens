@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../lib/api";
+import { displayBrandText } from "../lib/branding";
 import type {
   Approval,
   Catalog,
@@ -291,7 +292,7 @@ export function DashboardPage() {
                 onChange={selectProject}
                 options={projects.map((project) => ({
                   value: project.id,
-                  label: `${project.name}${project.is_default ? " (default)" : ""}`,
+                  label: `${displayBrandText(project.name)}${project.is_default ? " (default)" : ""}`,
                 }))}
               />
             </label>
@@ -614,7 +615,7 @@ export function DashboardPage() {
                     <div className="finding-meta">
                       <span>{prettyName(finding.skill)}</span>
                       {finding.resource && (
-                        <span title={finding.resource}>{finding.resource}</span>
+                        <span title={displayBrandText(finding.resource)}>{displayBrandText(finding.resource)}</span>
                       )}
                       <span>blast: {finding.blast_radius || "—"}</span>
                     </div>

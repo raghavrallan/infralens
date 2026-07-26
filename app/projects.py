@@ -24,6 +24,7 @@ from app.db import (
     Workflow,
     WorkflowRun,
 )
+from app.presentation import display_text
 
 
 def _default_id(session: Any) -> str | None:
@@ -34,7 +35,7 @@ def _default_id(session: Any) -> str | None:
 def _summary(project: Project, default_id: str | None) -> dict[str, Any]:
     return {
         "id": project.id,
-        "name": project.name,
+        "name": display_text(project.name),
         "is_default": project.id == default_id,
         "repos": list(project.repos or []),
         "created_at": project.created_at.isoformat() if project.created_at else None,

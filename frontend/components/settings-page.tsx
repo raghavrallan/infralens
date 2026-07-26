@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
+import { displayBrandText } from "../lib/branding";
 import type { ConnectionStatus, JsonObject, Project } from "../lib/types";
 import { Modal } from "./modal";
 import { ProjectModal } from "./project-modal";
@@ -353,7 +354,7 @@ export function SettingsPage() {
           <div className="card-head">
             <h3>Project</h3>
             <span className="pill ok">
-              {current?.name || "Selecting project"}
+              {displayBrandText(current?.name) || "Selecting project"}
             </span>
           </div>
           <p className="muted small">
@@ -369,7 +370,7 @@ export function SettingsPage() {
               onChange={switchProject}
               options={projects.map((project) => ({
                 value: project.id,
-                label: `${project.name}${project.is_default ? " (default)" : ""}`,
+                label: `${displayBrandText(project.name)}${project.is_default ? " (default)" : ""}`,
               }))}
             />
             <button

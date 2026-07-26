@@ -21,6 +21,7 @@ from app.db import (
     WorkflowRun,
 )
 from app.intelligence.risk_engine import GATE_LABELS as _GATE_LABELS
+from app.presentation import display_value
 from app.skills import is_workflow_safe
 
 # Change-producing findings wait this long for a decision; nothing auto-executes.
@@ -176,7 +177,7 @@ def _module_of(skills: list[str]) -> str:
 
 
 def _workflow_dict(row: Workflow) -> dict[str, Any]:
-    return {
+    return display_value({
         "id": row.id,
         "project_id": row.project_id,
         "name": row.name,
@@ -189,11 +190,11 @@ def _workflow_dict(row: Workflow) -> dict[str, Any]:
         "enabled": row.enabled,
         "created_at": _iso(row.created_at),
         "updated_at": _iso(row.updated_at),
-    }
+    })
 
 
 def _run_dict(row: WorkflowRun, workflow_name: str = "") -> dict[str, Any]:
-    return {
+    return display_value({
         "id": row.id,
         "workflow_id": row.workflow_id,
         "workflow_name": workflow_name,
@@ -205,11 +206,11 @@ def _run_dict(row: WorkflowRun, workflow_name: str = "") -> dict[str, Any]:
         "created_at": _iso(row.created_at),
         "started_at": _iso(row.started_at),
         "finished_at": _iso(row.finished_at),
-    }
+    })
 
 
 def _finding_dict(row: Finding) -> dict[str, Any]:
-    return {
+    return display_value({
         "id": row.id,
         "run_id": row.run_id,
         "workflow_id": row.workflow_id,
@@ -230,7 +231,7 @@ def _finding_dict(row: Finding) -> dict[str, Any]:
         "gate_rationale": row.gate_rationale,
         "status": row.status,
         "created_at": _iso(row.created_at),
-    }
+    })
 
 
 # ---------- Workflows ----------
@@ -577,7 +578,7 @@ def _approval_dict(approval: Approval, finding: Optional[Finding]) -> dict[str, 
     }
     if finding is not None:
         payload["finding"] = _finding_dict(finding)
-    return payload
+    return display_value(payload)
 
 
 def list_approvals(

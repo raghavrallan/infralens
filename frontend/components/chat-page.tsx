@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, apiUrl, consumeSse } from "../lib/api";
+import { displayBrandText } from "../lib/branding";
 import { copyText } from "../lib/clipboard";
 import type { Action, ActionEvent, ChatDetail, ChatMessage, ChatSummary, ConnectionStatus, MetricChart, Project, Skill, StreamEvent } from "../lib/types";
 import { MarkdownContent } from "./markdown";
@@ -497,7 +498,7 @@ export function ChatPage() {
       <div className="workspace">
         <aside className="chat-sidebar">
           <div className="project-bar"><span className="project-label">Project</span><div className="project-row">
-            <ThemedSelect className="project-select" value={projectId || ""} ariaLabel="Project" onChange={selectProject} options={projects.map((project) => ({ value: project.id, label: `${project.name}${project.is_default ? " (default)" : ""}` }))} />
+            <ThemedSelect className="project-select" value={projectId || ""} ariaLabel="Project" onChange={selectProject} options={projects.map((project) => ({ value: project.id, label: `${displayBrandText(project.name)}${project.is_default ? " (default)" : ""}` }))} />
             <button className="icon-btn" title="New project" onClick={() => setProjectModalOpen(true)}>+</button>
           </div></div>
           <button className="new-chat" onClick={() => void newChat()}>+ New chat</button>

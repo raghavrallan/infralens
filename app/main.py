@@ -29,6 +29,7 @@ from app.execution import service as execution
 from app.intelligence import scheduler as intel_scheduler
 from app.intelligence import workflows as intel
 from app.intelligence.queue import enqueue_run
+from app.presentation import display_value, internal_text
 from app.providers import github_infra
 from app.skills import WORKFLOW_SAFE, registry
 
@@ -574,6 +575,8 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
         raise HTTPException(status_code=400, detail=f"Unknown skill: {request.skill}")
 
     chat_id = request.chat_id
+    # UI may say MetLife / ml-*; tools and skills still need EQIP / eq-*.
+    internal_message = internal_text(request.message)
     if not chat_id or chats.get_chat(chat_id) is None:
         chat_id = chats.create_chat(request.message, project_id=request.project_id)["id"]
     if request.edit_message_id:
@@ -586,7 +589,7 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
     if request.mode == "agent":
         try:
             special_action = chat_actions.handle_turn(
-                chat_id, request.project_id, request.message, request.action_scope, request.access_level
+                chat_id, request.project_id, internal_message, request.action_scope, request.access_level
             )
         except ValueError as exc:
             special_action = {
@@ -596,7 +599,7 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
             }
 
     def sse(event: dict[str, Any]) -> str:
-        return f"data: {json.dumps(event)}\n\n"
+        return f"data: {json.dumps(display_value(event), default=str)}\n\n"
 
     def generate() -> Any:
         yield sse({"type": "chat", "chat_id": chat_id})
@@ -649,9 +652,9 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
             return
 
         history = chat_memory.get_model_context(
-            chat_id, request.message, project_id=request.project_id
+            chat_id, internal_message, project_id=request.project_id
         )
-        diagnostic_context = chat_actions.action_diagnostic_context(chat_id, request.message)
+        diagnostic_context = chat_actions.action_diagnostic_context(chat_id, internal_message)
         if diagnostic_context:
             history.insert(0, {"role": "system", "content": diagnostic_context})
         final: dict[str, Any] = {}
@@ -722,7 +725,7 @@ def execute_plan(request: ExecutePlanRequest) -> StreamingResponse:
     chat_id = request.chat_id
 
     def sse(event: dict[str, Any]) -> str:
-        return f"data: {json.dumps(event)}\n\n"
+        return f"data: {json.dumps(display_value(event), default=str)}\n\n"
 
     def generate() -> Any:
         yield sse({"type": "chat", "chat_id": chat_id})
