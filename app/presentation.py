@@ -1,12 +1,12 @@
-"""Display-only branding transforms for the EQIP → MetLife alias.
+"""Display-only branding transforms for the EQIP → mlife alias.
 
 Stored data, Azure resource IDs used by tools, and DB rows stay as EQIP / eq-*.
 Only outbound API / SSE payloads are rewritten for the UI:
 
-- Project / product name: EQIP → MetLife (any casing)
+- Project / product name: EQIP → mlife (any casing)
 - Resource-style tokens: eq- → ml-, eq_ → ml_, -eq- → -ml-, etc.
 
-Reverse mapping is available so user/UI text that says MetLife / ml- can be
+Reverse mapping is available so user/UI text that says mlife / ml- can be
 translated back before tool calls when needed.
 """
 from __future__ import annotations
@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-# Whole-word product name (EQIP / eqip / Eqip → MetLife / metlife / Metlife)
+# Whole-word product name (EQIP / eqip / Eqip → mlife)
 _EQIP_WORD = re.compile(r"\beqip\b", re.IGNORECASE)
 
 # Resource segments: leading eq-, eq_, or eq as a hyphen/underscore delimited token.
@@ -23,8 +23,8 @@ _EQ_RESOURCE = re.compile(
     r"(?i)(?<![A-Za-z0-9])eq(?=[-_])|(?<=[-_])eq(?=[-_]|$)|(?<![A-Za-z0-9])eq(?=\d)"
 )
 
-# Reverse: MetLife product name and ml- resource tokens
-_METLIFE_WORD = re.compile(r"\bmetlife\b", re.IGNORECASE)
+# Reverse: mlife / MetLife product names and ml- resource tokens
+_MLIFE_WORD = re.compile(r"\b(?:mlife|metlife)\b", re.IGNORECASE)
 _ML_RESOURCE = re.compile(
     r"(?i)(?<![A-Za-z0-9])ml(?=[-_])|(?<=[-_])ml(?=[-_]|$)|(?<![A-Za-z0-9])ml(?=\d)"
 )
@@ -35,8 +35,8 @@ def display_text(value: str) -> str:
     if not value or not isinstance(value, str):
         return value
 
-    # Product name always brands as MetLife (never METLIFE / metlife variants).
-    text = _EQIP_WORD.sub("MetLife", value)
+    # Product name always brands as mlife.
+    text = _EQIP_WORD.sub("mlife", value)
 
     def eq_res_sub(match: re.Match[str]) -> str:
         token = match.group(0)
@@ -55,8 +55,8 @@ def internal_text(value: str) -> str:
     if not value or not isinstance(value, str):
         return value
 
-    # Accept any MetLife casing back to EQIP for tools / Azure lookups.
-    text = _METLIFE_WORD.sub("EQIP", value)
+    # Accept mlife / MetLife casing back to EQIP for tools / Azure lookups.
+    text = _MLIFE_WORD.sub("EQIP", value)
 
     def ml_res_sub(match: re.Match[str]) -> str:
         token = match.group(0)

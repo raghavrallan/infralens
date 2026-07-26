@@ -1,5 +1,5 @@
 /**
- * Display-only EQIP → MetLife branding.
+ * Display-only EQIP → mlife branding.
  * Backend already rewrites API payloads; this keeps selects/labels consistent
  * if any raw name still reaches the client.
  */
@@ -11,7 +11,7 @@ const EQ_RESOURCE =
 export function displayBrandText(value: string | null | undefined): string {
   if (!value) return "";
   return value
-    .replace(EQIP_WORD, "MetLife")
+    .replace(EQIP_WORD, "mlife")
     .replace(EQ_RESOURCE, (token) => {
       if (token === token.toUpperCase()) return "ML";
       if (token[0] === token[0]?.toUpperCase()) return "Ml";

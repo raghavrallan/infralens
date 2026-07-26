@@ -575,7 +575,7 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
         raise HTTPException(status_code=400, detail=f"Unknown skill: {request.skill}")
 
     chat_id = request.chat_id
-    # UI may say MetLife / ml-*; tools and skills still need EQIP / eq-*.
+    # UI may say mlife / ml-*; tools and skills still need EQIP / eq-*.
     internal_message = internal_text(request.message)
     if not chat_id or chats.get_chat(chat_id) is None:
         chat_id = chats.create_chat(request.message, project_id=request.project_id)["id"]
