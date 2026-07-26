@@ -8,7 +8,7 @@ import os
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from sqlalchemy import Boolean, DateTime, String, create_engine, inspect, text
+from sqlalchemy import Boolean, DateTime, Integer, String, create_engine, inspect, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
@@ -216,6 +216,22 @@ class Finding(Base):
     gate_rationale: Mapped[str] = mapped_column(String, default="")
     status: Mapped[str] = mapped_column(String(16), default="open")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class FindingIdentity(Base):
+    """Stable issue key so repeated workflow runs update one finding instead of cloning it.
+
+    Owned by the app role (create_all) because Azure ``findings`` is root_admin-owned
+    and cannot be ALTERed by the application user.
+    """
+
+    __tablename__ = "finding_identities"
+
+    fingerprint: Mapped[str] = mapped_column(String(64), primary_key=True)
+    project_id: Mapped[str] = mapped_column(String(36), index=True)
+    finding_id: Mapped[str] = mapped_column(String(36), index=True)
+    occurrence_count: Mapped[int] = mapped_column(Integer, default=1)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
 class Approval(Base):

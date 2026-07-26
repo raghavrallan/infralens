@@ -16,10 +16,12 @@ from app.db import (
     Approval,
     EngineeringMemory,
     Finding,
+    FindingIdentity,
     SessionLocal,
     Workflow,
     WorkflowRun,
 )
+from app.intelligence.findings import compute_fingerprint
 from app.intelligence.risk_engine import GATE_LABELS as _GATE_LABELS
 from app.presentation import display_value
 from app.skills import is_workflow_safe
@@ -209,7 +211,10 @@ def _run_dict(row: WorkflowRun, workflow_name: str = "") -> dict[str, Any]:
     })
 
 
-def _finding_dict(row: Finding) -> dict[str, Any]:
+def _finding_dict(
+    row: Finding,
+    identity: FindingIdentity | None = None,
+) -> dict[str, Any]:
     return display_value({
         "id": row.id,
         "run_id": row.run_id,
@@ -231,6 +236,9 @@ def _finding_dict(row: Finding) -> dict[str, Any]:
         "gate_rationale": row.gate_rationale,
         "status": row.status,
         "created_at": _iso(row.created_at),
+        "fingerprint": identity.fingerprint if identity else None,
+        "occurrence_count": identity.occurrence_count if identity else 1,
+        "last_seen_at": _iso(identity.last_seen_at) if identity else _iso(row.created_at),
     })
 
 
@@ -469,26 +477,196 @@ def list_runs(
 
 # ---------- Findings ----------
 
+def _apply_finding_fields(
+    row: Finding,
+    *,
+    run_id: str,
+    workflow_id: str,
+    item: dict[str, Any],
+) -> None:
+    row.run_id = run_id
+    row.workflow_id = workflow_id
+    row.skill = item.get("skill", "") or row.skill
+    row.module = item.get("module", "") or row.module
+    row.severity = item.get("severity", row.severity) or "low"
+    row.title = item.get("title", "") or row.title
+    row.resource = item.get("resource", "") or row.resource
+    row.category = item.get("category", "") or row.category
+    row.evidence = item.get("evidence", "") or row.evidence
+    row.recommended_action = (
+        item.get("recommended_action", "") or row.recommended_action
+    )
+    row.risk_class = item.get("risk_class", row.risk_class) or "config_code_change"
+    row.blast_radius = item.get("blast_radius", row.blast_radius) or "medium"
+    row.gate_decision = item.get("gate_decision", row.gate_decision) or "human_approval"
+    row.gate_label = item.get("gate_label", "") or row.gate_label
+    row.gate_rationale = item.get("gate_rationale", "") or row.gate_rationale
+
+
+def _ensure_pending_approval(
+    session: Any,
+    *,
+    finding_id: str,
+    project_id: str,
+    gate: str,
+) -> None:
+    if gate not in _APPROVAL_GATES:
+        return
+    existing = session.scalar(
+        select(Approval.id).where(
+            Approval.finding_id == finding_id,
+            Approval.decision == "pending",
+        )
+    )
+    if existing:
+        return
+    session.add(
+        Approval(
+            id=str(uuid.uuid4()),
+            finding_id=finding_id,
+            project_id=project_id,
+            gate=gate,
+            decision="pending",
+            expires_at=_now() + timedelta(hours=_APPROVAL_TTL_HOURS),
+        )
+    )
+
+
+def collapse_duplicate_findings(project_id: str) -> int:
+    """Hide historical clone rows for the same issue (older → resolved).
+
+    Keeps the newest open/acknowledged finding per fingerprint and records
+    occurrence counts on ``finding_identities``. Safe to call on every
+    dashboard read — cheap when there are no duplicates.
+    """
+    with SessionLocal() as session:
+        rows = list(
+            session.execute(
+                select(Finding)
+                .where(
+                    Finding.project_id == project_id,
+                    Finding.status.in_(("open", "acknowledged")),
+                )
+                .order_by(Finding.created_at.desc())
+            ).scalars()
+        )
+        keepers: dict[str, Finding] = {}
+        counts: dict[str, int] = {}
+        to_resolve: list[str] = []
+        now = _now()
+        for row in rows:
+            fp = compute_fingerprint(
+                project_id, row.skill or "", row.resource or "", row.title or ""
+            )
+            counts[fp] = counts.get(fp, 0) + 1
+            if fp in keepers:
+                to_resolve.append(row.id)
+            else:
+                keepers[fp] = row
+
+        for offset in range(0, len(to_resolve), 150):
+            chunk = to_resolve[offset : offset + 150]
+            session.execute(
+                Finding.__table__.update()
+                .where(Finding.id.in_(chunk))
+                .values(status="resolved")
+            )
+
+        existing_ids = {
+            row.fingerprint: row
+            for row in session.execute(
+                select(FindingIdentity).where(FindingIdentity.project_id == project_id)
+            ).scalars()
+        }
+        for fp, keeper in keepers.items():
+            count = counts.get(fp, 1)
+            identity = existing_ids.get(fp)
+            if identity is None:
+                session.add(
+                    FindingIdentity(
+                        fingerprint=fp,
+                        project_id=project_id,
+                        finding_id=keeper.id,
+                        occurrence_count=count,
+                        last_seen_at=keeper.created_at or now,
+                    )
+                )
+            else:
+                identity.finding_id = keeper.id
+                identity.project_id = project_id
+                if (identity.occurrence_count or 1) < count:
+                    identity.occurrence_count = count
+                if keeper.created_at and (
+                    identity.last_seen_at is None
+                    or keeper.created_at > identity.last_seen_at
+                ):
+                    identity.last_seen_at = keeper.created_at
+
+        if to_resolve:
+            # Drop pending approvals attached to collapsed clone rows.
+            session.execute(
+                Approval.__table__.update()
+                .where(
+                    Approval.finding_id.in_(to_resolve),
+                    Approval.decision == "pending",
+                )
+                .values(decision="rejected", decided_by="system:dedupe")
+            )
+
+        session.commit()
+        return len(to_resolve)
+
+
 def save_findings(
     run_id: str, workflow_id: str, project_id: str, findings: list[dict[str, Any]]
 ) -> int:
+    """Persist findings with upsert-by-fingerprint so reruns do not clone issues."""
     if not findings:
         return 0
+    written = 0
     with SessionLocal() as session:
         for item in findings:
-            finding_id = str(uuid.uuid4())
+            title = item.get("title", "") or ""
+            resource = item.get("resource", "") or ""
+            skill = item.get("skill", "") or ""
+            fp = compute_fingerprint(project_id, skill, resource, title)
             gate = item.get("gate_decision", "human_approval")
+            identity = session.get(FindingIdentity, fp)
+            existing = (
+                session.get(Finding, identity.finding_id) if identity else None
+            )
+
+            if existing is not None:
+                was_resolved = existing.status == "resolved"
+                _apply_finding_fields(
+                    existing, run_id=run_id, workflow_id=workflow_id, item=item
+                )
+                if was_resolved:
+                    existing.status = "open"
+                identity.finding_id = existing.id
+                identity.occurrence_count = int(identity.occurrence_count or 1) + 1
+                identity.last_seen_at = _now()
+                _ensure_pending_approval(
+                    session,
+                    finding_id=existing.id,
+                    project_id=project_id,
+                    gate=gate,
+                )
+                written += 1
+                continue
+
+            finding_id = str(uuid.uuid4())
             session.add(
                 Finding(
                     id=finding_id,
                     run_id=run_id,
                     workflow_id=workflow_id,
                     project_id=project_id,
-                    skill=item.get("skill", ""),
+                    skill=skill,
                     module=item.get("module", ""),
                     severity=item.get("severity", "low"),
-                    title=item.get("title", ""),
-                    resource=item.get("resource", ""),
+                    title=title,
+                    resource=resource,
                     category=item.get("category", ""),
                     evidence=item.get("evidence", ""),
                     recommended_action=item.get("recommended_action", ""),
@@ -500,19 +678,33 @@ def save_findings(
                     status="open",
                 )
             )
-            if gate in _APPROVAL_GATES:
-                session.add(
-                    Approval(
-                        id=str(uuid.uuid4()),
-                        finding_id=finding_id,
-                        project_id=project_id,
-                        gate=gate,
-                        decision="pending",
-                        expires_at=_now() + timedelta(hours=_APPROVAL_TTL_HOURS),
-                    )
+            session.add(
+                FindingIdentity(
+                    fingerprint=fp,
+                    project_id=project_id,
+                    finding_id=finding_id,
+                    occurrence_count=1,
+                    last_seen_at=_now(),
                 )
+            )
+            _ensure_pending_approval(
+                session,
+                finding_id=finding_id,
+                project_id=project_id,
+                gate=gate,
+            )
+            written += 1
         session.commit()
-    return len(findings)
+    return written
+
+
+def _identity_map(session: Any, finding_ids: list[str]) -> dict[str, FindingIdentity]:
+    if not finding_ids:
+        return {}
+    rows = session.execute(
+        select(FindingIdentity).where(FindingIdentity.finding_id.in_(finding_ids))
+    ).scalars()
+    return {row.finding_id: row for row in rows}
 
 
 def list_findings(
@@ -526,6 +718,7 @@ def list_findings(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
 ) -> list[dict[str, Any]]:
+    collapse_duplicate_findings(project_id)
     since, until = time_range_bounds(time_range, start_date, end_date)
     with SessionLocal() as session:
         query = select(Finding).where(Finding.project_id == project_id)
@@ -542,7 +735,9 @@ def list_findings(
         if status:
             query = query.where(Finding.status == status)
         query = query.order_by(Finding.created_at.desc()).limit(limit)
-        return [_finding_dict(f) for f in session.execute(query).scalars()]
+        rows = list(session.execute(query).scalars())
+        identities = _identity_map(session, [row.id for row in rows])
+        return [_finding_dict(f, identities.get(f.id)) for f in rows]
 
 
 def update_finding_status(finding_id: str, status: str) -> Optional[dict[str, Any]]:
@@ -554,7 +749,10 @@ def update_finding_status(finding_id: str, status: str) -> Optional[dict[str, An
             return None
         row.status = status
         session.commit()
-        return _finding_dict(row)
+        identity = session.scalar(
+            select(FindingIdentity).where(FindingIdentity.finding_id == finding_id)
+        )
+        return _finding_dict(row, identity)
 
 
 # ---------- Approvals ----------
@@ -672,6 +870,7 @@ def dashboard_summary(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
 ) -> dict[str, Any]:
+    collapse_duplicate_findings(project_id)
     since, until = time_range_bounds(time_range, start_date, end_date)
     date_filter = []
     if module:

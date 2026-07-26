@@ -618,6 +618,11 @@ export function DashboardPage() {
                         <span title={displayBrandText(finding.resource)}>{displayBrandText(finding.resource)}</span>
                       )}
                       <span>blast: {finding.blast_radius || "—"}</span>
+                      {(finding.occurrence_count || 1) > 1 && (
+                        <span title="Times this issue was seen across workflow runs">
+                          Seen {finding.occurrence_count}×
+                        </span>
+                      )}
                     </div>
                     <div className="finding-body">
                       {finding.evidence && (
@@ -638,7 +643,7 @@ export function DashboardPage() {
                         className="tiny-btn"
                         onClick={() => explain(finding)}
                       >
-                        Explain in chat
+                        Chat to resolve
                       </button>
                       {finding.status === "open" && (
                         <button
@@ -723,7 +728,7 @@ export function DashboardPage() {
                         className="tiny-btn"
                         onClick={() => explain(approval.finding)}
                       >
-                        Explain in chat
+                        Chat to resolve
                       </button>
                       <button
                         className="tiny-btn danger"

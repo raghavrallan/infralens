@@ -58,6 +58,10 @@ export type Finding = {
   module_label?: string;
   evidence?: string;
   recommended_action?: string;
+  fingerprint?: string | null;
+  occurrence_count?: number;
+  last_seen_at?: string | null;
+  created_at?: string | null;
 };
 
 export type Approval = {

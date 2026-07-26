@@ -6,7 +6,9 @@ action. A short extraction pass turns the analysis into that structure; if the
 model is unavailable or returns nothing usable, the whole analysis becomes a
 single finding so a run never silently produces nothing.
 """
+import hashlib
 import json
+import re
 from typing import Any, Optional
 
 from app import azure_client
@@ -14,6 +16,7 @@ from app.intelligence import risk_engine
 from app.skills import blast_radius_for, remediation_class_for
 
 _SEVERITIES = ("critical", "high", "medium", "low")
+_CVE_RE = re.compile(r"cve-\d{4}-\d+", re.IGNORECASE)
 
 _EXTRACT_SYSTEM_PROMPT = (
     "You convert a DevSecOps analysis into a list of discrete findings for a "
@@ -60,6 +63,39 @@ def _clean_title(raw: str) -> str:
                     break
     title = title.lstrip("#").strip().strip('"')
     return title[:400]
+
+
+def normalize_issue_text(value: str) -> str:
+    """Normalize title/resource text for stable fingerprinting across runs."""
+    text = (value or "").lower().strip()
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"[^\w\s\-/\.]", "", text)
+    return text.strip()
+
+
+def compute_fingerprint(
+    project_id: str,
+    skill: str,
+    resource: str = "",
+    title: str = "",
+) -> str:
+    """Stable identity for an issue within a project.
+
+    Workflow reruns often reword the title via the LLM while pointing at the
+    same resource. Prefer skill+resource when a resource exists; fall back to
+    title (or CVE id) otherwise.
+    """
+    skill_key = (skill or "").strip().lower()
+    cve = _CVE_RE.search(title or "")
+    if cve:
+        raw = f"{project_id}|{skill_key}|{cve.group(0).lower()}"
+    else:
+        resource_key = normalize_issue_text(resource)
+        if resource_key:
+            raw = f"{project_id}|{skill_key}|{resource_key}"
+        else:
+            raw = f"{project_id}|{skill_key}|{normalize_issue_text(title)}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
 
 
 def _extract_structured(
