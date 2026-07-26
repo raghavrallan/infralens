@@ -650,7 +650,7 @@ export function SettingsPage() {
               </button>
               <button
                 type="button"
-                className="modal-btn primary"
+                className="modal-btn danger"
                 disabled={deletingProject}
                 onClick={() => void confirmDeleteProject()}
               >
