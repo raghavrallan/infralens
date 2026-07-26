@@ -17,6 +17,9 @@ from app.db import (
     Chat,
     Connection,
     EngineeringMemory,
+    ExecutionApproval,
+    ExecutionEvent,
+    ExecutionJob,
     Finding,
     Message,
     Project,
@@ -133,11 +136,19 @@ def set_default(project_id: str) -> Optional[dict[str, Any]]:
 
 
 def delete_project(project_id: str) -> bool:
-    """Delete a project and everything scoped to it. The default is never removed."""
+    """Delete a project and everything scoped to it.
+
+    The current default workspace cannot be deleted — make another project
+    default first. The seeded id ``default`` is allowed to be deleted once it
+    is no longer the default (e.g. after it was renamed to AEYE).
+    """
     with SessionLocal() as session:
         project = session.get(Project, project_id)
-        if project is None or project_id == _default_id(session) or project_id == DEFAULT_PROJECT_ID:
+        if project is None:
             return False
+        if project_id == _default_id(session):
+            return False
+
         chat_ids = list(
             session.execute(
                 select(Chat.id).where(Chat.project_id == project_id)
@@ -146,6 +157,25 @@ def delete_project(project_id: str) -> bool:
         if chat_ids:
             session.execute(delete(Message).where(Message.chat_id.in_(chat_ids)))
             session.execute(delete(Chat).where(Chat.id.in_(chat_ids)))
+
+        action_ids = list(
+            session.execute(
+                select(ExecutionJob.id).where(ExecutionJob.project_id == project_id)
+            ).scalars()
+        )
+        if action_ids:
+            session.execute(
+                delete(ExecutionEvent).where(ExecutionEvent.action_id.in_(action_ids))
+            )
+            session.execute(
+                delete(ExecutionApproval).where(
+                    ExecutionApproval.action_id.in_(action_ids)
+                )
+            )
+            session.execute(
+                delete(ExecutionJob).where(ExecutionJob.id.in_(action_ids))
+            )
+
         session.execute(delete(Connection).where(Connection.project_id == project_id))
         session.execute(delete(Approval).where(Approval.project_id == project_id))
         session.execute(delete(Finding).where(Finding.project_id == project_id))

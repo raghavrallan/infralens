@@ -287,18 +287,30 @@ export function SettingsPage() {
     await loadProjects();
   };
   const deleteProject = async () => {
+    if (!projectId) return;
+    if (current?.is_default) {
+      setProjectMessage(
+        "Cannot delete the default project. Click Make default on another project first, then delete this one.",
+      );
+      return;
+    }
     if (
-      !projectId ||
-      projectId === "default" ||
-      current?.is_default ||
       !window.confirm(
         "Delete this project, connections, repositories and chats?",
       )
-    )
+    ) {
       return;
-    await api(`/api/projects/${projectId}`, { method: "DELETE" });
-    window.localStorage.removeItem("projectId");
-    await loadProjects();
+    }
+    try {
+      await api(`/api/projects/${projectId}`, { method: "DELETE" });
+      window.localStorage.removeItem("projectId");
+      setProjectMessage("Project deleted.");
+      await loadProjects();
+    } catch (error) {
+      setProjectMessage(
+        error instanceof Error ? error.message : "Could not delete project.",
+      );
+    }
   };
   const saveAzure = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -395,8 +407,11 @@ export function SettingsPage() {
             </button>
             <button
               className="ghost danger"
-              disabled={
-                !projectId || projectId === "default" || current?.is_default
+              disabled={!projectId || current?.is_default}
+              title={
+                current?.is_default
+                  ? "Make another project the default before deleting this one"
+                  : "Delete this project"
               }
               onClick={() => void deleteProject()}
             >
@@ -405,7 +420,9 @@ export function SettingsPage() {
           </div>
           <div className="form-msg">
             {projectMessage}
-            {current?.is_default ? " This is the default project." : ""}
+            {current?.is_default
+              ? " This is the default project — make another project default before deleting it."
+              : ""}
           </div>
         </section>
         <section className="card">

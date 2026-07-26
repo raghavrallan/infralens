@@ -275,10 +275,22 @@ def set_default_project(project_id: str) -> dict[str, Any]:
 @app.delete("/api/projects/{project_id}")
 def delete_project(project_id: str) -> dict[str, bool]:
     """Delete a project and everything scoped to it (the default cannot be deleted)."""
+    project = projects.get_project(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project.get("is_default"):
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete the default project. Make another project the default first, then delete this one.",
+        )
     deleted = projects.delete_project(project_id)
-    if deleted:
-        intel_scheduler.sync_schedules()
-    return {"deleted": deleted}
+    if not deleted:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not delete this project. Make another project the default first.",
+        )
+    intel_scheduler.sync_schedules()
+    return {"deleted": True}
 
 
 @app.get("/api/projects/{project_id}/repos")
