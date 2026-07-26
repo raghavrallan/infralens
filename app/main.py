@@ -7,14 +7,22 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Literal, Optional
 
-from fastapi import FastAPI, Header, HTTPException
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from app import (
     __version__,
+    auth,
     azure_client,
     chat_memory,
     chats,
@@ -39,6 +47,7 @@ _FRONTEND_DIR = Path(__file__).resolve().parents[1] / "frontend" / "out"
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
+    auth.ensure_seed_user()
     intel.seed_default_workflows(DEFAULT_PROJECT_ID)
     intel_scheduler.start_scheduler()
     try:
@@ -47,7 +56,7 @@ async def lifespan(_: FastAPI):
         intel_scheduler.shutdown_scheduler()
 
 
-app = FastAPI(title="DevSecOps LLM Skills Suite", version=__version__, lifespan=lifespan)
+app = FastAPI(title="InfraLens Skills Suite", version=__version__, lifespan=lifespan)
 
 # Allow browser clients (Next.js live UI on :3000, static export on :8000, etc.).
 app.add_middleware(
@@ -57,6 +66,32 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+_PUBLIC_API_PATHS = frozenset({"/api/health", "/api/auth/login"})
+
+
+class JwtAuthMiddleware(BaseHTTPMiddleware):
+    """Require a Bearer JWT for all /api routes except login and health."""
+
+    async def dispatch(self, request: Request, call_next):
+        if request.method == "OPTIONS":
+            return await call_next(request)
+        path = request.url.path.rstrip("/") or "/"
+        # Keep /api/health exact; login is public; everything else under /api needs JWT.
+        if path.startswith("/api") and path not in _PUBLIC_API_PATHS:
+            try:
+                user = auth.verify_token(
+                    auth.bearer_token(request.headers.get("Authorization"))
+                )
+            except Exception:
+                user = None
+            if user is None:
+                return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+            request.state.user = user
+        return await call_next(request)
+
+
+app.add_middleware(JwtAuthMiddleware)
 
 
 def _refresh_chat_memory(chat_id: str) -> None:
@@ -113,6 +148,11 @@ class ExecutePlanRequest(BaseModel):
 class ActionDecisionRequest(BaseModel):
     approver: str = "user"
     reason: str = ""
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
 
 
 class ExecutorEventRequest(BaseModel):
@@ -207,6 +247,21 @@ def put_azure_config_route(body: AzureConfigRequest) -> dict[str, Any]:
         api_version=body.api_version,
     )
     return get_azure_config_route()
+
+
+@app.post("/api/auth/login")
+def login(body: LoginRequest) -> dict[str, Any]:
+    """Authenticate against the users table and return a JWT."""
+    session = auth.authenticate(body.username, body.password)
+    if session is None:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    return session
+
+
+@app.get("/api/auth/me")
+def auth_me(user: dict[str, Any] = Depends(auth.require_user)) -> dict[str, Any]:
+    """Return the current user for a valid Bearer JWT."""
+    return {"user": user}
 
 
 @app.get("/api/skills", response_model=list[SkillInfo])
@@ -1151,6 +1206,12 @@ def settings_page() -> FileResponse:
 @app.get("/wiki/")
 def wiki_page() -> FileResponse:
     return _frontend_page("wiki")
+
+
+@app.get("/login")
+@app.get("/login/")
+def login_page() -> FileResponse:
+    return _frontend_page("login")
 
 
 app.mount("/", StaticFiles(directory=_FRONTEND_DIR, html=True), name="frontend")

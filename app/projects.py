@@ -4,15 +4,18 @@ Each project has its own provider credentials (Azure / AWS / GitHub) and its own
 set of allowed GitHub repositories, so work for one client/product never leaks
 into another. Chats are scoped to a project too.
 """
+import json
 import uuid
 from typing import Any, Optional
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
+from sqlalchemy.exc import ProgrammingError
 
 from app.db import (
     AppConfig,
     DEFAULT_PROJECT_ID,
     DEFAULT_PROJECT_CONFIG_KEY,
+    DELETED_PROJECTS_CONFIG_KEY,
     Approval,
     Chat,
     Connection,
@@ -35,6 +38,40 @@ def _default_id(session: Any) -> str | None:
     return setting.value if setting and setting.value else None
 
 
+def _deleted_ids(session: Any) -> set[str]:
+    setting = session.get(AppConfig, DELETED_PROJECTS_CONFIG_KEY)
+    if setting is None or not setting.value:
+        return set()
+    try:
+        data = json.loads(setting.value)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return set()
+    if not isinstance(data, list):
+        return set()
+    return {str(item) for item in data if item}
+
+
+def _mark_deleted(session: Any, project_id: str) -> None:
+    ids = _deleted_ids(session)
+    ids.add(project_id)
+    payload = json.dumps(sorted(ids))
+    setting = session.get(AppConfig, DELETED_PROJECTS_CONFIG_KEY)
+    if setting is None:
+        session.add(AppConfig(key=DELETED_PROJECTS_CONFIG_KEY, value=payload))
+    else:
+        setting.value = payload
+
+
+def _try_execute(session: Any, statement: Any) -> bool:
+    """Run a statement; return False when the DB role lacks privilege."""
+    try:
+        with session.begin_nested():
+            session.execute(statement)
+        return True
+    except ProgrammingError:
+        return False
+
+
 def _summary(project: Project, default_id: str | None) -> dict[str, Any]:
     return {
         "id": project.id,
@@ -49,12 +86,26 @@ def _summary(project: Project, default_id: str | None) -> dict[str, Any]:
 def ensure_default() -> str:
     """Guarantee exactly one default project exists and return its id."""
     with SessionLocal() as session:
+        deleted = _deleted_ids(session)
         selected_id = _default_id(session)
         selected = session.get(Project, selected_id) if selected_id else None
+        if selected is None or selected.id in deleted:
+            selected = None
+            for candidate in session.scalars(
+                select(Project).order_by(Project.created_at.asc(), Project.id.asc())
+            ):
+                if candidate.id not in deleted:
+                    selected = candidate
+                    break
         if selected is None:
-            selected = session.scalar(select(Project).order_by(Project.created_at.asc(), Project.id.asc()))
-        if selected is None:
-            selected = Project(id=DEFAULT_PROJECT_ID, name="Default project", repos=[])
+            # Reuse the seeded id only when that row does not already exist
+            # (including soft-deleted tombstones still present in projects).
+            new_id = (
+                DEFAULT_PROJECT_ID
+                if session.get(Project, DEFAULT_PROJECT_ID) is None
+                else str(uuid.uuid4())
+            )
+            selected = Project(id=new_id, name="Default project", repos=[])
             session.add(selected)
             session.flush()
         setting = session.get(AppConfig, DEFAULT_PROJECT_CONFIG_KEY)
@@ -70,8 +121,11 @@ def list_projects() -> list[dict[str, Any]]:
     ensure_default()
     with SessionLocal() as session:
         default_id = _default_id(session)
+        deleted = _deleted_ids(session)
         rows = session.execute(select(Project).order_by(Project.created_at.asc())).scalars()
-        return [_summary(p, default_id) for p in rows]
+        return [
+            _summary(p, default_id) for p in rows if p.id not in deleted
+        ]
 
 
 def create_project(name: str) -> dict[str, Any]:
@@ -86,6 +140,8 @@ def create_project(name: str) -> dict[str, Any]:
 
 def get_project(project_id: str) -> Optional[dict[str, Any]]:
     with SessionLocal() as session:
+        if project_id in _deleted_ids(session):
+            return None
         project = session.get(Project, project_id)
         return _summary(project, _default_id(session)) if project else None
 
@@ -95,6 +151,8 @@ def rename_project(project_id: str, name: str) -> Optional[dict[str, Any]]:
     if not clean:
         return get_project(project_id)
     with SessionLocal() as session:
+        if project_id in _deleted_ids(session):
+            return None
         project = session.get(Project, project_id)
         if project is None:
             return None
@@ -106,6 +164,8 @@ def rename_project(project_id: str, name: str) -> Optional[dict[str, Any]]:
 def set_repos(project_id: str, repos: list[str]) -> Optional[dict[str, Any]]:
     cleaned = sorted({r.strip() for r in repos if r and r.strip()})
     with SessionLocal() as session:
+        if project_id in _deleted_ids(session):
+            return None
         project = session.get(Project, project_id)
         if project is None:
             return None
@@ -116,6 +176,8 @@ def set_repos(project_id: str, repos: list[str]) -> Optional[dict[str, Any]]:
 
 def get_repos(project_id: str) -> list[str]:
     with SessionLocal() as session:
+        if project_id in _deleted_ids(session):
+            return []
         project = session.get(Project, project_id)
         return list(project.repos or []) if project else []
 
@@ -123,6 +185,8 @@ def get_repos(project_id: str) -> list[str]:
 def set_default(project_id: str) -> Optional[dict[str, Any]]:
     """Make one existing project the sole default workspace."""
     with SessionLocal() as session:
+        if project_id in _deleted_ids(session):
+            return None
         project = session.get(Project, project_id)
         if project is None:
             return None
@@ -141,8 +205,15 @@ def delete_project(project_id: str) -> bool:
     The current default workspace cannot be deleted — make another project
     default first. The seeded id ``default`` is allowed to be deleted once it
     is no longer the default (e.g. after it was renamed to AEYE).
+
+    On Azure Postgres the app role often has SELECT/INSERT/UPDATE but not
+    DELETE on tables owned by ``root_admin``. In that case we purge what we can,
+    scrub secrets, and soft-hide the project via ``app_config``.
     """
     with SessionLocal() as session:
+        deleted = _deleted_ids(session)
+        if project_id in deleted:
+            return False
         project = session.get(Project, project_id)
         if project is None:
             return False
@@ -155,8 +226,8 @@ def delete_project(project_id: str) -> bool:
             ).scalars()
         )
         if chat_ids:
-            session.execute(delete(Message).where(Message.chat_id.in_(chat_ids)))
-            session.execute(delete(Chat).where(Chat.id.in_(chat_ids)))
+            _try_execute(session, delete(Message).where(Message.chat_id.in_(chat_ids)))
+            _try_execute(session, delete(Chat).where(Chat.id.in_(chat_ids)))
 
         action_ids = list(
             session.execute(
@@ -164,28 +235,50 @@ def delete_project(project_id: str) -> bool:
             ).scalars()
         )
         if action_ids:
-            session.execute(
-                delete(ExecutionEvent).where(ExecutionEvent.action_id.in_(action_ids))
+            _try_execute(
+                session,
+                delete(ExecutionEvent).where(ExecutionEvent.action_id.in_(action_ids)),
             )
-            session.execute(
+            _try_execute(
+                session,
                 delete(ExecutionApproval).where(
                     ExecutionApproval.action_id.in_(action_ids)
-                )
+                ),
             )
-            session.execute(
-                delete(ExecutionJob).where(ExecutionJob.id.in_(action_ids))
+            _try_execute(
+                session, delete(ExecutionJob).where(ExecutionJob.id.in_(action_ids))
             )
 
-        session.execute(delete(Connection).where(Connection.project_id == project_id))
-        session.execute(delete(Approval).where(Approval.project_id == project_id))
-        session.execute(delete(Finding).where(Finding.project_id == project_id))
-        session.execute(delete(WorkflowRun).where(WorkflowRun.project_id == project_id))
-        session.execute(delete(Workflow).where(Workflow.project_id == project_id))
-        session.execute(
+        hard_ok = True
+        for statement in (
+            delete(Connection).where(Connection.project_id == project_id),
+            delete(Approval).where(Approval.project_id == project_id),
+            delete(Finding).where(Finding.project_id == project_id),
+            delete(WorkflowRun).where(WorkflowRun.project_id == project_id),
+            delete(Workflow).where(Workflow.project_id == project_id),
             delete(EngineeringMemory).where(
                 EngineeringMemory.project_id == project_id
+            ),
+        ):
+            if not _try_execute(session, statement):
+                hard_ok = False
+
+        if hard_ok:
+            try:
+                with session.begin_nested():
+                    session.delete(project)
+            except ProgrammingError:
+                hard_ok = False
+
+        if not hard_ok:
+            # Scrub credentials and hide the row — app role cannot DELETE it.
+            session.execute(
+                update(Connection)
+                .where(Connection.project_id == project_id)
+                .values(fields={}, method="")
             )
-        )
-        session.delete(project)
+            project.repos = []
+            _mark_deleted(session, project_id)
+
         session.commit()
         return True

@@ -1,4 +1,4 @@
-/* DevSecOps Skills Suite — Fluent / Azure Portal enterprise theme */
+/* InfraLens Skills Suite — Fluent / Azure Portal enterprise theme */
 
 :root {
   --bg: #FBFBFD;
@@ -214,6 +214,41 @@ body.scroll-page .page {
   background: transparent;
   border-bottom-color: var(--primary);
   box-shadow: none;
+}
+
+.nav-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: 12px;
+  padding-left: 14px;
+  border-left: 1px solid var(--border);
+}
+
+.nav-user-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.nav-logout {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.nav-logout:hover {
+  color: var(--danger);
+  border-color: #fecaca;
+  background: var(--danger-subtle);
 }
 
 .nav-item:focus-visible {
@@ -989,7 +1024,7 @@ body.scroll-page .page {
   color: var(--muted);
 }
 .message.assistant .message-role::before {
-  content: "DS";
+  content: "IL";
   width: 24px;
   height: 24px;
   display: grid;
@@ -3817,6 +3852,165 @@ select option:hover {
 @keyframes loader-dot {
   0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
   30% { opacity: 1; transform: translateY(-3px); }
+}
+
+/* ---------- Login ---------- */
+.login-screen {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px 20px;
+}
+
+.login-atmosphere {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(720px 420px at 12% 18%, rgba(37, 99, 235, 0.12), transparent 60%),
+    radial-gradient(640px 380px at 88% 12%, rgba(14, 165, 233, 0.08), transparent 55%),
+    linear-gradient(180deg, #f8fafc 0%, #eef2ff 48%, #f8fafc 100%);
+}
+
+.login-check,
+.login-panel {
+  position: relative;
+  z-index: 1;
+}
+
+.login-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.login-panel {
+  width: min(420px, 100%);
+  padding: 32px 28px 28px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow-md);
+  backdrop-filter: blur(8px);
+  animation: fade-up 0.55s ease both;
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 28px;
+}
+
+.login-mark {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--solid-text);
+  background: var(--solid);
+  border-radius: 12px;
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.28);
+}
+
+.login-brand h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.login-brand p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.login-form {
+  display: grid;
+  gap: 14px;
+}
+
+.login-field {
+  display: grid;
+  gap: 6px;
+}
+
+.login-field span {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.login-field input {
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.login-field input:focus {
+  border-color: var(--primary);
+  box-shadow: var(--focus-ring);
+}
+
+.login-error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--danger-subtle);
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.login-submit {
+  margin-top: 4px;
+  height: 44px;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--solid);
+  color: var(--solid-text);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.login-submit:hover:not(:disabled) {
+  background: var(--solid-hover);
+}
+
+.login-submit:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.login-submit:disabled {
+  opacity: 0.7;
+  cursor: wait;
 }
 
 .approval-card {

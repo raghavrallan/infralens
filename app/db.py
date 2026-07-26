@@ -8,7 +8,7 @@ import os
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from sqlalchemy import DateTime, String, create_engine, inspect, text
+from sqlalchemy import Boolean, DateTime, String, create_engine, inspect, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
@@ -18,6 +18,8 @@ DEFAULT_DATABASE_URL = (
 
 DEFAULT_PROJECT_ID = "default"
 DEFAULT_PROJECT_CONFIG_KEY = "default_project_id"
+# JSON list of project ids hidden when the DB role cannot DELETE root_admin tables.
+DELETED_PROJECTS_CONFIG_KEY = "deleted_project_ids"
 
 
 def get_database_url() -> str:
@@ -56,6 +58,22 @@ class AppConfig(Base):
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+class User(Base):
+    """UI login account. Seeded on startup; passwords are stored hashed."""
+
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    display_name: Mapped[str] = mapped_column(String(120), default="Admin")
+    password_hash: Mapped[str] = mapped_column(String(255))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
 
 
 class Project(Base):

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, apiUrl, consumeSse } from "../lib/api";
+import { authHeaders, clearSession } from "../lib/auth";
 import { displayBrandText } from "../lib/branding";
 import { copyText } from "../lib/clipboard";
 import type { Action, ActionEvent, ChatDetail, ChatMessage, ChatSummary, ConnectionStatus, MetricChart, Project, Skill, StreamEvent } from "../lib/types";
@@ -338,7 +339,16 @@ export function ChatPage() {
   );
 
   const runStream = async (url: string, body: Record<string, unknown>, messageId: string) => {
-    const response = await fetch(apiUrl(url), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const response = await fetch(apiUrl(url), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(body),
+    });
+    if (response.status === 401) {
+      clearSession();
+      window.location.replace("/login");
+      throw new Error("Not authenticated");
+    }
     if (!response.ok) throw new Error("The stream failed to start.");
     let accumulated = "";
     await consumeSse(response, (event: StreamEvent) => {

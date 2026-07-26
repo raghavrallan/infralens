@@ -13,6 +13,7 @@ Supported connection methods:
 from typing import Any, Optional
 
 from sqlalchemy import select
+from sqlalchemy.exc import ProgrammingError
 
 from app.db import Connection, SessionLocal
 
@@ -75,7 +76,13 @@ def remove_connection(project_id: str, provider: str) -> dict[str, Any]:
     with SessionLocal() as session:
         row = session.get(Connection, {"project_id": project_id, "provider": provider})
         if row is not None:
-            session.delete(row)
+            try:
+                with session.begin_nested():
+                    session.delete(row)
+            except ProgrammingError:
+                # Azure app role may lack DELETE on root_admin-owned connections.
+                row.method = ""
+                row.fields = {}
             session.commit()
     return status(project_id, provider)
 
@@ -84,7 +91,7 @@ def status(project_id: str, provider: str) -> dict[str, Any]:
     """Return the public (secret-free) status for one provider in a project."""
     with SessionLocal() as session:
         row = session.get(Connection, {"project_id": project_id, "provider": provider})
-        if row is None:
+        if row is None or not (row.method or "").strip():
             return {"provider": provider, "connected": False}
         fields = row.fields or {}
         identity_key = _IDENTITY_FIELD.get(provider, "")

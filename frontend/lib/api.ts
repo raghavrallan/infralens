@@ -1,5 +1,8 @@
 import type { JsonObject, StreamEvent } from "./types";
 
+const TOKEN_KEY = "infralens_auth_token";
+const USER_KEY = "infralens_auth_user";
+
 /**
  * In local `next dev`, point at the FastAPI origin so /api calls do not go
  * through Next trailingSlash/rewrites (those were 404ing as /api/projects/).
@@ -11,11 +14,34 @@ export function apiUrl(path: string): string {
   return `${base}${path}`;
 }
 
+function readAuthHeaders(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  const token = window.localStorage.getItem(TOKEN_KEY);
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+function clearAuthStorage(): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(TOKEN_KEY);
+  window.localStorage.removeItem(USER_KEY);
+}
+
 export async function api<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(apiUrl(url), {
     ...options,
-    headers: { ...(options?.body ? { "Content-Type": "application/json" } : {}), ...options?.headers },
+    headers: {
+      ...(options?.body ? { "Content-Type": "application/json" } : {}),
+      ...readAuthHeaders(),
+      ...options?.headers,
+    },
   });
+  if (response.status === 401 && !url.includes("/api/auth/login")) {
+    clearAuthStorage();
+    if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
+      window.location.replace("/login");
+    }
+    throw new Error("Not authenticated");
+  }
   if (!response.ok) {
     let detail = response.statusText;
     try {
