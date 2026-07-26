@@ -271,9 +271,21 @@ export function SettingsPage() {
   };
   const [renameModal, setRenameModal] = useState(false);
   const [renameDraft, setRenameDraft] = useState("");
+  const [deleteModal, setDeleteModal] = useState(false);
+  const [deletingProject, setDeletingProject] = useState(false);
   const openRenameModal = () => {
     setRenameDraft(current?.name || "");
     setRenameModal(true);
+  };
+  const openDeleteModal = () => {
+    if (!projectId) return;
+    if (current?.is_default) {
+      setProjectMessage(
+        "Cannot delete the default project. Click Make default on another project first, then delete this one.",
+      );
+      return;
+    }
+    setDeleteModal(true);
   };
   const submitRename = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -286,30 +298,21 @@ export function SettingsPage() {
     setProjectMessage("Project renamed.");
     await loadProjects();
   };
-  const deleteProject = async () => {
-    if (!projectId) return;
-    if (current?.is_default) {
-      setProjectMessage(
-        "Cannot delete the default project. Click Make default on another project first, then delete this one.",
-      );
-      return;
-    }
-    if (
-      !window.confirm(
-        "Delete this project, connections, repositories and chats?",
-      )
-    ) {
-      return;
-    }
+  const confirmDeleteProject = async () => {
+    if (!projectId || current?.is_default) return;
+    setDeletingProject(true);
     try {
       await api(`/api/projects/${projectId}`, { method: "DELETE" });
       window.localStorage.removeItem("projectId");
+      setDeleteModal(false);
       setProjectMessage("Project deleted.");
       await loadProjects();
     } catch (error) {
       setProjectMessage(
         error instanceof Error ? error.message : "Could not delete project.",
       );
+    } finally {
+      setDeletingProject(false);
     }
   };
   const saveAzure = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -413,7 +416,7 @@ export function SettingsPage() {
                   ? "Make another project the default before deleting this one"
                   : "Delete this project"
               }
-              onClick={() => void deleteProject()}
+              onClick={openDeleteModal}
             >
               Delete
             </button>
@@ -626,6 +629,35 @@ export function SettingsPage() {
               </button>
             </div>
           </form>
+        </Modal>
+      )}
+      {deleteModal && (
+        <Modal
+          eyebrow="Project"
+          title="Delete project?"
+          description={`This will permanently delete “${displayBrandText(current?.name) || "this project"}”, including its connections, repositories, chats, workflows and findings. This cannot be undone.`}
+          onClose={() => !deletingProject && setDeleteModal(false)}
+        >
+          <div className="modal-body">
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="modal-btn ghost"
+                disabled={deletingProject}
+                onClick={() => setDeleteModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="modal-btn primary"
+                disabled={deletingProject}
+                onClick={() => void confirmDeleteProject()}
+              >
+                {deletingProject ? "Deleting…" : "Delete project"}
+              </button>
+            </div>
+          </div>
         </Modal>
       )}
     </Shell>
