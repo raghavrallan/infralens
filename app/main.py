@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -46,14 +46,22 @@ _FRONTEND_DIR = Path(__file__).resolve().parents[1] / "frontend" / "out"
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    from app import observability, prompts
+
+    observability.ensure_host_alias()
     init_db()
     auth.ensure_seed_user()
+    try:
+        prompts.seed_core_prompts()
+    except Exception:
+        pass
     intel.seed_default_workflows(DEFAULT_PROJECT_ID)
     intel_scheduler.start_scheduler()
     try:
         yield
     finally:
         intel_scheduler.shutdown_scheduler()
+        observability.flush()
 
 
 app = FastAPI(title="InfraLens Skills Suite", version=__version__, lifespan=lifespan)
@@ -635,13 +643,23 @@ def delete_chat(chat_id: str) -> dict[str, bool]:
     return {"deleted": chats.delete_chat(chat_id)}
 
 
+def _request_user_id(http_request: Request) -> Optional[str]:
+    user = getattr(http_request.state, "user", None) or {}
+    if isinstance(user, dict):
+        return user.get("username") or user.get("id")
+    return None
+
+
 @app.post("/api/chat/stream")
-def chat_stream(request: ChatRequest) -> StreamingResponse:
+def chat_stream(request: ChatRequest, http_request: Request) -> StreamingResponse:
     """Stream an orchestrated chat turn as Server-Sent Events."""
+    from app import observability
+
     if request.skill and registry.get(request.skill) is None:
         raise HTTPException(status_code=400, detail=f"Unknown skill: {request.skill}")
 
     chat_id = request.chat_id
+    user_id = _request_user_id(http_request)
     # UI may say mlife / ml-*; tools and skills still need EQIP / eq-*.
     internal_message = internal_text(request.message)
     if not chat_id or chats.get_chat(chat_id) is None:
@@ -669,104 +687,116 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
         return f"data: {json.dumps(display_value(event), default=str)}\n\n"
 
     def generate() -> Any:
-        yield sse({"type": "chat", "chat_id": chat_id})
+        with observability.tracing_context(
+            session_id=chat_id,
+            user_id=user_id,
+            tags=["chat", request.mode, f"project:{request.project_id}"],
+            feature="chat",
+            generation_name="chat-stream",
+        ):
+            try:
+                yield sse({"type": "chat", "chat_id": chat_id})
 
-        if special_action is not None:
-            action = special_action.get("action")
-            if action:
-                yield sse({
-                    "type": "action_planned",
-                    "action_id": action["id"],
-                    "action": action,
-                })
-                yield sse({
-                    "type": special_action.get("event_type", "approval_required"),
-                    "action_id": action["id"],
-                    "action": action,
-                })
-            reply = str(special_action.get("reply", ""))
-            yield sse({"type": "delta", "text": reply})
-            meta = {"mode": "agent"}
-            if action:
-                meta.update({"action_id": action["id"], "action_status": action.get("status")})
-            if special_action.get("pending_resource_group_name"):
-                meta["pending_resource_group_name"] = special_action["pending_resource_group_name"]
-            if special_action.get("pending_action_spec"):
-                meta["pending_action_spec"] = special_action["pending_action_spec"]
-            chats.add_message(chat_id, "assistant", reply, meta)
-            _refresh_chat_memory(chat_id)
-            yield sse({
-                "type": "final",
-                "mode": "agent",
-                "reply": reply,
-                "chat_id": chat_id,
-                **({"required_action_scope": special_action["required_action_scope"]} if special_action.get("required_action_scope") else {}),
-                **({"action_id": action["id"], "action": action} if action else {}),
-            })
-            return
+                if special_action is not None:
+                    action = special_action.get("action")
+                    if action:
+                        yield sse({
+                            "type": "action_planned",
+                            "action_id": action["id"],
+                            "action": action,
+                        })
+                        yield sse({
+                            "type": special_action.get("event_type", "approval_required"),
+                            "action_id": action["id"],
+                            "action": action,
+                        })
+                    reply = str(special_action.get("reply", ""))
+                    yield sse({"type": "delta", "text": reply})
+                    meta = {"mode": "agent"}
+                    if action:
+                        meta.update({"action_id": action["id"], "action_status": action.get("status")})
+                    if special_action.get("pending_resource_group_name"):
+                        meta["pending_resource_group_name"] = special_action["pending_resource_group_name"]
+                    if special_action.get("pending_action_spec"):
+                        meta["pending_action_spec"] = special_action["pending_action_spec"]
+                    chats.add_message(chat_id, "assistant", reply, meta)
+                    _refresh_chat_memory(chat_id)
+                    yield sse({
+                        "type": "final",
+                        "mode": "agent",
+                        "reply": reply,
+                        "chat_id": chat_id,
+                        **({"required_action_scope": special_action["required_action_scope"]} if special_action.get("required_action_scope") else {}),
+                        **({"action_id": action["id"], "action": action} if action else {}),
+                    })
+                    return
 
-        if not config.get_azure_config().configured:
-            reply = (
-                "Azure OpenAI is not configured yet. Open Settings and add your "
-                "Azure OpenAI endpoint and key. Chats, skills and wiki work "
-                "offline so you can still preview the suite.\n\n"
-                + chat_actions.provider_status_text(request.project_id, request.action_scope)
-            )
-            yield sse({"type": "delta", "text": reply})
-            chats.add_message(chat_id, "assistant", reply, {"mode": request.mode})
-            _refresh_chat_memory(chat_id)
-            yield sse({"type": "final", "mode": request.mode, "reply": reply, "chat_id": chat_id})
-            return
+                if not config.get_azure_config().configured:
+                    reply = (
+                        "Azure OpenAI is not configured yet. Open Settings and add your "
+                        "Azure OpenAI endpoint and key. Chats, skills and wiki work "
+                        "offline so you can still preview the suite.\n\n"
+                        + chat_actions.provider_status_text(request.project_id, request.action_scope)
+                    )
+                    yield sse({"type": "delta", "text": reply})
+                    chats.add_message(chat_id, "assistant", reply, {"mode": request.mode})
+                    _refresh_chat_memory(chat_id)
+                    yield sse({"type": "final", "mode": request.mode, "reply": reply, "chat_id": chat_id})
+                    return
 
-        history = chat_memory.get_model_context(
-            chat_id, internal_message, project_id=request.project_id
-        )
-        diagnostic_context = chat_actions.action_diagnostic_context(chat_id, internal_message)
-        if diagnostic_context:
-            history.insert(0, {"role": "system", "content": diagnostic_context})
-        final: dict[str, Any] = {}
-        try:
-            for event in orchestrator.run_chat_stream(
-                history,
-                request.project_id,
-                mode=request.mode,
-                skill=request.skill,
-                action_scope=request.action_scope,
-                access_level=request.access_level,
-            ):
-                if event.get("type") == "final":
-                    final = event
-                    continue
-                yield sse(event)
-        except azure_client.AzureOpenAINotConfiguredError as exc:
-            yield sse({"type": "delta", "text": str(exc)})
-            final = {"mode": request.mode, "reply": str(exc)}
-        except Exception as exc:  # noqa: BLE001 - surface a clean error to the client
-            message = f"The request failed while generating a response: {exc}"
-            yield sse({"type": "delta", "text": message})
-            final = {"mode": request.mode, "reply": message}
+                history = chat_memory.get_model_context(
+                    chat_id, internal_message, project_id=request.project_id
+                )
+                diagnostic_context = chat_actions.action_diagnostic_context(chat_id, internal_message)
+                if diagnostic_context:
+                    history.insert(0, {"role": "system", "content": diagnostic_context})
+                final: dict[str, Any] = {}
+                try:
+                    for event in orchestrator.run_chat_stream(
+                        history,
+                        request.project_id,
+                        mode=request.mode,
+                        skill=request.skill,
+                        action_scope=request.action_scope,
+                        access_level=request.access_level,
+                    ):
+                        if event.get("type") == "final":
+                            final = event
+                            continue
+                        yield sse(event)
+                except azure_client.AzureOpenAINotConfiguredError as exc:
+                    yield sse({"type": "delta", "text": str(exc)})
+                    final = {"mode": request.mode, "reply": str(exc)}
+                except Exception as exc:  # noqa: BLE001 - surface a clean error to the client
+                    message = f"The request failed while generating a response: {exc}"
+                    yield sse({"type": "delta", "text": message})
+                    final = {"mode": request.mode, "reply": message}
 
-        reply = final.get("reply", "")
-        chats.add_message(
-            chat_id,
-            "assistant",
-            reply,
-            {
-                "mode": final.get("mode"),
-                "skills_used": final.get("skills_used", []),
-                "charts": final.get("charts", []),
-            },
-        )
-        _refresh_chat_memory(chat_id)
-        final["chat_id"] = chat_id
-        yield sse({"type": "final", **final})
+                reply = final.get("reply", "")
+                chats.add_message(
+                    chat_id,
+                    "assistant",
+                    reply,
+                    {
+                        "mode": final.get("mode"),
+                        "skills_used": final.get("skills_used", []),
+                        "charts": final.get("charts", []),
+                    },
+                )
+                _refresh_chat_memory(chat_id)
+                final["chat_id"] = chat_id
+                yield sse({"type": "final", **final})
+            finally:
+                observability.flush()
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 @app.post("/api/chat/execute-plan")
-def execute_plan(request: ExecutePlanRequest) -> StreamingResponse:
+def execute_plan(request: ExecutePlanRequest, http_request: Request) -> StreamingResponse:
     """Execute a plan the user approved (from plan mode), streaming the run."""
+    from app import observability
+
     chat = chats.get_chat(request.chat_id)
     if chat is None:
         raise HTTPException(status_code=404, detail="Chat not found")
@@ -790,79 +820,93 @@ def execute_plan(request: ExecutePlanRequest) -> StreamingResponse:
         raise HTTPException(status_code=400, detail="No runnable steps in the plan")
 
     chat_id = request.chat_id
+    user_id = _request_user_id(http_request)
 
     def sse(event: dict[str, Any]) -> str:
         return f"data: {json.dumps(display_value(event), default=str)}\n\n"
 
     def generate() -> Any:
-        yield sse({"type": "chat", "chat_id": chat_id})
-        for action in action_jobs:
-            yield sse({"type": "action_planned", "action_id": action["id"], "action": action})
-            if action["status"] == "awaiting_approval":
-                yield sse({"type": "approval_required", "action_id": action["id"], "action": action})
-            else:
-                yield sse({"type": "action_queued", "action_id": action["id"], "action": action})
+        with observability.tracing_context(
+            session_id=chat_id,
+            user_id=user_id,
+            tags=["chat", "plan-execute", f"project:{request.project_id}"],
+            feature="chat",
+            generation_name="execute-plan",
+        ):
+            try:
+                yield sse({"type": "chat", "chat_id": chat_id})
+                for action in action_jobs:
+                    yield sse({"type": "action_planned", "action_id": action["id"], "action": action})
+                    if action["status"] == "awaiting_approval":
+                        yield sse({"type": "approval_required", "action_id": action["id"], "action": action})
+                    else:
+                        yield sse({"type": "action_queued", "action_id": action["id"], "action": action})
 
-        if not config.get_azure_config().configured:
-            reply = "Azure OpenAI is not configured yet. Open Settings to run plans."
-            yield sse({"type": "delta", "text": reply})
-            chats.add_message(chat_id, "assistant", reply, {"mode": "agent"})
-            _refresh_chat_memory(chat_id)
-            yield sse({"type": "final", "mode": "agent", "reply": reply, "chat_id": chat_id})
-            return
+                if not config.get_azure_config().configured:
+                    reply = "Azure OpenAI is not configured yet. Open Settings to run plans."
+                    yield sse({"type": "delta", "text": reply})
+                    chats.add_message(chat_id, "assistant", reply, {"mode": "agent"})
+                    _refresh_chat_memory(chat_id)
+                    yield sse({"type": "final", "mode": "agent", "reply": reply, "chat_id": chat_id})
+                    return
 
-        history = chat_memory.get_model_context(
-            chat_id, project_id=request.project_id
-        )
-        diagnostic_context = chat_actions.action_diagnostic_context(chat_id)
-        if diagnostic_context:
-            history.insert(0, {"role": "system", "content": diagnostic_context})
-        final: dict[str, Any] = {}
-        try:
-            for event in orchestrator.execute_plan_stream(
-                history,
-                request.project_id,
-                steps,
-                action_scope=request.action_scope,
-                access_level=request.access_level,
-            ):
-                if event.get("type") == "final":
-                    final = event
-                    continue
-                yield sse(event)
-        except azure_client.AzureOpenAINotConfiguredError as exc:
-            yield sse({"type": "delta", "text": str(exc)})
-            final = {"mode": "agent", "reply": str(exc)}
-        except Exception as exc:  # noqa: BLE001 - surface a clean error to the client
-            message = f"The plan failed while executing: {exc}"
-            yield sse({"type": "delta", "text": message})
-            final = {"mode": "agent", "reply": message}
+                history = chat_memory.get_model_context(
+                    chat_id, project_id=request.project_id
+                )
+                diagnostic_context = chat_actions.action_diagnostic_context(chat_id)
+                if diagnostic_context:
+                    history.insert(0, {"role": "system", "content": diagnostic_context})
+                final: dict[str, Any] = {}
+                try:
+                    for event in orchestrator.execute_plan_stream(
+                        history,
+                        request.project_id,
+                        steps,
+                        action_scope=request.action_scope,
+                        access_level=request.access_level,
+                    ):
+                        if event.get("type") == "final":
+                            final = event
+                            continue
+                        yield sse(event)
+                except azure_client.AzureOpenAINotConfiguredError as exc:
+                    yield sse({"type": "delta", "text": str(exc)})
+                    final = {"mode": "agent", "reply": str(exc)}
+                except Exception as exc:  # noqa: BLE001 - surface a clean error to the client
+                    message = f"The plan failed while executing: {exc}"
+                    yield sse({"type": "delta", "text": message})
+                    final = {"mode": "agent", "reply": message}
 
-        reply = final.get("reply", "")
-        chats.add_message(
-            chat_id,
-            "assistant",
-            reply,
-            {
-                "mode": final.get("mode", "agent"),
-                "skills_used": final.get("skills_used", []),
-                "charts": final.get("charts", []),
-            },
-        )
-        _refresh_chat_memory(chat_id)
-        final["chat_id"] = chat_id
-        yield sse({"type": "final", **final})
+                reply = final.get("reply", "")
+                chats.add_message(
+                    chat_id,
+                    "assistant",
+                    reply,
+                    {
+                        "mode": final.get("mode", "agent"),
+                        "skills_used": final.get("skills_used", []),
+                        "charts": final.get("charts", []),
+                    },
+                )
+                _refresh_chat_memory(chat_id)
+                final["chat_id"] = chat_id
+                yield sse({"type": "final", **final})
+            finally:
+                observability.flush()
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 @app.post("/api/chat")
-def chat(request: ChatRequest) -> dict[str, Any]:
+def chat(request: ChatRequest, http_request: Request) -> dict[str, Any]:
     """Run one orchestrated chat turn, persisting both messages to the chat."""
+    from app import observability
+
     if request.skill and registry.get(request.skill) is None:
         raise HTTPException(status_code=400, detail=f"Unknown skill: {request.skill}")
 
     chat_id = request.chat_id
+    user_id = _request_user_id(http_request)
     if not chat_id or chats.get_chat(chat_id) is None:
         chat_id = chats.create_chat(request.message, project_id=request.project_id)["id"]
 
@@ -872,74 +916,108 @@ def chat(request: ChatRequest) -> dict[str, Any]:
     else:
         chats.add_message(chat_id, "user", request.message)
 
-    if request.mode == "agent":
+    with observability.tracing_context(
+        session_id=chat_id,
+        user_id=user_id,
+        tags=["chat", request.mode, f"project:{request.project_id}"],
+        feature="chat",
+        generation_name="chat",
+    ):
         try:
-            special_action = chat_actions.handle_turn(
-                chat_id, request.project_id, request.message, request.action_scope, request.access_level
+            if request.mode == "agent":
+                try:
+                    special_action = chat_actions.handle_turn(
+                        chat_id,
+                        request.project_id,
+                        request.message,
+                        request.action_scope,
+                        request.access_level,
+                    )
+                except ValueError as exc:
+                    special_action = {
+                        "reply": f"I could not prepare that Azure action: {exc}",
+                        "action": None,
+                    }
+                if special_action is not None:
+                    reply = str(special_action.get("reply", ""))
+                    action = special_action.get("action")
+                    meta = {"mode": "agent"}
+                    if action:
+                        meta.update(
+                            {
+                                "action_id": action["id"],
+                                "action_status": action.get("status"),
+                            }
+                        )
+                    if special_action.get("pending_resource_group_name"):
+                        meta["pending_resource_group_name"] = special_action[
+                            "pending_resource_group_name"
+                        ]
+                    if special_action.get("pending_action_spec"):
+                        meta["pending_action_spec"] = special_action["pending_action_spec"]
+                    chats.add_message(chat_id, "assistant", reply, meta)
+                    _refresh_chat_memory(chat_id)
+                    result = {"mode": "agent", "reply": reply, "chat_id": chat_id}
+                    if special_action.get("required_action_scope"):
+                        result["required_action_scope"] = special_action[
+                            "required_action_scope"
+                        ]
+                    if action:
+                        result.update({"action_id": action["id"], "action": action})
+                    return result
+
+            if not config.get_azure_config().configured:
+                reply = (
+                    "Azure OpenAI is not configured yet. Open Settings and add your "
+                    "Azure OpenAI endpoint and key. Chats, skills and wiki work offline "
+                    "so you can still preview the suite.\n\n"
+                    + chat_actions.provider_status_text(
+                        request.project_id, request.action_scope
+                    )
+                )
+                turn = orchestrator.ChatTurn(mode=request.mode, reply=reply)
+                chats.add_message(chat_id, "assistant", reply, {"mode": request.mode})
+                _refresh_chat_memory(chat_id)
+                result = turn.to_dict()
+                result["chat_id"] = chat_id
+                return result
+
+            history = chat_memory.get_model_context(
+                chat_id, request.message, project_id=request.project_id
             )
-        except ValueError as exc:
-            special_action = {"reply": f"I could not prepare that Azure action: {exc}", "action": None}
-        if special_action is not None:
-            reply = str(special_action.get("reply", ""))
-            action = special_action.get("action")
-            meta = {"mode": "agent"}
-            if action:
-                meta.update({"action_id": action["id"], "action_status": action.get("status")})
-            if special_action.get("pending_resource_group_name"):
-                meta["pending_resource_group_name"] = special_action["pending_resource_group_name"]
-            if special_action.get("pending_action_spec"):
-                meta["pending_action_spec"] = special_action["pending_action_spec"]
-            chats.add_message(chat_id, "assistant", reply, meta)
+            diagnostic_context = chat_actions.action_diagnostic_context(
+                chat_id, request.message
+            )
+            if diagnostic_context:
+                history.insert(0, {"role": "system", "content": diagnostic_context})
+            try:
+                turn = orchestrator.run_chat(
+                    history,
+                    request.project_id,
+                    mode=request.mode,
+                    skill=request.skill,
+                    action_scope=request.action_scope,
+                    access_level=request.access_level,
+                )
+            except azure_client.AzureOpenAINotConfiguredError as exc:
+                turn = orchestrator.ChatTurn(mode=request.mode, reply=str(exc))
+
+            chats.add_message(
+                chat_id,
+                "assistant",
+                turn.reply,
+                {
+                    "mode": turn.mode,
+                    "skills_used": turn.skills_used,
+                    "charts": turn.charts,
+                },
+            )
             _refresh_chat_memory(chat_id)
-            result = {"mode": "agent", "reply": reply, "chat_id": chat_id}
-            if special_action.get("required_action_scope"):
-                result["required_action_scope"] = special_action["required_action_scope"]
-            if action:
-                result.update({"action_id": action["id"], "action": action})
+            result = turn.to_dict()
+            result["chat_id"] = chat_id
             return result
-
-    if not config.get_azure_config().configured:
-        reply = (
-            "Azure OpenAI is not configured yet. Open Settings and add your "
-            "Azure OpenAI endpoint and key. Chats, skills and wiki work offline "
-            "so you can still preview the suite.\n\n"
-            + chat_actions.provider_status_text(request.project_id, request.action_scope)
-        )
-        turn = orchestrator.ChatTurn(mode=request.mode, reply=reply)
-        chats.add_message(chat_id, "assistant", reply, {"mode": request.mode})
-        _refresh_chat_memory(chat_id)
-        result = turn.to_dict()
-        result["chat_id"] = chat_id
-        return result
-
-    history = chat_memory.get_model_context(
-        chat_id, request.message, project_id=request.project_id
-    )
-    diagnostic_context = chat_actions.action_diagnostic_context(chat_id, request.message)
-    if diagnostic_context:
-        history.insert(0, {"role": "system", "content": diagnostic_context})
-    try:
-        turn = orchestrator.run_chat(
-            history,
-            request.project_id,
-            mode=request.mode,
-            skill=request.skill,
-            action_scope=request.action_scope,
-            access_level=request.access_level,
-        )
-    except azure_client.AzureOpenAINotConfiguredError as exc:
-        turn = orchestrator.ChatTurn(mode=request.mode, reply=str(exc))
-
-    chats.add_message(
-        chat_id,
-        "assistant",
-        turn.reply,
-        {"mode": turn.mode, "skills_used": turn.skills_used, "charts": turn.charts},
-    )
-    _refresh_chat_memory(chat_id)
-    result = turn.to_dict()
-    result["chat_id"] = chat_id
-    return result
+        finally:
+            observability.flush()
 
 
 class WorkflowRequest(BaseModel):

@@ -47,6 +47,15 @@ JSON with this shape: {"summary":"", "facts":[], "references":[],
 "unresolved":[]}. Keep each item concise."""
 
 
+def _memory_system_prompt() -> str:
+    from app.prompts import get_text_prompt
+
+    return get_text_prompt(
+        "chat-memory-system",
+        fallback=MEMORY_SYSTEM_PROMPT,
+    )
+
+
 def redact(value: Any) -> Any:
     """Redact secret-like values recursively before persistence or model use."""
     if isinstance(value, dict):
@@ -265,7 +274,7 @@ def _summarise(messages: list[dict[str, Any]]) -> dict[str, Any]:
     source = source[-MAX_SOURCE_CHARS:]
     completion = azure_client.chat(
         [
-            {"role": "system", "content": MEMORY_SYSTEM_PROMPT},
+            {"role": "system", "content": _memory_system_prompt()},
             {"role": "user", "content": f"Transcript JSON:\n{source}"},
         ],
         temperature=0,

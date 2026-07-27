@@ -85,31 +85,47 @@ def run_workflow(run_id: str) -> dict[str, int]:
     environment = workflow["environment"]
     policy = orchestrator.build_policy("read_only", "ask_approval")
 
-    try:
-        live_context = _usable_context(
-            _gather_context(objective, project_id, workflow["skills"])
-        )
-        collected: list[dict] = []
-        for skill_name in workflow["skills"]:
-            skill = registry.get(skill_name)
-            if skill is None:
-                continue
-            args = orchestrator._skill_args(
-                skill_name, objective, objective, policy, live_context
+    from app import observability
+
+    with observability.tracing_context(
+        session_id=f"workflow-run:{run_id}",
+        user_id="intelligence-worker",
+        tags=[
+            "intelligence",
+            "workflow",
+            f"project:{project_id}",
+            f"workflow:{workflow['id']}",
+        ],
+        feature="intelligence",
+        generation_name="workflow-run",
+    ):
+        try:
+            live_context = _usable_context(
+                _gather_context(objective, project_id, workflow["skills"])
             )
-            result = skill.run(args)
-            collected.extend(
-                findings_mod.build_findings(
-                    skill_name,
-                    workflow["module"],
-                    result.content,
-                    objective,
-                    environment,
+            collected: list[dict] = []
+            for skill_name in workflow["skills"]:
+                skill = registry.get(skill_name)
+                if skill is None:
+                    continue
+                args = orchestrator._skill_args(
+                    skill_name, objective, objective, policy, live_context
                 )
-            )
-    except Exception as exc:  # noqa: BLE001 - record the failure on the run
-        store.mark_run_failed(run_id, str(exc))
-        return {"findings": 0}
+                result = skill.run(args)
+                collected.extend(
+                    findings_mod.build_findings(
+                        skill_name,
+                        workflow["module"],
+                        result.content,
+                        objective,
+                        environment,
+                    )
+                )
+        except Exception as exc:  # noqa: BLE001 - record the failure on the run
+            store.mark_run_failed(run_id, str(exc))
+            return {"findings": 0}
+        finally:
+            observability.flush()
 
     count = store.save_findings(run_id, workflow["id"], project_id, collected)
     store.mark_run_succeeded(run_id, count)

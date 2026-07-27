@@ -31,6 +31,17 @@ _EXTRACT_SYSTEM_PROMPT = (
     '"evidence": "<1-2 sentences citing the specific detail from the analysis>", '
     '"recommended_action": "<the concrete change that would resolve it>"}]}'
 )
+# Exported for Langfuse prompt seeding / fallbacks.
+EXTRACT_SYSTEM_PROMPT_FALLBACK = _EXTRACT_SYSTEM_PROMPT
+
+
+def _extract_system_prompt() -> str:
+    from app.prompts import get_text_prompt
+
+    return get_text_prompt(
+        "finding-extract-system",
+        fallback=EXTRACT_SYSTEM_PROMPT_FALLBACK,
+    )
 
 
 def _severity_from_text(text: str) -> str:
@@ -102,21 +113,32 @@ def _extract_structured(
     skill: str, output: str, objective: str
 ) -> Optional[list[dict[str, Any]]]:
     """Ask the model to split the analysis into discrete findings."""
+    from app import observability
+
     try:
-        completion = azure_client.chat(
-            messages=[
-                {"role": "system", "content": _EXTRACT_SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": (
-                        f"Skill: {skill}\nObjective: {objective}\n\n"
-                        f"Analysis:\n{output}"
-                    ),
-                },
-            ],
-            temperature=0.0,
-            response_format={"type": "json_object"},
-        )
+        with observability.tracing_context(
+            tags=["intelligence", "finding-extract", f"skill:{skill}"],
+            feature="intelligence",
+            generation_name="finding-extract",
+        ):
+            completion = azure_client.chat(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": _extract_system_prompt(),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Skill: {skill}\nObjective: {objective}\n\n"
+                            f"Analysis:\n{output}"
+                        ),
+                    },
+                ],
+                temperature=0.0,
+                response_format={"type": "json_object"},
+                name="finding-extract",
+            )
         parsed = json.loads(completion.choices[0].message.content or "{}")
     except Exception:  # noqa: BLE001 - fall back to a single finding on extraction failure
         return None

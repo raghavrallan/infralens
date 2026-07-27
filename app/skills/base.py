@@ -66,20 +66,34 @@ class Skill:
 
     def build_messages(self, args: dict[str, Any]) -> list[dict[str, Any]]:
         """Build the system + user messages for this skill run."""
+        from app.prompts import get_text_prompt
+
+        system = get_text_prompt(
+            f"skill-{self.name}",
+            fallback=self.system_prompt,
+        )
         return [
-            {"role": "system", "content": self.system_prompt},
+            {"role": "system", "content": system},
             {"role": "user", "content": self.build_user_prompt(args)},
         ]
 
     def run(self, args: dict[str, Any]) -> SkillResult:
         """Execute the skill via one focused Azure OpenAI completion."""
+        from app import observability
+
         messages = self.build_messages(args)
         response_format = {"type": "json_object"} if self.json_output else None
-        completion = azure_client.chat(
-            messages=messages,
-            temperature=self.temperature,
-            response_format=response_format,
-        )
+        with observability.tracing_context(
+            feature="skill",
+            tags=["skill", self.name],
+            generation_name=f"skill-{self.name}",
+        ):
+            completion = azure_client.chat(
+                messages=messages,
+                temperature=self.temperature,
+                response_format=response_format,
+                name=f"skill-{self.name}",
+            )
         content = completion.choices[0].message.content or ""
         return SkillResult(
             skill=self.name,

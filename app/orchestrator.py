@@ -984,6 +984,19 @@ ORCHESTRATOR_SYSTEM_PROMPT = (
 )
 
 
+def _orchestrator_system(policy: str, live_context: Optional[str] = None) -> str:
+    from app.prompts import get_text_prompt
+
+    base = get_text_prompt(
+        "orchestrator-system",
+        fallback=ORCHESTRATOR_SYSTEM_PROMPT,
+    )
+    system = f"{base}\n\n{policy}"
+    if live_context:
+        system += "\n\n" + live_context
+    return system
+
+
 @dataclass
 class PlanStep:
     """One unit of work assigned to a single skill agent."""
@@ -1072,7 +1085,7 @@ def _skill_catalog_text() -> str:
     return "\n".join(lines)
 
 
-PLANNER_SYSTEM_PROMPT = (
+PLANNER_SYSTEM_PROMPT_TEMPLATE = (
     "You are the routing planner for a DevSecOps Skills Suite. Your job is to "
     "decide — precisely — which specialist skills (if any) a user's request "
     "needs, and in what order.\n\n"
@@ -1097,8 +1110,10 @@ PLANNER_SYSTEM_PROMPT = (
     '"summary": "<one sentence plan overview>", "steps": ['
     '{"skill": "<exact skill name>", "objective": "<clear, self-contained '
     'instruction for that agent>"}]}\n\n'
-    "Available skills:\n{catalog}"
+    "Available skills:\n{{catalog}}"
 )
+# Back-compat alias used by older imports / docs.
+PLANNER_SYSTEM_PROMPT = PLANNER_SYSTEM_PROMPT_TEMPLATE
 
 
 def _build_plan(
@@ -1106,7 +1121,13 @@ def _build_plan(
 ) -> tuple[str, list[PlanStep]]:
     """Ask the planner LLM for an ordered set of skill steps."""
     catalog = _skill_catalog_text()
-    system_content = PLANNER_SYSTEM_PROMPT.replace("{catalog}", catalog)
+    from app.prompts import get_text_prompt
+
+    system_content = get_text_prompt(
+        "planner-system",
+        fallback=PLANNER_SYSTEM_PROMPT_TEMPLATE,
+        variables={"catalog": catalog},
+    )
     if live_context:
         system_content += (
             "\n\nIMPORTANT: The user's live data has already been fetched "
@@ -1167,7 +1188,7 @@ def _build_plan(
     return summary, steps
 
 
-DETAILED_PLAN_SYSTEM_PROMPT = (
+DETAILED_PLAN_SYSTEM_PROMPT_TEMPLATE = (
     "You are a lead DevSecOps engineer scoping a piece of work and writing a "
     "DETAILED, researched plan BEFORE anything runs. You have already explored "
     "the user's environment: any live data below (their real repositories, cloud "
@@ -1200,8 +1221,9 @@ DETAILED_PLAN_SYSTEM_PROMPT = (
     '"resolution": "<the approach>", '
     '"steps": [{"skill": "<exact skill name>", "objective": "<instruction for '
     'that agent>", "detail": "<what this step does and why>"}]}\n\n'
-    "Available skills:\n{catalog}"
+    "Available skills:\n{{catalog}}"
 )
+DETAILED_PLAN_SYSTEM_PROMPT = DETAILED_PLAN_SYSTEM_PROMPT_TEMPLATE
 
 
 def _build_detailed_plan(
@@ -1213,7 +1235,13 @@ def _build_detailed_plan(
     / steps) plus the validated, ordered PlanSteps used for execution.
     """
     catalog = _skill_catalog_text()
-    system_content = DETAILED_PLAN_SYSTEM_PROMPT.replace("{catalog}", catalog)
+    from app.prompts import get_text_prompt
+
+    system_content = get_text_prompt(
+        "detailed-plan-system",
+        fallback=DETAILED_PLAN_SYSTEM_PROMPT_TEMPLATE,
+        variables={"catalog": catalog},
+    )
     if live_context:
         system_content += (
             "\n\nLIVE EXPLORATION DATA (already fetched read-only from the user's "
@@ -1323,15 +1351,14 @@ def _run_multi_agent(
     )
 
     if not steps:
-        system = f"{ORCHESTRATOR_SYSTEM_PROMPT}\n\n{policy}"
-        if live_context:
-            system += "\n\n" + live_context
+        system = _orchestrator_system(policy, live_context)
         completion = azure_client.chat(
             messages=[
                 {"role": "system", "content": system},
                 *messages,
             ],
             temperature=0.3,
+            name="orchestrator-direct",
         )
         return ChatTurn(
             mode="agent",
@@ -1478,12 +1505,21 @@ def _pretty(name: str) -> str:
 
 def _skill_deltas(skill: Any, args: dict[str, Any]) -> Iterator[str]:
     """Yield text deltas for a skill run, streaming unless it emits JSON."""
-    if skill.json_output:
-        yield skill.run(args).content
-        return
-    yield from azure_client.stream_chat(
-        skill.build_messages(args), temperature=skill.temperature
-    )
+    from app import observability
+
+    with observability.tracing_context(
+        feature="skill",
+        tags=["skill", skill.name],
+        generation_name=f"skill-{skill.name}",
+    ):
+        if skill.json_output:
+            yield skill.run(args).content
+            return
+        yield from azure_client.stream_chat(
+            skill.build_messages(args),
+            temperature=skill.temperature,
+            name=f"skill-{skill.name}",
+        )
 
 
 def _stream_and_collect(deltas: Iterator[str]) -> Iterator[dict[str, Any]]:
@@ -1512,11 +1548,11 @@ def _stream_steps(
     """
     charts = charts or []
     if not steps:
-        system = f"{ORCHESTRATOR_SYSTEM_PROMPT}\n\n{policy}"
-        if live_context:
-            system += "\n\n" + live_context
+        system = _orchestrator_system(policy, live_context)
         deltas = azure_client.stream_chat(
-            [{"role": "system", "content": system}, *messages], temperature=0.3
+            [{"role": "system", "content": system}, *messages],
+            temperature=0.3,
+            name="orchestrator-direct",
         )
         content = yield from _stream_and_collect(deltas)
         turn = ChatTurn(mode="agent", reply=content, charts=charts)
