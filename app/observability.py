@@ -42,16 +42,22 @@ def ensure_host_alias() -> None:
         os.environ.setdefault("LANGFUSE_HOST", base)
 
 
-@contextmanager
-def tracing_context(
+def bind_tracing(
     *,
     session_id: Optional[str] = None,
     user_id: Optional[str] = None,
     tags: Optional[list[str] | tuple[str, ...]] = None,
     feature: Optional[str] = None,
     generation_name: Optional[str] = None,
-) -> Iterator[None]:
-    tokens = []
+) -> list[tuple[ContextVar[Any], Any]]:
+    """Set tracing ContextVars and return tokens for a later soft reset.
+
+    Prefer this (or tracing_context) for request-scoped work. For StreamingResponse
+    generators that yield, use bind_tracing at the start and do not reset across
+    yields — ASGI may resume the generator in a different Context, which makes
+    ContextVar.reset(token) raise ValueError.
+    """
+    tokens: list[tuple[ContextVar[Any], Any]] = []
     if session_id is not None:
         tokens.append((_session_id, _session_id.set(str(session_id))))
     if user_id is not None:
@@ -62,11 +68,39 @@ def tracing_context(
         tokens.append((_feature, _feature.set(str(feature))))
     if generation_name is not None:
         tokens.append((_generation_name, _generation_name.set(str(generation_name))))
+    return tokens
+
+
+def reset_tracing(tokens: list[tuple[ContextVar[Any], Any]]) -> None:
+    """Reset ContextVar tokens; ignore cross-context errors from streamed responses."""
+    for var, token in reversed(tokens):
+        try:
+            var.reset(token)
+        except ValueError:
+            # Token was created in a different Context (common with StreamingResponse).
+            pass
+
+
+@contextmanager
+def tracing_context(
+    *,
+    session_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    tags: Optional[list[str] | tuple[str, ...]] = None,
+    feature: Optional[str] = None,
+    generation_name: Optional[str] = None,
+) -> Iterator[None]:
+    tokens = bind_tracing(
+        session_id=session_id,
+        user_id=user_id,
+        tags=tags,
+        feature=feature,
+        generation_name=generation_name,
+    )
     try:
         yield
     finally:
-        for var, token in reversed(tokens):
-            var.reset(token)
+        reset_tracing(tokens)
 
 
 def current_trace_metadata() -> dict[str, Any]:

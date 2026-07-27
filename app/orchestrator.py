@@ -1507,11 +1507,13 @@ def _skill_deltas(skill: Any, args: dict[str, Any]) -> Iterator[str]:
     """Yield text deltas for a skill run, streaming unless it emits JSON."""
     from app import observability
 
-    with observability.tracing_context(
+    # Bind only — do not wrap yields in tracing_context (StreamingResponse ContextVar issue).
+    tokens = observability.bind_tracing(
         feature="skill",
         tags=["skill", skill.name],
         generation_name=f"skill-{skill.name}",
-    ):
+    )
+    try:
         if skill.json_output:
             yield skill.run(args).content
             return
@@ -1520,6 +1522,8 @@ def _skill_deltas(skill: Any, args: dict[str, Any]) -> Iterator[str]:
             temperature=skill.temperature,
             name=f"skill-{skill.name}",
         )
+    finally:
+        observability.reset_tracing(tokens)
 
 
 def _stream_and_collect(deltas: Iterator[str]) -> Iterator[dict[str, Any]]:
