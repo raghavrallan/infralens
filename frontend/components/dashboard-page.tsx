@@ -217,7 +217,7 @@ export function DashboardPage() {
     window.localStorage.setItem("projectId", projectId);
     window.localStorage.setItem(
       "pendingPrompt",
-      `Explain this finding and how to fix it safely.\n\nSkill: ${prettyName(finding.skill)}\nSeverity: ${finding.severity}\nTitle: ${finding.title}\n${finding.evidence ? `Evidence: ${finding.evidence}` : ""}`,
+      `Explain this finding and how to fix it safely.\n\nSkill: ${prettyName(finding.skill)}\nSeverity: ${finding.severity}\nTitle: ${displayBrandText(finding.title)}\n${finding.evidence ? `Evidence: ${displayBrandText(finding.evidence)}` : ""}`,
     );
     window.location.href = "/";
   };
@@ -611,7 +611,7 @@ export function DashboardPage() {
                         </span>
                       )}
                     </div>
-                    <div className="finding-title">{finding.title}</div>
+                    <div className="finding-title">{displayBrandText(finding.title)}</div>
                     <div className="finding-meta">
                       <span>{prettyName(finding.skill)}</span>
                       {finding.resource && (
@@ -628,13 +628,13 @@ export function DashboardPage() {
                       {finding.evidence && (
                         <>
                           <span className="label">Evidence</span>
-                          {finding.evidence}
+                          {displayBrandText(finding.evidence)}
                         </>
                       )}
                       {finding.recommended_action && (
                         <>
                           <span className="label">Recommended action</span>
-                          {finding.recommended_action}
+                          {displayBrandText(finding.recommended_action)}
                         </>
                       )}
                     </div>
@@ -883,8 +883,8 @@ export function DashboardPage() {
               {runModal.findings?.length ? (
                 runModal.findings.map((finding) => (
                   <div className="finding-card" key={finding.id}>
-                    <div className="finding-title">{finding.title}</div>
-                    <div className="finding-body">{finding.evidence}</div>
+                    <div className="finding-title">{displayBrandText(finding.title)}</div>
+                    <div className="finding-body">{displayBrandText(finding.evidence)}</div>
                   </div>
                 ))
               ) : (

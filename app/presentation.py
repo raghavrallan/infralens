@@ -3,7 +3,7 @@
 Stored data, Azure resource IDs used by tools, and DB rows stay as EQIP / eq-*.
 Only outbound API / SSE payloads are rewritten for the UI:
 
-- Project / product name: EQIP → mlife (any casing)
+- Product / path tokens: EQIP, eqip, eqip_backend, eqip-frontend → mlife*
 - Resource-style tokens: eq- → ml-, eq_ → ml_, -eq- → -ml-, etc.
 
 Reverse mapping is available so user/UI text that says mlife / ml- can be
@@ -14,8 +14,10 @@ from __future__ import annotations
 import re
 from typing import Any
 
-# Whole-word product name (EQIP / eqip / Eqip → mlife)
-_EQIP_WORD = re.compile(r"\beqip\b", re.IGNORECASE)
+# "eqip" as a standalone word OR as the start of a compound path/id
+# (eqip_backend, eqip-frontend, eqip/Dockerfile). Underscore is a word char,
+# so \\beqip\\b alone misses those compounds.
+_EQIP_TOKEN = re.compile(r"(?i)(?<![A-Za-z0-9])eqip(?![A-Za-z])")
 
 # Resource segments: leading eq-, eq_, or eq as a hyphen/underscore delimited token.
 # Avoids mangling English words like "request", "equal", "sequence".
@@ -23,20 +25,23 @@ _EQ_RESOURCE = re.compile(
     r"(?i)(?<![A-Za-z0-9])eq(?=[-_])|(?<=[-_])eq(?=[-_]|$)|(?<![A-Za-z0-9])eq(?=\d)"
 )
 
-# Reverse: mlife / MetLife product names and ml- resource tokens
-_MLIFE_WORD = re.compile(r"\b(?:mlife|metlife)\b", re.IGNORECASE)
+# Reverse: mlife compounds first, then standalone product name → EQIP
+_MLIFE_PREFIX = re.compile(
+    r"(?i)(?<![A-Za-z0-9])(?:mlife|metlife)(?=[_\-/.\\])"
+)
+_MLIFE_WORD = re.compile(r"(?i)\b(?:mlife|metlife)\b")
 _ML_RESOURCE = re.compile(
     r"(?i)(?<![A-Za-z0-9])ml(?=[-_])|(?<=[-_])ml(?=[-_]|$)|(?<![A-Za-z0-9])ml(?=\d)"
 )
 
 
 def display_text(value: str) -> str:
-    """Rewrite EQIP / eq-* tokens for UI display."""
+    """Rewrite EQIP / eqip* / eq-* tokens for UI display."""
     if not value or not isinstance(value, str):
         return value
 
-    # Product name always brands as mlife.
-    text = _EQIP_WORD.sub("mlife", value)
+    # Product name and path prefixes always brand as mlife.
+    text = _EQIP_TOKEN.sub("mlife", value)
 
     def eq_res_sub(match: re.Match[str]) -> str:
         token = match.group(0)
@@ -55,8 +60,10 @@ def internal_text(value: str) -> str:
     if not value or not isinstance(value, str):
         return value
 
-    # Accept mlife / MetLife casing back to EQIP for tools / Azure lookups.
-    text = _MLIFE_WORD.sub("EQIP", value)
+    # Compounds like mlife_backend → eqip_backend (keep path casing).
+    text = _MLIFE_PREFIX.sub("eqip", value)
+    # Standalone product name back to EQIP for tools / Azure lookups.
+    text = _MLIFE_WORD.sub("EQIP", text)
 
     def ml_res_sub(match: re.Match[str]) -> str:
         token = match.group(0)

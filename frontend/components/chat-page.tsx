@@ -539,7 +539,7 @@ export function ChatPage() {
             </div></div>}
             {messages.map((message) => <div className={`message ${message.role}${message.error ? " error" : ""}`} key={message.id}>
               <div className="message-role">{message.role === "user" ? "You" : "Assistant"}</div>
-              <div className="message-content">{message.role === "assistant" ? <MarkdownContent text={message.content || (message.streaming ? "Working…" : "")} /> : <span className="plain-message">{message.content}</span>}</div>
+              <div className="message-content">{message.role === "assistant" ? <MarkdownContent text={message.content || (message.streaming ? "Working…" : "")} /> : <span className="plain-message">{displayBrandText(message.content)}</span>}</div>
               {message.role === "assistant" && <MetricCharts charts={message.charts} />}
               {!message.streaming && <div className="message-actions">
                 <button type="button" className="message-action" onClick={() => void copyMessage(message)}>{copiedMessageId === message.id ? "Copied" : "Copy"}</button>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { displayBrandText } from "../lib/branding";
 import { copyText } from "../lib/clipboard";
 
 function inline(text: string): ReactNode[] {
@@ -39,7 +40,7 @@ function CopyButton({ value, label = "Copy" }: { value: string; label?: string }
 }
 
 export function MarkdownContent({ text }: { text: string }) {
-  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const lines = displayBrandText(text).replace(/\r\n/g, "\n").split("\n");
   const blocks: ReactNode[] = [];
   let index = 0;
 
