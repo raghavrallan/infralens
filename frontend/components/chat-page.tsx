@@ -362,7 +362,7 @@ export function ChatPage() {
       }
       if (event.type === "status") setStatus(String(event.text || "Working…"));
       if (event.type === "delta") {
-        accumulated += String(event.text || "");
+        accumulated = displayBrandText(accumulated + String(event.text || ""));
         setMessages((current) => current.map((message) => message.id === messageId ? { ...message, content: accumulated, streaming: true } : message));
       }
       if (event.type === "final") {
@@ -370,7 +370,7 @@ export function ChatPage() {
           setActionScope("write");
           window.localStorage.setItem(`actionScope:${projectId}`, "write");
         }
-        accumulated = String(event.reply || accumulated);
+        accumulated = displayBrandText(String(event.reply || accumulated));
         const responseMode: ChatMode = event.mode === "plan" ? "plan" : "agent";
         const plan = responseMode === "plan" && Array.isArray(event.plan) ? event.plan : undefined;
         const charts = Array.isArray(event.charts) ? event.charts : undefined;
