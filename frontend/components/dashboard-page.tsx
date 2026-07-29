@@ -275,9 +275,32 @@ export function DashboardPage() {
 
   return (
     <Shell subtitle="Intelligence Layer" scroll loading={loading}>
-      <main className="dash">
-        <div className="dash-head">
-          <div className="dash-context">
+      <div className="dash-layout">
+        <aside className="dash-sidebar-nav">
+          <h3 className="nav-heading">Modules</h3>
+          <nav
+            className="module-tabs"
+            aria-label="Dashboard modules"
+            role="tablist"
+          >
+            {moduleTabs.map((item) => (
+              <button
+                type="button"
+                role="tab"
+                key={item.key || "all"}
+                className={`module-tab${module === item.key ? " active" : ""}`}
+                aria-selected={module === item.key}
+                title={item.description || "All intelligence modules"}
+                onClick={() => selectModule(item.key)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </nav>
+        </aside>
+        <main className="dash">
+          <div className="dash-head">
+            <div className="dash-context">
             <span className="dash-context-label">Dashboard Module</span>
             <strong>{activeModuleLabel}</strong>
           </div>
@@ -328,25 +351,6 @@ export function DashboardPage() {
             </button>
           </div>
         </div>
-        <nav
-          className="module-tabs"
-          aria-label="Dashboard modules"
-          role="tablist"
-        >
-          {moduleTabs.map((item) => (
-            <button
-              type="button"
-              role="tab"
-              key={item.key || "all"}
-              className={`module-tab${module === item.key ? " active" : ""}`}
-              aria-selected={module === item.key}
-              title={item.description || "All intelligence modules"}
-              onClick={() => selectModule(item.key)}
-            >
-              {item.label}
-            </button>
-          ))}
-        </nav>
         <section className="module-definition" aria-live="polite">
           <div className="module-definition-heading">
             <span className="dash-context-label">What this module covers</span>
@@ -851,7 +855,8 @@ export function DashboardPage() {
             </div>
           </aside>
         </div>
-      </main>
+        </main>
+      </div>
       {workflowModal !== undefined && projectId && (
         <WorkflowModal
           existing={workflowModal}
