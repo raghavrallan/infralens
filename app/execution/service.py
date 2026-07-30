@@ -62,6 +62,10 @@ def _public(job: ExecutionJob, approval: Optional[ExecutionApproval] = None) -> 
         "expected_result": (job.operation or {}).get("expected_result", ""),
         "risk": (job.operation or {}).get("risk", ""),
         "rollback": (job.operation or {}).get("rollback", ""),
+        "why": (job.operation or {}).get("why", ""),
+        "blast_radius": (job.operation or {}).get("blast_radius", ""),
+        "degrade_plan": (job.operation or {}).get("degrade_plan", ""),
+        "preflight_summary": (job.operation or {}).get("preflight_summary", {}),
         "result": job.result or {},
         "error": job.error,
         "created_at": job.created_at.isoformat() if job.created_at else None,
@@ -95,9 +99,19 @@ def create_action(
     preflight: list[str], preflight_expect: str = "", verify: list[str] | None = None,
     requested_by: str = "user", access_level: str = "ask_approval",
     steps: list[dict[str, Any]] | None = None,
+    why: str = "",
+    blast_radius: str = "",
+    degrade_plan: str = "",
 ) -> dict[str, Any]:
     if access_level not in {"ask_approval", "auto_approve", "full_access"}:
         raise ValueError("Unsupported access level")
+    if access_scope == "write":
+        if not str(rollback or "").strip():
+            raise ValueError("Write actions require a rollback plan")
+        if not str(risk or "").strip():
+            raise ValueError("Write actions require a risk statement")
+        if not str(expected_result or "").strip():
+            raise ValueError("Write actions require an expected_result")
     if connections.get_secret_fields(project_id, provider) is None:
         raise ValueError(f"No {provider} connection is configured for this project")
     if provider == "github" and "/" in target:
@@ -134,10 +148,21 @@ def create_action(
         normalized_steps.append(step_operation)
     if normalized_steps:
         operation["steps"] = normalized_steps
+    preflight_summary = {
+        "command": command_preview({**operation, "args": operation.get("preflight") or []})
+        if operation.get("preflight")
+        else "",
+        "args": operation.get("preflight") or [],
+        "expect": preflight_expect or "",
+    }
     operation.update({
         "expected_result": expected_result[:1000],
         "risk": risk[:1000],
         "rollback": rollback[:1000],
+        "why": (why or risk or "")[:1000],
+        "blast_radius": (blast_radius or "medium")[:32],
+        "degrade_plan": (degrade_plan or "")[:1000],
+        "preflight_summary": preflight_summary,
         "access_level": access_level,
         "requires_double_confirmation": access_scope == "write" and access_level == "full_access",
     })
@@ -164,6 +189,7 @@ def create_action(
     with SessionLocal() as session:
         session.add(job)
         _event(session, action_id, "action_planned", {"provider": provider, "target": target})
+        approval = None
         if access_scope == "write":
             approval = ExecutionApproval(
                 id=str(uuid4()), action_id=action_id, approved_operation_hash=job.operation_hash
@@ -176,6 +202,12 @@ def create_action(
                 {
                     "operation_hash": job.operation_hash,
                     "mode": "double_confirmation" if access_level == "full_access" else "single_confirmation",
+                    "why": operation.get("why"),
+                    "blast_radius": operation.get("blast_radius"),
+                    "rollback": operation.get("rollback"),
+                    "expected_result": operation.get("expected_result"),
+                    "preflight_summary": preflight_summary,
+                    "degrade_plan": operation.get("degrade_plan"),
                 },
             )
         else:
@@ -319,6 +351,24 @@ def approve_action(action_id: str, approver: str) -> dict[str, Any]:
         session.commit()
         result = _public(job, approval)
     try:
+        from app import memory as eng_memory
+
+        eng_memory.remember_action(
+            project_id=result["project_id"],
+            action_id=action_id,
+            summary=result.get("target") or result.get("command_preview") or action_id,
+            outcome="approved",
+            payload={
+                "provider": result.get("provider"),
+                "rollback": result.get("rollback"),
+                "risk": result.get("risk"),
+                "blast_radius": result.get("blast_radius"),
+                "approver": approver,
+            },
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    try:
         dispatch = enqueue_action(action_id, job.provider, job.access_scope)
         _record_dispatch_diagnostic(action_id, dispatch)
     except Exception as exc:  # noqa: BLE001
@@ -340,7 +390,20 @@ def reject_action(action_id: str, approver: str, reason: str) -> dict[str, Any]:
         job.finished_at = _now()
         _event(session, action_id, "action_rejected", {"reason": job.error})
         session.commit()
-        return _public(job, approval)
+        result = _public(job, approval)
+    try:
+        from app import memory as eng_memory
+
+        eng_memory.remember_action(
+            project_id=result["project_id"],
+            action_id=action_id,
+            summary=result.get("target") or action_id,
+            outcome="rejected",
+            payload={"reason": reason, "approver": approver, "rollback": result.get("rollback")},
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    return result
 
 
 def cancel_action(action_id: str, requested_by: str = "user") -> dict[str, Any]:
@@ -425,4 +488,18 @@ def mark_result(action_id: str, status: str, result: dict[str, Any], error: str 
         job.error = error[:2000]
         job.finished_at = _now()
         _event(session, action_id, f"action_{'succeeded' if status == 'succeeded' else 'failed'}", {"status": status, "error": job.error})
+        project_id = job.project_id
+        target = job.target
         session.commit()
+    try:
+        from app import memory as eng_memory
+
+        eng_memory.remember_action(
+            project_id=project_id,
+            action_id=action_id,
+            summary=target or action_id,
+            outcome=status,
+            payload={"error": error[:500] if error else ""},
+        )
+    except Exception:  # noqa: BLE001
+        pass

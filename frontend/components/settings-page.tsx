@@ -8,6 +8,7 @@ import { Modal } from "./modal";
 import { ProjectModal } from "./project-modal";
 import { Shell } from "./shell";
 import { ThemedSelect } from "./themed-select";
+import { UsersRolesPanel } from "./users-roles-panel";
 
 type Provider = "azure" | "aws" | "github";
 const providerFields: Record<
@@ -61,6 +62,7 @@ function ProviderCard({
   );
   const [fields, setFields] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
+  const [oauthAvailable, setOauthAvailable] = useState(false);
   const labels = {
     azure: "Azure account",
     aws: "AWS account",
@@ -72,10 +74,37 @@ function ProviderCard({
   useEffect(() => {
     if (status?.method) setMethod(status.method);
   }, [status?.method]);
+  useEffect(() => {
+    if (provider === "aws") return;
+    void api<{
+      github: { oauth: boolean };
+      azure: { oauth: boolean; oauth_note?: string | null };
+    }>("/api/providers/auth-options")
+      .then((opts) => {
+        setOauthAvailable(
+          provider === "github" ? opts.github.oauth : opts.azure.oauth,
+        );
+      })
+      .catch(() => undefined);
+  }, [provider]);
   const update = (name: string, value: string) =>
     setFields((current) => ({ ...current, [name]: value }));
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (method === "oauth") {
+      setMessage("Starting OAuth…");
+      try {
+        const path =
+          provider === "github"
+            ? `/api/providers/github/oauth/start?project_id=${encodeURIComponent(projectId)}`
+            : `/api/providers/azure/oauth/start?project_id=${encodeURIComponent(projectId)}`;
+        const result = await api<{ authorize_url: string }>(path);
+        window.location.href = result.authorize_url;
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "OAuth unavailable");
+      }
+      return;
+    }
     if (method !== "sso" && !Object.values(fields).some(Boolean)) {
       setMessage("Please fill in at least one field.");
       return;
@@ -117,11 +146,22 @@ function ProviderCard({
           }
         >
           {provider === "github"
-            ? "Token"
+            ? "Token / PAT"
             : provider === "aws"
               ? "Access key"
               : "Client secret"}
         </button>
+        {provider !== "aws" && (
+          <button
+            type="button"
+            className={`method-tab${method === "oauth" ? " active" : ""}`}
+            onClick={() => setMethod("oauth")}
+            disabled={!oauthAvailable}
+            title={oauthAvailable ? "OAuth" : "Configure OAuth env vars to enable"}
+          >
+            OAuth{oauthAvailable ? "" : " (env)"}
+          </button>
+        )}
         <button
           type="button"
           className={`method-tab${method === "sso" ? " active" : ""}`}
@@ -131,7 +171,14 @@ function ProviderCard({
         </button>
       </div>
       <form onSubmit={(event) => void save(event)}>
-        {method === "sso" ? (
+        {method === "oauth" ? (
+          <div className="fields">
+            <p className="muted small">
+              Guided OAuth connect. Secrets stay in the project connection store.
+              {!oauthAvailable && " Set GITHUB_OAUTH_* / AZURE_OAUTH_* to enable."}
+            </p>
+          </div>
+        ) : method === "sso" ? (
           <div className="fields">
             <p className="muted small">
               Records the directory for single sign-on. Redirect-based login
@@ -197,6 +244,9 @@ export function SettingsPage() {
     api_version: "2024-10-21",
     configured: false,
     has_key: false,
+    editable: false,
+    note: "",
+    scope: "platform",
   });
   const [azureMessage, setAzureMessage] = useState("");
   const [connections, setConnections] = useState<ConnectionStatus[]>([]);
@@ -210,35 +260,53 @@ export function SettingsPage() {
   const [repoSearch, setRepoSearch] = useState("");
 
   const loadProjects = useCallback(async () => {
-    const list = await api<Project[]>("/api/projects");
-    setProjects(list);
-    const saved = window.localStorage.getItem("projectId");
-    const selected =
-      saved && list.some((project) => project.id === saved)
-        ? saved
-        : list.find((project) => project.is_default)?.id || list[0]?.id || null;
-    setProjectId(selected);
+    try {
+      const list = await api<Project[]>("/api/projects");
+      setProjects(list);
+      const saved = window.localStorage.getItem("projectId");
+      const selected =
+        saved && list.some((project) => project.id === saved)
+          ? saved
+          : list.find((project) => project.is_default)?.id || list[0]?.id || null;
+      setProjectId(selected);
+    } catch (error) {
+      setProjectMessage(
+        error instanceof Error ? error.message : "Could not load projects",
+      );
+    }
   }, []);
   const loadConnections = useCallback(async (selected?: string) => {
     if (!selected) return;
-    const list = await api<ConnectionStatus[]>(
-      `/api/projects/${selected}/connections`,
-    );
-    setConnections(
-      list.map(
-        (item) => ({ ...item, project_id: selected }) as ConnectionStatus,
-      ),
-    );
-    const repoData = await api<typeof repos>(`/api/projects/${selected}/repos`);
-    setRepos({
-      ...repoData,
-      mapped: repoData.mapped || [],
-      available: repoData.available || [],
-    });
+    try {
+      const list = await api<ConnectionStatus[]>(
+        `/api/projects/${selected}/connections`,
+      );
+      setConnections(
+        list.map(
+          (item) => ({ ...item, project_id: selected }) as ConnectionStatus,
+        ),
+      );
+      const repoData = await api<typeof repos>(`/api/projects/${selected}/repos`);
+      setRepos({
+        ...repoData,
+        mapped: repoData.mapped || [],
+        available: repoData.available || [],
+      });
+    } catch (error) {
+      setRepoMessage(
+        error instanceof Error ? error.message : "Could not load connections",
+      );
+    }
   }, []);
   useEffect(() => {
     void loadProjects();
-    void api<typeof azure>("/api/config/azure-openai").then(setAzure);
+    void api<typeof azure>("/api/config/azure-openai")
+      .then(setAzure)
+      .catch((error) => {
+        setAzureMessage(
+          error instanceof Error ? error.message : "Could not load Azure OpenAI config",
+        );
+      });
   }, [loadProjects]);
   useEffect(() => {
     void loadConnections(projectId || undefined);
@@ -261,13 +329,10 @@ export function SettingsPage() {
     );
     setProjectMessage("Default project updated.");
   };
-  const createProject = async (name: string) => {
-    await api("/api/projects", {
-      method: "POST",
-      body: JSON.stringify({ name }),
-    });
-    setProjectMessage("Project created.");
+  const createProject = async (projectIdOrName: string) => {
+    setProjectMessage("Project ready.");
     await loadProjects();
+    if (projectIdOrName) setProjectId(projectIdOrName);
   };
   const [renameModal, setRenameModal] = useState(false);
   const [renameDraft, setRenameDraft] = useState("");
@@ -432,12 +497,13 @@ export function SettingsPage() {
           <div className="card-head">
             <h3>Azure OpenAI</h3>
             <span className={`pill ${azure.configured ? "ok" : "off"}`}>
-              {azure.configured ? "connected" : "not configured"}
+              {azure.configured ? "platform LLM ready" : "not configured"}
             </span>
           </div>
           <p className="muted small">
-            Global · powers the assistant and every skill across all projects.
-            Stored in the database.
+            {azure.note ||
+              "Platform LLM for chat/skills — not the same as project Azure cloud account below."}
+            {!azure.editable ? " Super Admin manages these credentials." : ""}
           </p>
           <form onSubmit={(event) => void saveAzure(event)}>
             <div className="fields">
@@ -445,6 +511,7 @@ export function SettingsPage() {
                 Endpoint
                 <input
                   value={azure.endpoint}
+                  disabled={!azure.editable}
                   onChange={(event) =>
                     setAzure((current) => ({
                       ...current,
@@ -459,6 +526,7 @@ export function SettingsPage() {
                 <input
                   type="password"
                   value={azure.api_key}
+                  disabled={!azure.editable}
                   onChange={(event) =>
                     setAzure((current) => ({
                       ...current,
@@ -474,6 +542,7 @@ export function SettingsPage() {
                 Deployment name
                 <input
                   value={azure.deployment}
+                  disabled={!azure.editable}
                   onChange={(event) =>
                     setAzure((current) => ({
                       ...current,
@@ -486,6 +555,7 @@ export function SettingsPage() {
                 API version
                 <input
                   value={azure.api_version}
+                  disabled={!azure.editable}
                   onChange={(event) =>
                     setAzure((current) => ({
                       ...current,
@@ -495,11 +565,13 @@ export function SettingsPage() {
                 />
               </label>
             </div>
-            <div className="actions">
-              <button type="submit" className="primary">
-                Save
-              </button>
-            </div>
+            {azure.editable ? (
+              <div className="actions">
+                <button type="submit" className="primary">
+                  Save
+                </button>
+              </div>
+            ) : null}
             <div className="form-msg">{azureMessage}</div>
           </form>
         </section>
@@ -596,6 +668,7 @@ export function SettingsPage() {
             </section>
           </>
         )}{" "}
+        {projectId && <UsersRolesPanel />}
       </main>
       {projectModalOpen && (
         <ProjectModal

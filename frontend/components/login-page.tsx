@@ -12,6 +12,7 @@ export function LoginPage() {
 
   useEffect(() => {
     if (getToken() && getStoredUser()) {
+      // AuthGate on destination will send incomplete users to /onboarding.
       window.location.replace("/dashboard");
       return;
     }
@@ -24,6 +25,7 @@ export function LoginPage() {
     setBusy(true);
     try {
       await doLogin(username.trim(), password);
+      // Landing on dashboard; AuthGate redirects to /onboarding when needed.
       window.location.href = "/dashboard";
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign-in failed");

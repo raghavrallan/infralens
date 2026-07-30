@@ -76,6 +76,7 @@ def _summary(project: Project, default_id: str | None) -> dict[str, Any]:
     return {
         "id": project.id,
         "name": display_text(project.name),
+        "org_id": getattr(project, "org_id", "") or "",
         "is_default": project.id == default_id,
         "repos": list(project.repos or []),
         "created_at": project.created_at.isoformat() if project.created_at else None,
@@ -117,25 +118,107 @@ def ensure_default() -> str:
         return selected.id
 
 
-def list_projects() -> list[dict[str, Any]]:
-    ensure_default()
+def list_projects(user: Optional[dict[str, Any]] = None) -> list[dict[str, Any]]:
+    """List projects. When ``user`` is provided, only accessible projects are returned."""
+    if user is None:
+        ensure_default()
+        with SessionLocal() as session:
+            default_id = _default_id(session)
+            deleted = _deleted_ids(session)
+            rows = session.execute(select(Project).order_by(Project.created_at.asc())).scalars()
+            return [_summary(p, default_id) for p in rows if p.id not in deleted]
+
+    from app import memberships
+
+    # Do not auto-create a shared default for scoped users — empty means onboard.
     with SessionLocal() as session:
         default_id = _default_id(session)
         deleted = _deleted_ids(session)
-        rows = session.execute(select(Project).order_by(Project.created_at.asc())).scalars()
+        accessible = memberships.list_accessible_project_rows(user)
         return [
-            _summary(p, default_id) for p in rows if p.id not in deleted
+            _summary(p, default_id)
+            for p in accessible
+            if p.id not in deleted
         ]
 
 
-def create_project(name: str) -> dict[str, Any]:
-    project_id = str(uuid.uuid4())
+def create_project(
+    name: str,
+    *,
+    org_id: Optional[str] = None,
+    owner_user_id: Optional[str] = None,
+    owner_project_role: str = "devops_lead",
+    reuse_empty: bool = False,
+) -> dict[str, Any]:
     clean = " ".join((name or "").strip().split()) or "New project"
+
+    # Reuse the caller's empty onboarding project so PAT/OAuth does not spawn duplicates.
+    if reuse_empty and owner_user_id:
+        from app import memberships
+
+        for existing in list_projects(user={"id": owner_user_id, "role": "developer"}):
+            # Only reuse projects the user owns with no mapped repos yet.
+            if existing.get("org_id") and org_id and existing.get("org_id") != org_id:
+                continue
+            if not (existing.get("repos") or []):
+                if clean and clean != "Onboarding project" and clean != "New project":
+                    renamed = rename_project(existing["id"], clean)
+                    if renamed:
+                        memberships.ensure_project_membership(
+                            project_id=existing["id"],
+                            user_id=owner_user_id,
+                            project_role=owner_project_role,
+                        )
+                        return renamed
+                memberships.ensure_project_membership(
+                    project_id=existing["id"],
+                    user_id=owner_user_id,
+                    project_role=owner_project_role,
+                )
+                return existing
+
+    project_id = str(uuid.uuid4())
     with SessionLocal() as session:
-        project = Project(id=project_id, name=clean, repos=[])
+        if not org_id:
+            from app.db import Organization
+
+            org = session.scalar(select(Organization).order_by(Organization.created_at.asc()))
+            org_id = org.id if org else ""
+        project = Project(id=project_id, name=clean, repos=[], org_id=org_id or "")
         session.add(project)
         session.commit()
-        return _summary(project, _default_id(session))
+        summary = _summary(project, _default_id(session))
+    if owner_user_id:
+        from app import memberships
+
+        memberships.ensure_project_membership(
+            project_id=project_id,
+            user_id=owner_user_id,
+            project_role=owner_project_role,
+        )
+    return summary
+
+
+def collapse_duplicate_empty_projects(
+    *,
+    user: dict[str, Any],
+    keep_project_id: str,
+    org_id: Optional[str] = None,
+) -> int:
+    """Delete empty sibling projects created during onboarding retries. Returns count removed."""
+    removed = 0
+    for project in list_projects(user=user):
+        pid = project["id"]
+        if pid == keep_project_id:
+            continue
+        if org_id and project.get("org_id") and project.get("org_id") != org_id:
+            continue
+        if project.get("repos"):
+            continue
+        # Only remove empty shells the user can access.
+        if delete_project(pid):
+            removed += 1
+    return removed
 
 
 def get_project(project_id: str) -> Optional[dict[str, Any]]:

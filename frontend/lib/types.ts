@@ -68,8 +68,18 @@ export type Approval = {
   id: string;
   gate?: string;
   gate_label?: string;
+  gate_rationale?: string;
   expired?: boolean;
   expires_in_seconds?: number;
+  blast_radius?: string;
+  evidence?: string;
+  recommended_action?: string;
+  rollback?: string;
+  min_role?: string;
+  min_role_label?: string;
+  break_glass_applied?: boolean;
+  preflight?: { summary?: string; checks?: string[] };
+  precedent?: { summary?: string; outcome?: string; created_at?: string }[];
   finding?: Finding;
 };
 
@@ -135,6 +145,10 @@ export type Action = {
   expected_result?: string;
   risk?: string;
   rollback?: string;
+  why?: string;
+  blast_radius?: string;
+  degrade_plan?: string;
+  preflight_summary?: JsonObject;
   error?: string;
   approval?: {
     decision?: string;
