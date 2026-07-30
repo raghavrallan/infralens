@@ -28,3 +28,7 @@ assets/
 tests/
 .vscode/
 .idea/
+docs/
+docs/~$*
+**/~$*
+~$*

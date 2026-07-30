@@ -38,7 +38,8 @@ _GATE_LABELS: dict[Gate, str] = {
 GATE_LABELS = _GATE_LABELS
 
 # Ordering used to escalate a gate when blast radius is high.
-_GATE_ORDER: tuple[Gate, ...] = (
+# Public alias for break-glass one-step downgrade.
+GATE_ORDER: tuple[Gate, ...] = (
     "autonomous",
     "autonomous_logged",
     "auto_instant_undo",
@@ -46,6 +47,7 @@ _GATE_ORDER: tuple[Gate, ...] = (
     "human_approval",
     "two_person",
 )
+_GATE_ORDER = GATE_ORDER
 
 
 @dataclass(frozen=True)

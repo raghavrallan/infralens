@@ -249,13 +249,20 @@ export function ChatPage() {
     inputRef.current?.focus();
   };
 
-  const createProject = async (name: string) => {
-    const project = await api<Project>("/api/projects", { method: "POST", body: JSON.stringify({ name }) });
-    setProjects((current) => [...current, project]);
-    setProjectId(project.id);
-    window.localStorage.setItem("projectId", project.id);
+  const createProject = async (projectIdOrName: string) => {
+    // Onboarding wizard already created the project; refresh and select it.
+    const list = await api<Project[]>("/api/projects");
+    setProjects(list);
+    const match =
+      list.find((p) => p.id === projectIdOrName) ||
+      list.find((p) => p.name === projectIdOrName) ||
+      list[list.length - 1];
+    if (match) {
+      setProjectId(match.id);
+      window.localStorage.setItem("projectId", match.id);
+    }
     setActionScope("read_only");
-    window.localStorage.setItem(`actionScope:${project.id}`, "read_only");
+    if (match) window.localStorage.setItem(`actionScope:${match.id}`, "read_only");
   };
 
   const selectProject = (value: string) => {
@@ -553,7 +560,7 @@ export function ChatPage() {
               {activeAction.expected_result && <p className="action-activity-expect"><b>Expected:</b> {activeAction.expected_result}</p>}
               {(actionEvents.length > 0 || ["queued", "running"].includes(activeAction.status)) && <div className="action-log" aria-label="Live deployment logs">{actionEvents.slice(-12).map((event) => <div className="action-log-line" key={event.id}><span>{event.created_at ? new Date(event.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "--:--:--"}</span><code>{actionEventText(event)}</code></div>)}{!actionEvents.length && <div className="action-log-empty">Waiting for the provider executor…</div>}</div>}
               {activeAction.error && <p className="error-text">{activeAction.error}</p>}
-              <div className="action-actions">{["queued", "running"].includes(activeAction.status) && <button type="button" className="secondary cancel-action" onClick={() => void cancelActiveAction()} disabled={cancelingAction}>{cancelingAction ? "Stopping…" : "Stop action"}</button>}{["approval_required", "awaiting_approval"].includes(activeAction.status) && <><button type="button" className="secondary" onClick={() => void rejectActiveAction()}>Reject</button>{activeAction.access_level === "full_access" ? <button type="button" className="primary" onClick={openFullAccessModal}>Review danger action</button> : <button type="button" className="primary" onClick={() => void approveActiveAction()}>Approve action</button>}</>}</div>
+              <div className="action-actions">{["queued", "running"].includes(activeAction.status) && <button type="button" className="secondary cancel-action" onClick={() => void cancelActiveAction()} disabled={cancelingAction}>{cancelingAction ? "Stopping…" : "Stop action"}</button>}{["approval_required", "awaiting_approval"].includes(activeAction.status) && <><div className="action-informed">{activeAction.why && <p><strong>Why</strong> {activeAction.why}</p>}{activeAction.blast_radius && <p><strong>Blast</strong> {activeAction.blast_radius}</p>}{activeAction.risk && <p><strong>Risk</strong> {activeAction.risk}</p>}{activeAction.rollback && <p><strong>Rollback</strong> {activeAction.rollback}</p>}{activeAction.expected_result && <p><strong>Expected</strong> {activeAction.expected_result}</p>}{activeAction.degrade_plan && <p><strong>Degrade</strong> {activeAction.degrade_plan}</p>}</div><button type="button" className="secondary" onClick={() => void rejectActiveAction()}>Reject</button>{activeAction.access_level === "full_access" ? <button type="button" className="primary" onClick={openFullAccessModal}>Review danger action</button> : <button type="button" className="primary" onClick={() => void approveActiveAction()}>Approve action</button>}</>}</div>
             </section>}
           </div>
           <form className="composer" onSubmit={(event) => { event.preventDefault(); void sendMessage(); }}>

@@ -467,14 +467,29 @@ function Stop-PortProcessTree {
 
     if (-not $ProcId -or $ProcId -le 0) { return }
 
-    # Prefer taskkill (tree + force); falls back to Stop-Process
-    $null = & taskkill.exe /F /T /PID $ProcId 2>$null
-    Get-CimInstance Win32_Process -Filter ("ParentProcessId = " + $ProcId) -ErrorAction SilentlyContinue |
-        ForEach-Object {
-            $null = & taskkill.exe /F /T /PID $_.ProcessId 2>$null
-            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-        }
-    Stop-Process -Id $ProcId -Force -ErrorAction SilentlyContinue
+    # Already gone (common after taskkill /T killed a parent tree, or ghost listen PIDs).
+    if (-not (Get-Process -Id $ProcId -ErrorAction SilentlyContinue)) { return }
+
+    # Prefer taskkill (tree + force); falls back to Stop-Process.
+    # Run via cmd so PowerShell does not surface NativeCommandError when the
+    # process exits between the existence check and the kill (race), and so
+    # $ErrorActionPreference = Stop does not abort the script on stderr.
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "SilentlyContinue"
+    try {
+        cmd.exe /c "taskkill /F /T /PID $ProcId >nul 2>&1" | Out-Null
+        Get-CimInstance Win32_Process -Filter ("ParentProcessId = " + $ProcId) -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                $childId = [int]$_.ProcessId
+                if (-not (Get-Process -Id $childId -ErrorAction SilentlyContinue)) { return }
+                cmd.exe /c "taskkill /F /T /PID $childId >nul 2>&1" | Out-Null
+                Stop-Process -Id $childId -Force -ErrorAction SilentlyContinue
+            }
+        Stop-Process -Id $ProcId -Force -ErrorAction SilentlyContinue
+    }
+    finally {
+        $ErrorActionPreference = $prevEap
+    }
 }
 
 function Stop-MatchingAppProcesses {
@@ -490,8 +505,10 @@ function Stop-MatchingAppProcesses {
             )
         } |
         ForEach-Object {
-            Write-Host ("    Stopping related process " + $_.Name + " (pid " + $_.ProcessId + ")")
-            Stop-PortProcessTree -ProcId ([int]$_.ProcessId)
+            $matchId = [int]$_.ProcessId
+            if (-not (Get-Process -Id $matchId -ErrorAction SilentlyContinue)) { return }
+            Write-Host ("    Stopping related process " + $_.Name + " (pid " + $matchId + ")")
+            Stop-PortProcessTree -ProcId $matchId
         }
 }
 
@@ -906,14 +923,17 @@ function Stop-AppProcesses {
             )
         } |
         ForEach-Object {
-            Stop-PortProcessTree -ProcId ([int]$_.ProcessId)
-            if (-not $Quiet) { Write-Host ("Stopped leftover process " + $_.ProcessId) }
+            $leftoverId = [int]$_.ProcessId
+            if (-not (Get-Process -Id $leftoverId -ErrorAction SilentlyContinue)) { return }
+            Stop-PortProcessTree -ProcId $leftoverId
+            if (-not $Quiet) { Write-Host ("Stopped leftover process " + $leftoverId) }
         }
 
     # Also close titled CMD windows if still around
     Get-Process -Name cmd -ErrorAction SilentlyContinue | ForEach-Object {
         try {
             if ($_.MainWindowTitle -match '^DevSecOps (API|Worker|Frontend)') {
+                if (-not (Get-Process -Id $_.Id -ErrorAction SilentlyContinue)) { return }
                 Stop-PortProcessTree -ProcId $_.Id
                 if (-not $Quiet) { Write-Host ("Stopped CMD window: " + $_.MainWindowTitle) }
             }

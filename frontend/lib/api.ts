@@ -27,14 +27,21 @@ function clearAuthStorage(): void {
 }
 
 export async function api<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(apiUrl(url), {
-    ...options,
-    headers: {
-      ...(options?.body ? { "Content-Type": "application/json" } : {}),
-      ...readAuthHeaders(),
-      ...options?.headers,
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(apiUrl(url), {
+      ...options,
+      headers: {
+        ...(options?.body ? { "Content-Type": "application/json" } : {}),
+        ...readAuthHeaders(),
+        ...options?.headers,
+      },
+    });
+  } catch {
+    throw new Error(
+      "Cannot reach the API. Is the backend running on NEXT_PUBLIC_API_BASE?",
+    );
+  }
   if (response.status === 401 && !url.includes("/api/auth/login")) {
     clearAuthStorage();
     if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {

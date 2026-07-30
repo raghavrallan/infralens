@@ -67,9 +67,131 @@ class User(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    email: Mapped[str] = mapped_column(String(255), default="", index=True)
     display_name: Mapped[str] = mapped_column(String(120), default="Admin")
     password_hash: Mapped[str] = mapped_column(String(255))
+    # Global role: super_admin | org_admin | devops_lead | devops_engineer | developer | viewer
+    # Effective project powers also come from project_memberships.project_role.
+    role: Mapped[str] = mapped_column(String(32), default="developer")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+
+class Organization(Base):
+    """Tenant boundary: projects and users are isolated per organization."""
+
+    __tablename__ = "organizations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), default="Organization")
+    slug: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    created_by: Mapped[str] = mapped_column(String(36), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+
+class OrgMembership(Base):
+    """User membership in an organization (org_admin or member)."""
+
+    __tablename__ = "org_memberships"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    org_id: Mapped[str] = mapped_column(String(36), index=True)
+    user_id: Mapped[str] = mapped_column(String(36), index=True)
+    # org_admin | member
+    org_role: Mapped[str] = mapped_column(String(32), default="member")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class ProjectMembership(Base):
+    """User membership in a project with a project-scoped role."""
+
+    __tablename__ = "project_memberships"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(String(36), index=True)
+    user_id: Mapped[str] = mapped_column(String(36), index=True)
+    # devops_lead | devops_engineer | developer | viewer
+    project_role: Mapped[str] = mapped_column(String(32), default="developer")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class Invite(Base):
+    """Email invite into an organization (and optionally a project)."""
+
+    __tablename__ = "invites"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    org_id: Mapped[str] = mapped_column(String(36), index=True)
+    email: Mapped[str] = mapped_column(String(255), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    invited_role: Mapped[str] = mapped_column(String(32), default="developer")
+    org_role: Mapped[str] = mapped_column(String(32), default="member")
+    project_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    project_role: Mapped[str] = mapped_column(String(32), default="developer")
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    invited_by: Mapped[str] = mapped_column(String(36), default="")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class MembershipRequest(Base):
+    """DevOps Lead proposal to add/remove/update a project member; Org Admin approves."""
+
+    __tablename__ = "membership_requests"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    org_id: Mapped[str] = mapped_column(String(36), index=True)
+    project_id: Mapped[str] = mapped_column(String(36), index=True)
+    # add | remove | update_role
+    action: Mapped[str] = mapped_column(String(16), default="add")
+    target_email: Mapped[str] = mapped_column(String(255), default="")
+    target_user_id: Mapped[str] = mapped_column(String(36), default="")
+    project_role: Mapped[str] = mapped_column(String(32), default="developer")
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    reason: Mapped[str] = mapped_column(String, default="")
+    requested_by: Mapped[str] = mapped_column(String(36), default="")
+    decided_by: Mapped[str] = mapped_column(String(36), default="")
+    approve_token_hash: Mapped[str] = mapped_column(String(64), default="", index=True)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class BreakGlassSession(Base):
+    """Time-boxed gate downgrade window opened by DevOps Lead+."""
+
+    __tablename__ = "break_glass_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(String(36), index=True, default=DEFAULT_PROJECT_ID)
+    opened_by: Mapped[str] = mapped_column(String(120), default="")
+    reason: Mapped[str] = mapped_column(String, default="")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    postmortem_required: Mapped[bool] = mapped_column(Boolean, default=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class DeliveryRun(Base):
+    """Staged docs → architecture → TF → apply → code delivery for a project."""
+
+    __tablename__ = "delivery_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(String(36), index=True)
+    stage: Mapped[str] = mapped_column(String(32), default="ingest")
+    status: Mapped[str] = mapped_column(String(32), default="active")
+    artifacts: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    approved_by: Mapped[str] = mapped_column(String(120), default="")
+    created_by: Mapped[str] = mapped_column(String(120), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now
@@ -82,6 +204,7 @@ class Project(Base):
     __tablename__ = "projects"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    org_id: Mapped[str] = mapped_column(String(36), index=True, default="")
     name: Mapped[str] = mapped_column(String(120), default="New project")
     # GitHub repositories ("owner/name") this project is allowed to inspect.
     repos: Mapped[list[str]] = mapped_column(JSONB, default=list)
@@ -421,8 +544,121 @@ def _migrate() -> None:
                     )
                 )
 
+        if "users" in tables:
+            user_columns = {c["name"] for c in inspector.get_columns("users")}
+            if "role" not in user_columns:
+                try:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE users ADD COLUMN role VARCHAR(32) "
+                            "NOT NULL DEFAULT 'developer'"
+                        )
+                    )
+                except Exception:
+                    # Table may be owned by another role; create_all + seed still work
+                    # for new DBs. Existing rows get role via ensure_seed_user upgrade.
+                    pass
+            if "email" not in user_columns:
+                try:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE users ADD COLUMN email VARCHAR(255) "
+                            "NOT NULL DEFAULT ''"
+                        )
+                    )
+                except Exception:
+                    pass
+
+        if "projects" in tables:
+            project_columns = {c["name"] for c in inspector.get_columns("projects")}
+            if "org_id" not in project_columns:
+                try:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE projects ADD COLUMN org_id VARCHAR(36) "
+                            "NOT NULL DEFAULT ''"
+                        )
+                    )
+                except Exception:
+                    pass
+
+
+def ensure_tenancy_seed() -> None:
+    """Create default org, attach orphan projects, grant seed admin org+project access."""
+    import uuid as _uuid
+
+    from sqlalchemy import select as _select
+
+    DEFAULT_ORG_SLUG = "infralens"
+    with SessionLocal() as session:
+        org = session.scalar(
+            _select(Organization).where(Organization.slug == DEFAULT_ORG_SLUG)
+        )
+        if org is None:
+            org = Organization(
+                id=str(_uuid.uuid4()),
+                name="InfraLens",
+                slug=DEFAULT_ORG_SLUG,
+                created_by="",
+            )
+            session.add(org)
+            session.flush()
+
+        for project in session.scalars(_select(Project)).all():
+            if not (project.org_id or "").strip():
+                project.org_id = org.id
+
+        admin = session.scalar(
+            _select(User).where(User.role == "super_admin").order_by(User.created_at.asc())
+        )
+        if admin is None:
+            admin = session.scalar(_select(User).order_by(User.created_at.asc()).limit(1))
+        if admin is not None:
+            if not (admin.email or "").strip():
+                admin.email = f"{admin.username}@local"
+            org.created_by = org.created_by or admin.id
+            existing_om = session.scalar(
+                _select(OrgMembership).where(
+                    OrgMembership.org_id == org.id,
+                    OrgMembership.user_id == admin.id,
+                )
+            )
+            if existing_om is None:
+                session.add(
+                    OrgMembership(
+                        id=str(_uuid.uuid4()),
+                        org_id=org.id,
+                        user_id=admin.id,
+                        org_role="org_admin",
+                    )
+                )
+            for project in session.scalars(
+                _select(Project).where(Project.org_id == org.id)
+            ).all():
+                existing_pm = session.scalar(
+                    _select(ProjectMembership).where(
+                        ProjectMembership.project_id == project.id,
+                        ProjectMembership.user_id == admin.id,
+                    )
+                )
+                if existing_pm is None:
+                    session.add(
+                        ProjectMembership(
+                            id=str(_uuid.uuid4()),
+                            project_id=project.id,
+                            user_id=admin.id,
+                            project_role="devops_lead",
+                        )
+                    )
+        session.commit()
+
 
 def init_db() -> None:
     """Create tables if they do not exist, then apply lightweight migrations."""
     Base.metadata.create_all(engine)
     _migrate()
+    try:
+        ensure_tenancy_seed()
+    except Exception:
+        # Seed may run before users exist on first boot; auth.ensure_seed_user retries.
+        pass

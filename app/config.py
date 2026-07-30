@@ -5,6 +5,7 @@ Settings page — not environment variables. Infrastructure-only values (server
 host/port) still come from the environment.
 """
 import os
+import time
 from dataclasses import dataclass
 
 from sqlalchemy import select
@@ -21,6 +22,8 @@ _DEFAULTS = {
     "azure_openai_deployment": "gpt-4o",
     "azure_openai_api_version": "2024-10-21",
 }
+_AZURE_CACHE_TTL = float(os.environ.get("AZURE_CONFIG_CACHE_TTL", "60"))
+_azure_cache: tuple[float, "AzureConfig"] | None = None
 
 
 @dataclass
@@ -55,10 +58,17 @@ def set_config_values(values: dict[str, str]) -> None:
             else:
                 row.value = value
         session.commit()
+    invalidate_azure_config_cache()
 
 
-def get_azure_config() -> AzureConfig:
-    """Load Azure OpenAI settings from the database."""
+def get_azure_config(*, use_cache: bool = True) -> AzureConfig:
+    """Load Azure OpenAI settings from the database (short TTL cache)."""
+    global _azure_cache
+    if use_cache and _azure_cache is not None:
+        expires_at, cached = _azure_cache
+        if expires_at > time.monotonic():
+            return cached
+
     values: dict[str, str] = {}
     with SessionLocal() as session:
         rows = session.execute(
@@ -68,7 +78,7 @@ def get_azure_config() -> AzureConfig:
             if row.value:
                 values[row.key] = row.value
 
-    return AzureConfig(
+    config = AzureConfig(
         endpoint=values.get("azure_openai_endpoint", ""),
         api_key=values.get("azure_openai_api_key", ""),
         deployment=values.get(
@@ -78,6 +88,13 @@ def get_azure_config() -> AzureConfig:
             "azure_openai_api_version", _DEFAULTS["azure_openai_api_version"]
         ),
     )
+    _azure_cache = (time.monotonic() + _AZURE_CACHE_TTL, config)
+    return config
+
+
+def invalidate_azure_config_cache() -> None:
+    global _azure_cache
+    _azure_cache = None
 
 
 def set_azure_config(
@@ -96,7 +113,7 @@ def set_azure_config(
     if api_key:
         values["azure_openai_api_key"] = api_key
     set_config_values(values)
-    return get_azure_config()
+    return get_azure_config(use_cache=False)
 
 
 def get_server_options() -> dict[str, str]:

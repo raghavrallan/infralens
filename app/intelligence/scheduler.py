@@ -9,6 +9,7 @@ import logging
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from sqlalchemy import select
 
 from app.intelligence import workflows as store
 from app.intelligence.queue import enqueue_run
@@ -29,11 +30,36 @@ def _enqueue_scheduled(workflow_id: str) -> None:
         logger.warning("Failed to enqueue scheduled run for %s: %s", workflow_id, exc)
 
 
+def _pause_workflows_without_cloud() -> None:
+    """Disable scheduled workflows when the project has no Azure/AWS connection."""
+    from app import connections
+    from app.db import Project, SessionLocal, Workflow
+
+    with SessionLocal() as session:
+        for project in session.scalars(select(Project)).all():
+            azure_ok = connections.status(project.id, "azure").get("connected")
+            aws_ok = connections.status(project.id, "aws").get("connected")
+            if azure_ok or aws_ok:
+                continue
+            for wf in session.scalars(
+                select(Workflow).where(
+                    Workflow.project_id == project.id,
+                    Workflow.enabled.is_(True),
+                )
+            ).all():
+                wf.enabled = False
+        session.commit()
+
+
 def sync_schedules() -> None:
     """Rebuild the cron jobs from the current set of scheduled workflows."""
     if _scheduler is None:
         return
     _scheduler.remove_all_jobs()
+    try:
+        _pause_workflows_without_cloud()
+    except Exception:
+        logger.exception("Could not pause workflows for projects without cloud accounts")
     for workflow in store.scheduled_workflows():
         cron = workflow.get("schedule_cron", "")
         try:

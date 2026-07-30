@@ -28,6 +28,7 @@ from app import (
     chats,
     config,
     connections,
+    memberships,
     orchestrator,
     projects,
 )
@@ -51,6 +52,9 @@ async def lifespan(_: FastAPI):
     observability.ensure_host_alias()
     init_db()
     auth.ensure_seed_user()
+    from app.db import ensure_tenancy_seed
+
+    ensure_tenancy_seed()
     try:
         prompts.seed_core_prompts()
     except Exception:
@@ -66,16 +70,25 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="InfraLens Skills Suite", version=__version__, lifespan=lifespan)
 
-# Allow browser clients (Next.js live UI on :3000, static export on :8000, etc.).
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+_PUBLIC_API_PATHS = frozenset(
+    {
+        "/api/health",
+        "/api/auth/login",
+        "/api/invites/peek",
+        "/api/invites/accept",
+        "/api/member-requests/decide-email",
+        "/api/providers/github/oauth/callback",
+        "/api/providers/azure/oauth/callback",
+    }
 )
 
-_PUBLIC_API_PATHS = frozenset({"/api/health", "/api/auth/login"})
+_WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+_VIEWER_WRITE_ALLOW = frozenset(
+    {
+        "/api/auth/login",
+        "/api/auth/me",
+    }
+)
 
 
 class JwtAuthMiddleware(BaseHTTPMiddleware):
@@ -96,10 +109,36 @@ class JwtAuthMiddleware(BaseHTTPMiddleware):
             if user is None:
                 return JSONResponse({"detail": "Not authenticated"}, status_code=401)
             request.state.user = user
+            # Viewer (and missing role) cannot mutate except allowlisted read-style posts.
+            if (
+                request.method in _WRITE_METHODS
+                and path not in _VIEWER_WRITE_ALLOW
+                and not path.endswith("/oauth/callback")
+            ):
+                from app.rbac import has_min_role
+
+                if not has_min_role(user.get("role"), "developer"):
+                    return JSONResponse(
+                        {"detail": "Viewer role is read-only"},
+                        status_code=403,
+                    )
         return await call_next(request)
 
 
+# Last-added middleware is outermost. CORS must wrap JWT auth so browser
+# clients on :3000 still receive Access-Control-* headers on 401/403 short-circuits.
 app.add_middleware(JwtAuthMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+from app.routes_mvp import router as mvp_router
+
+app.include_router(mvp_router)
 
 
 def _refresh_chat_memory(chat_id: str) -> None:
@@ -137,6 +176,9 @@ class ActionRequest(BaseModel):
     expected_result: str = ""
     risk: str = ""
     rollback: str = ""
+    why: str = ""
+    blast_radius: str = ""
+    degrade_plan: str = ""
     preflight: list[str] = []
     preflight_expect: str = ""
     verify: list[str] = []
@@ -186,10 +228,17 @@ class ReposRequest(BaseModel):
     repos: list[str] = []
 
 
-def _require_project(project_id: str) -> dict[str, Any]:
+def _require_project(
+    project_id: str,
+    user: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
     project = projects.get_project(project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
+    if user is not None:
+        from app import memberships
+
+        memberships.assert_project_access(user, project_id)
     return project
 
 
@@ -233,28 +282,41 @@ def health() -> dict[str, Any]:
 
 
 @app.get("/api/config/azure-openai")
-def get_azure_config_route() -> dict[str, Any]:
-    """Return Azure OpenAI config (never the key itself, only whether it's set)."""
+def get_azure_config_route(
+    user: dict[str, Any] = Depends(auth.require_user),
+) -> dict[str, Any]:
+    """Platform LLM config — separate from project Azure cloud account."""
     azure = config.get_azure_config()
     return {
-        "endpoint": azure.endpoint,
+        "endpoint": azure.endpoint if memberships.is_super_admin(user) or azure.configured else "",
         "deployment": azure.deployment,
         "api_version": azure.api_version,
         "configured": azure.configured,
         "has_key": bool(azure.api_key),
+        "scope": "platform",
+        "editable": memberships.is_super_admin(user),
+        "note": (
+            "Platform LLM for chat/skills (Super Admin). Separate from project Azure account "
+            "used for cloud workflows."
+        ),
     }
 
 
 @app.put("/api/config/azure-openai")
-def put_azure_config_route(body: AzureConfigRequest) -> dict[str, Any]:
-    """Save Azure OpenAI config to the database."""
+def put_azure_config_route(
+    body: AzureConfigRequest,
+    user: dict[str, Any] = Depends(auth.require_user),
+) -> dict[str, Any]:
+    """Save Azure OpenAI config — Super Admin only."""
+    if not memberships.is_super_admin(user):
+        raise HTTPException(status_code=403, detail="Super Admin required to edit platform LLM")
     config.set_azure_config(
         endpoint=body.endpoint,
         api_key=body.api_key,
         deployment=body.deployment,
         api_version=body.api_version,
     )
-    return get_azure_config_route()
+    return get_azure_config_route(user)
 
 
 @app.post("/api/auth/login")
@@ -269,7 +331,9 @@ def login(body: LoginRequest) -> dict[str, Any]:
 @app.get("/api/auth/me")
 def auth_me(user: dict[str, Any] = Depends(auth.require_user)) -> dict[str, Any]:
     """Return the current user for a valid Bearer JWT."""
-    return {"user": user}
+    from app import memberships
+
+    return {"user": memberships.enrich_user_public(user)}
 
 
 @app.get("/api/skills", response_model=list[SkillInfo])
@@ -303,23 +367,53 @@ def get_skill(name: str) -> SkillDetail:
 
 
 @app.get("/api/projects")
-def list_projects() -> list[dict[str, Any]]:
-    """List all projects (workspaces)."""
-    return projects.list_projects()
+def list_projects(user: dict[str, Any] = Depends(auth.require_user)) -> list[dict[str, Any]]:
+    """List projects the current user can access."""
+    return projects.list_projects(user=user)
 
 
 @app.post("/api/projects")
-def create_project(body: ProjectRequest) -> dict[str, Any]:
-    """Create a new project, seeded with the starter intelligence workflows."""
-    project = projects.create_project(body.name)
+def create_project(
+    body: ProjectRequest,
+    user: dict[str, Any] = Depends(auth.require_user),
+) -> dict[str, Any]:
+    """Create a new project in the user's org, seeded with starter workflows."""
+    from app import memberships
+    from app.rbac import assert_capability, normalize_role
+
+    assert_capability(user, "create_project")
+    try:
+        org_id = memberships.ensure_user_org(user)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    role = normalize_role(user.get("role"))
+    project_role = (
+        "devops_lead"
+        if role in {"super_admin", "org_admin", "devops_lead"}
+        else ("devops_engineer" if role == "devops_engineer" else "developer")
+    )
+    project = projects.create_project(
+        body.name,
+        org_id=org_id,
+        owner_user_id=str(user.get("id") or "") or None,
+        owner_project_role=project_role,
+        reuse_empty=True,
+    )
     intel.seed_default_workflows(project["id"])
     intel_scheduler.sync_schedules()
     return project
 
 
 @app.patch("/api/projects/{project_id}")
-def rename_project(project_id: str, body: ProjectRequest) -> dict[str, Any]:
+def rename_project(
+    project_id: str,
+    body: ProjectRequest,
+    user: dict[str, Any] = Depends(auth.require_user),
+) -> dict[str, Any]:
     """Rename a project."""
+    from app import memberships
+
+    memberships.assert_project_access(user, project_id)
     project = projects.rename_project(project_id, body.name)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -327,8 +421,14 @@ def rename_project(project_id: str, body: ProjectRequest) -> dict[str, Any]:
 
 
 @app.put("/api/projects/{project_id}/default")
-def set_default_project(project_id: str) -> dict[str, Any]:
+def set_default_project(
+    project_id: str,
+    user: dict[str, Any] = Depends(auth.require_user),
+) -> dict[str, Any]:
     """Set the sole persisted default project used on a fresh page load."""
+    from app import memberships
+
+    memberships.assert_project_access(user, project_id)
     project = projects.set_default(project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -336,8 +436,19 @@ def set_default_project(project_id: str) -> dict[str, Any]:
 
 
 @app.delete("/api/projects/{project_id}")
-def delete_project(project_id: str) -> dict[str, bool]:
+def delete_project(
+    project_id: str,
+    user: dict[str, Any] = Depends(auth.require_user),
+) -> dict[str, bool]:
     """Delete a project and everything scoped to it (the default cannot be deleted)."""
+    from app import memberships
+    from app.rbac import assert_capability
+
+    assert_capability(user, "delete_project")
+    memberships.assert_project_access(user, project_id)
+    org_id = memberships.project_org_id(project_id)
+    if org_id:
+        memberships.assert_org_admin(user, org_id)
     project = projects.get_project(project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -357,9 +468,12 @@ def delete_project(project_id: str) -> dict[str, bool]:
 
 
 @app.get("/api/projects/{project_id}/repos")
-def get_project_repos(project_id: str) -> dict[str, Any]:
+def get_project_repos(
+    project_id: str,
+    user: dict[str, Any] = Depends(auth.require_user),
+) -> dict[str, Any]:
     """Return the repos mapped to a project plus every repo available to map."""
-    _require_project(project_id)
+    _require_project(project_id, user)
     available: list[str] = []
     error: Optional[str] = None
     if github_infra.is_connected(project_id):
@@ -376,8 +490,13 @@ def get_project_repos(project_id: str) -> dict[str, Any]:
 
 
 @app.put("/api/projects/{project_id}/repos")
-def set_project_repos(project_id: str, body: ReposRequest) -> dict[str, Any]:
+def set_project_repos(
+    project_id: str,
+    body: ReposRequest,
+    user: dict[str, Any] = Depends(auth.require_user),
+) -> dict[str, Any]:
     """Set which repositories a project is allowed to inspect."""
+    _require_project(project_id, user)
     project = projects.set_repos(project_id, body.repos)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -385,32 +504,56 @@ def set_project_repos(project_id: str, body: ReposRequest) -> dict[str, Any]:
 
 
 @app.get("/api/projects/{project_id}/connections")
-def get_connections(project_id: str) -> list[dict[str, Any]]:
+def get_connections(
+    project_id: str,
+    user: dict[str, Any] = Depends(auth.require_user),
+) -> list[dict[str, Any]]:
     """Return public (secret-free) status of a project's provider connections."""
-    _require_project(project_id)
+    _require_project(project_id, user)
     return connections.all_status(project_id)
 
 
 @app.get("/api/projects/{project_id}/provider-status")
-def get_provider_status(project_id: str, action_scope: Literal["read_only", "write"] = "read_only") -> list[dict[str, Any]]:
+def get_provider_status(
+    project_id: str,
+    action_scope: Literal["read_only", "write"] = "read_only",
+    user: dict[str, Any] = Depends(auth.require_user),
+) -> list[dict[str, Any]]:
     """Return the selected project's provider readiness without secrets."""
-    _require_project(project_id)
+    _require_project(project_id, user)
     return chat_actions.provider_status(project_id, action_scope)
 
 
 @app.put("/api/projects/{project_id}/connections/{provider}")
-def put_connection(project_id: str, provider: str, body: ConnectionRequest) -> dict[str, Any]:
+def put_connection(
+    project_id: str,
+    provider: str,
+    body: ConnectionRequest,
+    user: dict[str, Any] = Depends(auth.require_user),
+) -> dict[str, Any]:
     """Save or update a provider connection within a project."""
-    _require_project(project_id)
+    from app.rbac import assert_capability
+
+    assert_capability(user, "connect_provider")
+    _require_project(project_id, user)
     if provider not in connections.PROVIDERS:
         raise HTTPException(status_code=404, detail=f"Unknown provider: {provider}")
-    return connections.set_connection(project_id, provider, body.method, body.fields)
+    result = connections.set_connection(project_id, provider, body.method, body.fields)
+    if provider in {"azure", "aws"}:
+        enabled = intel.enable_workflows_when_ready(project_id)
+        if enabled:
+            intel_scheduler.sync_schedules()
+    return result
 
 
 @app.delete("/api/projects/{project_id}/connections/{provider}")
-def delete_connection(project_id: str, provider: str) -> dict[str, Any]:
+def delete_connection(
+    project_id: str,
+    provider: str,
+    user: dict[str, Any] = Depends(auth.require_user),
+) -> dict[str, Any]:
     """Disconnect a provider within a project."""
-    _require_project(project_id)
+    _require_project(project_id, user)
     if provider not in connections.PROVIDERS:
         raise HTTPException(status_code=404, detail=f"Unknown provider: {provider}")
     return connections.remove_connection(project_id, provider)
@@ -428,6 +571,9 @@ def _action_values(body: ActionRequest) -> dict[str, Any]:
         "expected_result": body.expected_result,
         "risk": body.risk,
         "rollback": body.rollback,
+        "why": body.why,
+        "blast_radius": body.blast_radius,
+        "degrade_plan": body.degrade_plan,
         "preflight": body.preflight,
         "preflight_expect": body.preflight_expect,
         "verify": body.verify,
@@ -468,8 +614,15 @@ def preview_action(body: ActionRequest) -> dict[str, Any]:
 
 
 @app.post("/api/actions")
-def create_action(body: ActionRequest) -> dict[str, Any]:
+def create_action(
+    body: ActionRequest,
+    user: dict[str, Any] = Depends(auth.require_user),
+) -> dict[str, Any]:
     """Persist and dispatch a safe read action, or create a write approval."""
+    from app.rbac import assert_capability
+
+    if body.access_scope == "write":
+        assert_capability(user, "propose_write")
     _require_project(body.project_id)
     try:
         return execution.create_action(**_action_values(body))
@@ -502,9 +655,18 @@ def diagnose_action(action_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/actions/{action_id}/approve")
-def approve_action(action_id: str, body: ActionDecisionRequest) -> dict[str, Any]:
+def approve_action(
+    action_id: str,
+    body: ActionDecisionRequest,
+    user: dict[str, Any] = Depends(auth.require_user),
+) -> dict[str, Any]:
+    from app.rbac import assert_capability
+
+    assert_capability(user, "approve_human")
     try:
-        return execution.approve_action(action_id, body.approver)
+        return execution.approve_action(
+            action_id, body.approver or user.get("username") or "user"
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -1141,8 +1303,26 @@ def delete_workflow(workflow_id: str) -> dict[str, bool]:
 
 
 @app.post("/api/workflows/{workflow_id}/run")
-def run_workflow_now(workflow_id: str) -> dict[str, Any]:
-    """Queue a workflow to run now."""
+def run_workflow_now(
+    workflow_id: str,
+    user: dict[str, Any] = Depends(auth.require_user),
+) -> dict[str, Any]:
+    """Queue a workflow to run now — requires a cloud account on the project."""
+    from app.rbac import assert_capability
+
+    assert_capability(user, "run_workflow")
+    workflow = intel.get_workflow(workflow_id)
+    if workflow is None:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    project_id = workflow["project_id"]
+    _require_project(project_id, user)
+    azure_ok = connections.status(project_id, "azure").get("connected")
+    aws_ok = connections.status(project_id, "aws").get("connected")
+    if not (azure_ok or aws_ok):
+        raise HTTPException(
+            status_code=400,
+            detail="Connect an Azure or AWS account for this project before running workflows.",
+        )
     run = intel.create_run(workflow_id, trigger="manual")
     if run is None:
         raise HTTPException(status_code=404, detail="Workflow not found")
@@ -1240,9 +1420,10 @@ def list_approvals(
     module: Optional[str] = None,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
+    user: dict[str, Any] = Depends(auth.require_user),
 ) -> list[dict[str, Any]]:
     """List gated findings awaiting a decision (default: pending), with lineage."""
-    _require_project(project_id)
+    _require_project(project_id, user)
     return intel.list_approvals(
         project_id,
         status=status,
@@ -1255,9 +1436,35 @@ def list_approvals(
 
 
 @app.post("/api/approvals/{approval_id}/decide")
-def decide_approval(approval_id: str, body: ApprovalDecisionRequest) -> dict[str, Any]:
+def decide_approval(
+    approval_id: str,
+    body: ApprovalDecisionRequest,
+    user: dict[str, Any] = Depends(auth.require_user),
+) -> dict[str, Any]:
     """Approve or reject a gated finding. Nothing executes — the decision is recorded."""
-    decided = intel.decide_approval(approval_id, body.decision, body.decided_by)
+    from app import break_glass, memberships
+    from app.db import Approval, SessionLocal
+    from app.rbac import can_approve_gate
+
+    with SessionLocal() as session:
+        row = session.get(Approval, approval_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Approval not found")
+        gate = row.gate
+        project_id = row.project_id
+    memberships.assert_project_access(user, project_id)
+    bg = break_glass.gate_with_break_glass(project_id=project_id, gate=gate)
+    effective_gate = bg.get("gate") if isinstance(bg, dict) else gate
+    if body.decision == "approved" and not can_approve_gate(user, effective_gate):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Your role cannot approve gate '{effective_gate}'",
+        )
+    decided = intel.decide_approval(
+        approval_id,
+        body.decision,
+        body.decided_by or user.get("username") or "",
+    )
     if decided is None:
         raise HTTPException(status_code=404, detail="Approval not found")
     return decided
@@ -1294,6 +1501,30 @@ def wiki_page() -> FileResponse:
 @app.get("/login/")
 def login_page() -> FileResponse:
     return _frontend_page("login")
+
+
+@app.get("/organizations")
+@app.get("/organizations/")
+def organizations_page() -> FileResponse:
+    return _frontend_page("organizations")
+
+
+@app.get("/onboarding")
+@app.get("/onboarding/")
+def onboarding_page() -> FileResponse:
+    return _frontend_page("onboarding")
+
+
+@app.get("/accept-invite")
+@app.get("/accept-invite/")
+def accept_invite_page() -> FileResponse:
+    return _frontend_page("accept-invite")
+
+
+@app.get("/approve-member")
+@app.get("/approve-member/")
+def approve_member_page() -> FileResponse:
+    return _frontend_page("approve-member")
 
 
 app.mount("/", StaticFiles(directory=_FRONTEND_DIR, html=True), name="frontend")
