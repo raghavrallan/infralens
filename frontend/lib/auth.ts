@@ -7,6 +7,14 @@ export type AuthUser = {
   id?: string;
   username: string;
   name: string;
+  email?: string;
+  role?: string;
+  role_label?: string;
+  display_role?: string;
+  org_role?: string | null;
+  is_active?: boolean;
+  org_ids?: string[];
+  primary_org_id?: string;
 };
 
 export type AuthSession = {
@@ -40,6 +48,7 @@ export function saveSession(session: AuthSession): void {
 export function clearSession(): void {
   window.localStorage.removeItem(TOKEN_KEY);
   window.localStorage.removeItem(USER_KEY);
+  window.localStorage.removeItem("projectId");
 }
 
 export function authHeaders(): Record<string, string> {
@@ -48,6 +57,8 @@ export function authHeaders(): Record<string, string> {
 }
 
 export async function login(username: string, password: string): Promise<AuthSession> {
+  // Clear previous user's project selection so isolation is not broken by localStorage.
+  window.localStorage.removeItem("projectId");
   const session = await api<AuthSession>("/api/auth/login", {
     method: "POST",
     body: JSON.stringify({ username, password }),
@@ -63,8 +74,12 @@ export async function fetchCurrentUser(): Promise<AuthUser | null> {
     const body = await api<{ user: AuthUser }>("/api/auth/me");
     window.localStorage.setItem(USER_KEY, JSON.stringify(body.user));
     return body.user;
-  } catch {
-    clearSession();
+  } catch (error) {
+    // Only drop the session on real auth failures — not network/CORS blips.
+    const message = error instanceof Error ? error.message : "";
+    if (message === "Not authenticated" || /not authenticated|401/i.test(message)) {
+      clearSession();
+    }
     return null;
   }
 }

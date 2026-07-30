@@ -676,3 +676,69 @@ def build_environment_report(project_id: str) -> dict[str, Any]:
             "public_count": len(public),
         },
     }
+
+
+def list_repos_for_picker(project_id: str, limit: int = 100) -> list[dict[str, Any]]:
+    """Return repo metadata for onboarding picker (unfiltered by project mapping)."""
+    creds = load_credentials(project_id)
+    with _client(creds) as client:
+        who = _get(client, "/user")
+        if who.status_code in (401, 403):
+            raise GitHubApiError(
+                f"GitHub token rejected ({who.status_code}): {_error_detail(who)}."
+            )
+        repos = _list_repos(client, creds)
+    out: list[dict[str, Any]] = []
+    for repo in repos[: max(1, min(limit, 200))]:
+        out.append(
+            {
+                "full_name": repo.get("full_name"),
+                "name": repo.get("name"),
+                "private": bool(repo.get("private")),
+                "html_url": repo.get("html_url"),
+                "default_branch": repo.get("default_branch"),
+                "description": (repo.get("description") or "")[:200],
+            }
+        )
+    return out
+
+
+def create_repo(
+    project_id: str,
+    *,
+    name: str,
+    private: bool = True,
+    org: Optional[str] = None,
+    description: str = "",
+    auto_init: bool = True,
+) -> dict[str, Any]:
+    """Create a repository on the authenticated user or org account."""
+    clean = (name or "").strip()
+    if not clean or "/" in clean or not re.match(r"^[A-Za-z0-9_.-]+$", clean):
+        raise ValueError("Invalid repository name")
+    creds = load_credentials(project_id)
+    payload = {
+        "name": clean,
+        "private": bool(private),
+        "description": (description or "Created by InfraLens")[:350],
+        "auto_init": bool(auto_init),
+    }
+    org_name = (org or creds.org or "").strip() or None
+    path = f"/orgs/{org_name}/repos" if org_name else "/user/repos"
+    with _client(creds) as client:
+        try:
+            resp = client.post(path, json=payload)
+        except httpx.HTTPError as exc:
+            raise GitHubApiError(f"GitHub request failed: {exc}") from exc
+        if resp.status_code not in (200, 201):
+            raise GitHubApiError(
+                f"Could not create repository ({resp.status_code}): {_error_detail(resp)}"
+            )
+        body = resp.json()
+    return {
+        "full_name": body.get("full_name"),
+        "html_url": body.get("html_url"),
+        "private": bool(body.get("private")),
+        "default_branch": body.get("default_branch") or "main",
+        "clone_url": body.get("clone_url"),
+    }

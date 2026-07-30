@@ -14,6 +14,10 @@ import type {
 import { Modal, useToast } from "./modal";
 import { Shell } from "./shell";
 import { ThemedSelect } from "./themed-select";
+import { DeliveryChecklist } from "./delivery-checklist";
+import { BreakGlassPanel } from "./break-glass-panel";
+import { MemoryStrip } from "./memory-strip";
+import { getStoredUser } from "../lib/auth";
 
 type Summary = Record<string, unknown>;
 type WorkflowDraft = {
@@ -683,6 +687,9 @@ export function DashboardPage() {
             </div>
           </section>
           <aside className="dash-col dash-side">
+            {projectId && <DeliveryChecklist projectId={projectId} />}
+            {projectId && <BreakGlassPanel projectId={projectId} />}
+            {projectId && <MemoryStrip projectId={projectId} />}
             <div className="dash-section-head">
               <h3>Approvals</h3>
               <span className={`pill ${pendingLive ? "warn" : "off"}`}>
@@ -720,12 +727,39 @@ export function DashboardPage() {
                     <div className="finding-meta">
                       <span>{prettyName(approval.finding?.skill)}</span>
                       <span>
-                        blast: {approval.finding?.blast_radius || "—"}
+                        blast: {approval.blast_radius || approval.finding?.blast_radius || "—"}
                       </span>
+                      {approval.min_role_label && (
+                        <span>min role: {approval.min_role_label}</span>
+                      )}
                     </div>
+                    {approval.gate_rationale && (
+                      <div className="approval-note">{approval.gate_rationale}</div>
+                    )}
+                    {approval.evidence || approval.finding?.evidence ? (
+                      <div className="approval-note">
+                        Evidence: {approval.evidence || approval.finding?.evidence}
+                      </div>
+                    ) : null}
+                    {approval.rollback && (
+                      <div className="approval-note">Rollback: {approval.rollback}</div>
+                    )}
+                    {approval.preflight?.summary && (
+                      <div className="approval-note">{approval.preflight.summary}</div>
+                    )}
+                    {!!approval.precedent?.length && (
+                      <div className="approval-note">
+                        Precedent:{" "}
+                        {approval.precedent
+                          .slice(0, 2)
+                          .map((p) => `${p.outcome}: ${p.summary}`)
+                          .join(" · ")}
+                      </div>
+                    )}
                     <div className="approval-note">
                       {approval.gate_label} required — approving records intent
                       only; nothing is executed.
+                      {approval.break_glass_applied ? " Break-glass downgrade active." : ""}
                     </div>
                     <div className="finding-actions">
                       <button
@@ -742,14 +776,42 @@ export function DashboardPage() {
                       >
                         Reject
                       </button>
-                      <button
-                        className="tiny-btn solid"
-                        onClick={() =>
-                          void decideApproval(approval, "approved")
+                      {(() => {
+                        const me = getStoredUser();
+                        const order = [
+                          "viewer",
+                          "developer",
+                          "devops_engineer",
+                          "devops_lead",
+                          "org_admin",
+                          "super_admin",
+                        ];
+                        const min = approval.min_role || "devops_engineer";
+                        const ok =
+                          order.indexOf(me?.role || "viewer") >= order.indexOf(min);
+                        if (!ok) {
+                          return (
+                            <span className="empty-note">
+                              Needs {approval.min_role_label || min}+
+                            </span>
+                          );
                         }
-                      >
-                        Approve
-                      </button>
+                        return (
+                          <button
+                            className="tiny-btn solid"
+                            onClick={() =>
+                              void decideApproval(approval, "approved")
+                            }
+                            title={
+                              approval.min_role_label
+                                ? `Requires ${approval.min_role_label}+`
+                                : undefined
+                            }
+                          >
+                            Approve
+                          </button>
+                        );
+                      })()}
                     </div>
                   </div>
                 ))

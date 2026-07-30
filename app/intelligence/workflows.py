@@ -378,10 +378,34 @@ def seed_default_workflows(project_id: str = DEFAULT_PROJECT_ID) -> None:
                     environment="prod",
                     skills=_safe_skills(spec["skills"]),
                     schedule_cron=spec["schedule_cron"],
-                    enabled=True,
+                    # Disabled until a cloud provider is connected for the project.
+                    enabled=False,
                 )
             )
         session.commit()
+
+
+def enable_workflows_when_ready(project_id: str) -> int:
+    """Enable seeded workflows once Azure (or another cloud) is connected. Returns count."""
+    from app import connections
+
+    azure = connections.status(project_id, "azure")
+    aws = connections.status(project_id, "aws")
+    if not (azure.get("connected") or aws.get("connected")):
+        return 0
+    with SessionLocal() as session:
+        rows = list(
+            session.scalars(
+                select(Workflow).where(
+                    Workflow.project_id == project_id,
+                    Workflow.enabled.is_(False),
+                )
+            ).all()
+        )
+        for row in rows:
+            row.enabled = True
+        session.commit()
+        return len(rows)
 
 
 # ---------- Runs ----------
@@ -757,25 +781,65 @@ def update_finding_status(finding_id: str, status: str) -> Optional[dict[str, An
 
 # ---------- Approvals ----------
 
-def _approval_dict(approval: Approval, finding: Optional[Finding]) -> dict[str, Any]:
+def _approval_dict(
+    approval: Approval,
+    finding: Optional[Finding],
+    *,
+    break_glass_active: Optional[bool] = None,
+    precedent: Optional[list[dict[str, Any]]] = None,
+) -> dict[str, Any]:
     now = _now()
     expires = approval.expires_at
     expired = bool(expires and expires <= now and approval.decision == "pending")
+    from app import break_glass, memory
+    from app.rbac import GATE_MIN_ROLE, ROLE_LABELS
+
+    gate = approval.gate
+    bg = break_glass.gate_with_break_glass(
+        gate, approval.project_id, active=break_glass_active
+    )
+    effective_gate = bg["gate"]
+    if precedent is None:
+        precedent = memory.list_precedent(
+            approval.project_id,
+            skill=finding.skill if finding else None,
+            module=finding.module if finding else None,
+            limit=5,
+        )
     payload: dict[str, Any] = {
         "id": approval.id,
         "finding_id": approval.finding_id,
         "project_id": approval.project_id,
-        "gate": approval.gate,
-        "gate_label": _GATE_LABELS.get(approval.gate, approval.gate),
+        "gate": effective_gate,
+        "original_gate": gate,
+        "gate_label": _GATE_LABELS.get(effective_gate, effective_gate),
+        "gate_rationale": (finding.gate_rationale if finding else "") or "",
+        "break_glass_applied": bg.get("break_glass_applied", False),
+        "min_role": GATE_MIN_ROLE.get(effective_gate, "devops_lead"),
+        "min_role_label": ROLE_LABELS.get(
+            GATE_MIN_ROLE.get(effective_gate, "devops_lead"), "DevOps Lead"
+        ),
         "decision": approval.decision,
         "decided_by": approval.decided_by,
         "created_at": _iso(approval.created_at),
         "expires_at": _iso(expires),
         "expired": expired,
         "expires_in_seconds": int((expires - now).total_seconds()) if expires else None,
+        "blast_radius": finding.blast_radius if finding else "",
+        "evidence": finding.evidence if finding else "",
+        "recommended_action": finding.recommended_action if finding else "",
+        "rollback": (finding.recommended_action if finding else "")
+        or "Document rollback before approve",
+        "preflight": {
+            "summary": "Review evidence and recommended action before approving.",
+            "checks": ["evidence reviewed", "blast radius understood", "rollback known"],
+        },
+        "precedent": precedent,
     }
     if finding is not None:
         payload["finding"] = _finding_dict(finding)
+        if getattr(finding, "gate_rationale", None):
+            payload["gate_rationale"] = finding.gate_rationale
     return display_value(payload)
 
 
@@ -789,7 +853,12 @@ def list_approvals(
     end_date: Optional[date] = None,
 ) -> list[dict[str, Any]]:
     """Approvals for a project, joined to their finding. Default: pending only."""
+    from app import break_glass, memory
+
     since, until = time_range_bounds(time_range, start_date, end_date)
+    # One break-glass lookup + one memory preload for the whole list (not per row).
+    bg_active = break_glass.is_active(project_id)
+    memory_rows = memory.list_recent(project_id, limit=50)
     with SessionLocal() as session:
         query = (
             select(Approval, Finding)
@@ -805,7 +874,21 @@ def list_approvals(
         if status and status != "all":
             query = query.where(Approval.decision == status)
         query = query.order_by(Approval.created_at.desc()).limit(limit)
-        return [_approval_dict(a, f) for a, f in session.execute(query).all()]
+        rows = list(session.execute(query).all())
+        return [
+            _approval_dict(
+                a,
+                f,
+                break_glass_active=bg_active,
+                precedent=memory.filter_precedent(
+                    memory_rows,
+                    skill=f.skill if f else None,
+                    module=f.module if f else None,
+                    limit=5,
+                ),
+            )
+            for a, f in rows
+        ]
 
 
 def decide_approval(
