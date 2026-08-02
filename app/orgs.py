@@ -117,7 +117,14 @@ def create_org(
             # Do not overwrite an invited global role (e.g. devops_lead).
             # Org power comes from org_membership.org_role.
         session.commit()
-        return _public(org, member_count=1 if admin_id else 0, project_count=0)
+        result = _public(org, member_count=1 if admin_id else 0, project_count=0)
+    try:
+        from app.org_executors import settings as org_executor_settings
+
+        org_executor_settings.ensure_settings(result["id"])
+    except Exception:
+        pass
+    return result
 
 
 def assign_org_admin(*, org_id: str, user_id: str) -> dict[str, Any]:

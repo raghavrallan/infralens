@@ -12,6 +12,7 @@ services:
       CONTROL_PLANE_URL: http://host.docker.internal:8000
       EXECUTOR_SERVICE_KEY: dev-executor-key
       EXECUTOR_PROVIDER: azure
+      EXECUTOR_ORG_ID: ${EXECUTOR_ORG_ID:-00000000-0000-4000-8000-000000000001}
 
   aws-executor:
     build:
@@ -26,6 +27,7 @@ services:
       CONTROL_PLANE_URL: http://host.docker.internal:8000
       EXECUTOR_SERVICE_KEY: dev-executor-key
       EXECUTOR_PROVIDER: aws
+      EXECUTOR_ORG_ID: ${EXECUTOR_ORG_ID:-00000000-0000-4000-8000-000000000001}
 
   github-executor:
     build:
@@ -40,3 +42,4 @@ services:
       CONTROL_PLANE_URL: http://host.docker.internal:8000
       EXECUTOR_SERVICE_KEY: dev-executor-key
       EXECUTOR_PROVIDER: github
+      EXECUTOR_ORG_ID: ${EXECUTOR_ORG_ID:-00000000-0000-4000-8000-000000000001}

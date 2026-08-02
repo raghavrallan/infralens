@@ -60,9 +60,13 @@ async def lifespan(_: FastAPI):
         pass
     intel.seed_default_workflows(DEFAULT_PROJECT_ID)
     intel_scheduler.start_scheduler()
+    from app.org_executors.controller import start_controller, stop_controller
+
+    start_controller()
     try:
         yield
     finally:
+        stop_controller()
         intel_scheduler.shutdown_scheduler()
         observability.flush()
 
@@ -694,25 +698,38 @@ def cancel_action(action_id: str, body: ActionDecisionRequest) -> dict[str, Any]
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-def _require_executor(key: Optional[str], provider: Optional[str]) -> str:
+def _require_executor(
+    key: Optional[str], provider: Optional[str], org_id: Optional[str] = None
+) -> tuple[str, str]:
     expected = os.environ.get("EXECUTOR_SERVICE_KEY", "dev-executor-key")
     if not key or not hmac.compare_digest(key, expected):
         raise HTTPException(status_code=403, detail="Invalid executor credentials")
     if provider not in {"azure", "aws", "github"}:
         raise HTTPException(status_code=403, detail="Invalid executor provider")
-    return provider
+    clean_org = (org_id or "").strip()
+    if not clean_org:
+        raise HTTPException(status_code=403, detail="Missing executor org id")
+    return provider, clean_org
 
 
 @app.get("/internal/execution/jobs/{action_id}/claim")
 def claim_action_for_executor(
-    action_id: str, provider: str, x_executor_key: Optional[str] = Header(default=None),
+    action_id: str,
+    provider: str,
+    x_executor_key: Optional[str] = Header(default=None),
     x_executor_provider: Optional[str] = Header(default=None),
+    x_executor_org_id: Optional[str] = Header(default=None),
 ) -> dict[str, Any]:
     """Private control-plane endpoint; credentials are never returned publicly."""
-    if _require_executor(x_executor_key, x_executor_provider) != provider:
+    exec_provider, exec_org = _require_executor(
+        x_executor_key, x_executor_provider, x_executor_org_id
+    )
+    if exec_provider != provider:
         raise HTTPException(status_code=403, detail="Executor provider mismatch")
     try:
-        return execution.claim_for_executor(action_id, provider)
+        return execution.claim_for_executor(
+            action_id, provider, executor_org_id=exec_org
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -721,14 +738,20 @@ def claim_action_for_executor(
 
 @app.post("/internal/execution/jobs/{action_id}/events")
 def record_executor_event(
-    action_id: str, body: ExecutorEventRequest, x_executor_key: Optional[str] = Header(default=None),
+    action_id: str,
+    body: ExecutorEventRequest,
+    x_executor_key: Optional[str] = Header(default=None),
     x_executor_provider: Optional[str] = Header(default=None),
+    x_executor_org_id: Optional[str] = Header(default=None),
 ) -> dict[str, bool]:
-    provider = _require_executor(x_executor_key, x_executor_provider)
+    provider, exec_org = _require_executor(
+        x_executor_key, x_executor_provider, x_executor_org_id
+    )
     if body.type not in {"action_output", "action_verified"}:
         raise HTTPException(status_code=400, detail="Unsupported executor event")
     try:
         execution.validate_executor_provider(action_id, provider)
+        execution.validate_executor_org(action_id, exec_org)
         execution.append_event(action_id, body.type, body.payload)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -739,12 +762,19 @@ def record_executor_event(
 
 @app.get("/internal/execution/jobs/{action_id}/canceled")
 def check_executor_cancellation(
-    action_id: str, provider: str, x_executor_key: Optional[str] = Header(default=None),
+    action_id: str,
+    provider: str,
+    x_executor_key: Optional[str] = Header(default=None),
     x_executor_provider: Optional[str] = Header(default=None),
+    x_executor_org_id: Optional[str] = Header(default=None),
 ) -> dict[str, bool]:
-    if _require_executor(x_executor_key, x_executor_provider) != provider:
+    exec_provider, exec_org = _require_executor(
+        x_executor_key, x_executor_provider, x_executor_org_id
+    )
+    if exec_provider != provider:
         raise HTTPException(status_code=403, detail="Executor provider mismatch")
     try:
+        execution.validate_executor_org(action_id, exec_org)
         return {"canceled": execution.is_canceled(action_id, provider)}
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -754,12 +784,18 @@ def check_executor_cancellation(
 
 @app.post("/internal/execution/jobs/{action_id}/result")
 def record_executor_result(
-    action_id: str, body: ExecutorResultRequest, x_executor_key: Optional[str] = Header(default=None),
+    action_id: str,
+    body: ExecutorResultRequest,
+    x_executor_key: Optional[str] = Header(default=None),
     x_executor_provider: Optional[str] = Header(default=None),
+    x_executor_org_id: Optional[str] = Header(default=None),
 ) -> dict[str, bool]:
-    provider = _require_executor(x_executor_key, x_executor_provider)
+    provider, exec_org = _require_executor(
+        x_executor_key, x_executor_provider, x_executor_org_id
+    )
     try:
         execution.validate_executor_provider(action_id, provider)
+        execution.validate_executor_org(action_id, exec_org)
         execution.mark_result(action_id, body.status, body.result, body.error)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

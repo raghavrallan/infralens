@@ -138,12 +138,23 @@ def auto_retry_failed_builds(
             prepared.append({"run": run, "action": action})
         except Exception as exc:  # noqa: BLE001
             prepared.append({"run": run, "error": str(exc)[:300]})
-    return {
+    payload = {
         "failed_count": len(failed_runs(project_id)),
         "prepared": prepared,
-        "queue_hint": "Approve write actions; provider.github.write worker must be running.",
-        "queue_snapshot": queue.queue_snapshot("github", "write"),
+        "queue_hint": (
+            "Approve write actions; the org provider.github.write worker must be running "
+            "(Organizations → Executor capacity)."
+        ),
+        "queue_snapshot": {},
     }
+    try:
+        from app.org_executors import settings as org_executor_settings
+
+        org_id = org_executor_settings.resolve_org_id_for_project(project_id)
+        payload["queue_snapshot"] = queue.queue_snapshot(org_id, "github", "write")
+    except Exception as exc:  # noqa: BLE001
+        payload["queue_snapshot"] = {"diagnostic_error": str(exc)[:300]}
+    return payload
 
 
 def after_success_deploy_hook(

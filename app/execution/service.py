@@ -21,8 +21,45 @@ from app.execution.validation import (
     validate_operation,
     validate_rollback_plan,
 )
+from app.org_executors import settings as org_executor_settings
+from app.org_executors.controller import request_wake
 
-TERMINAL = {"succeeded", "failed", "verification_failed", "rolled_back", "canceled"}
+def _org_id_for_project(project_id: str) -> str:
+    return org_executor_settings.resolve_org_id_for_project(project_id)
+
+
+def _dispatch_action(action_id: str, project_id: str, provider: str, access_scope: str) -> dict[str, object]:
+    org_id = _org_id_for_project(project_id)
+    org_executor_settings.ensure_settings(org_id)
+    cfg = org_executor_settings.get_settings(org_id) or {}
+    if str(cfg.get("actual_state")) == "error":
+        # Still enqueue so jobs wait; surface warming/offline via diagnostics.
+        pass
+    org_executor_settings.touch_last_job(org_id)
+    if str(cfg.get("actual_state")) in {"scaled_to_zero", "error", "warming"} or not cfg.get(
+        "in_warm_window"
+    ):
+        try:
+            request_wake(org_id)
+        except Exception:  # noqa: BLE001 - wake is best-effort; job remains queued
+            pass
+    dispatch = enqueue_action(action_id, org_id, provider, access_scope)
+    if not dispatch.get("executor_available"):
+        dispatch = {
+            **dispatch,
+            "executor_warming": True,
+            "executor_message": (
+                f"No {provider} executor is listening for org {org_id}; "
+                "the pool is scaled to zero or still warming."
+            ),
+        }
+    return dispatch
+
+
+def _queue_label(org_id: str, provider: str, access_scope: str) -> str:
+    from app.execution.queue import queue_name
+
+    return queue_name(org_id, provider, access_scope)
 
 
 def _now() -> datetime:
@@ -235,12 +272,17 @@ def create_action(
             )
         else:
             job.queued_at = _now()
-            _event(session, action_id, "action_queued", {"queue": f"provider.{provider}.read"})
+            try:
+                org_id = _org_id_for_project(project_id)
+                queue_label = _queue_label(org_id, provider, "read_only")
+            except Exception:  # noqa: BLE001
+                queue_label = f"org.*.provider.{provider}.read"
+            _event(session, action_id, "action_queued", {"queue": queue_label})
         session.commit()
         response = _public(job, approval if access_scope == "write" else None)
     if access_scope == "read_only":
         try:
-            dispatch = enqueue_action(action_id, provider, access_scope)
+            dispatch = _dispatch_action(action_id, project_id, provider, access_scope)
             _record_dispatch_diagnostic(action_id, dispatch)
         except Exception as exc:  # noqa: BLE001
             mark_result(action_id, "failed", {}, f"Unable to queue action: {exc}")
@@ -298,16 +340,43 @@ def diagnose_action(action_id: str) -> dict[str, Any]:
     """Diagnose queue starvation and append a rate-limited event for UI/LLM."""
     with SessionLocal() as session:
         job, _approval = _load(session, action_id)
-        snapshot = queue_snapshot(job.provider, job.access_scope, action_id)
+        try:
+            org_id = _org_id_for_project(job.project_id)
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "status": job.status,
+                "executor_available": False,
+                "message": str(exc),
+                "recommendation": "Attach the project to an organization before running CLI actions.",
+            }
+        snapshot = queue_snapshot(org_id, job.provider, job.access_scope, action_id)
+        cfg = org_executor_settings.get_settings(org_id) or {}
         age_seconds = 0
         if job.queued_at:
             queued_at = job.queued_at
             if queued_at.tzinfo is None:
                 queued_at = queued_at.replace(tzinfo=timezone.utc)
             age_seconds = max(0, int((_now() - queued_at).total_seconds()))
+        pool_state = str(cfg.get("actual_state") or "")
         if job.status == "queued" and not snapshot.get("executor_available"):
-            message = f"No {job.provider} executor worker is listening to {snapshot['queue']}; the provider CLI has not started."
-            recommendation = "Start the provider executor or stop this action. Do not retry the CLI command until an executor is available."
+            if pool_state in {"scaled_to_zero", "warming"}:
+                message = (
+                    f"The {job.provider} executor pool for this org is {pool_state.replace('_', ' ')}; "
+                    f"the action is waiting in {snapshot['queue']}."
+                )
+                recommendation = (
+                    "Wait for the pool to warm, open a warm window in Organizations → Executor capacity, "
+                    "or stop this action."
+                )
+            else:
+                message = (
+                    f"No {job.provider} executor worker is listening to {snapshot['queue']}; "
+                    "the provider CLI has not started."
+                )
+                recommendation = (
+                    "Start the org provider executor or stop this action. "
+                    "Do not retry the CLI command until an executor is available."
+                )
         elif job.status == "queued":
             message = f"The action is waiting in {snapshot['queue']} for an available executor."
             recommendation = "Keep waiting while the executor claims the job, or stop it to prevent execution."
@@ -323,6 +392,8 @@ def diagnose_action(action_id: str) -> dict[str, Any]:
             "age_seconds": age_seconds,
             "message": message,
             "recommendation": recommendation,
+            "executor_pool_state": pool_state,
+            "executor_mode": cfg.get("mode"),
         }
         recent = session.scalar(
             select(ExecutionEvent)
@@ -370,7 +441,12 @@ def approve_action(action_id: str, approver: str) -> dict[str, Any]:
         approval.decided_at = _now()
         job.status = "queued"
         job.queued_at = _now()
-        _event(session, action_id, "action_queued", {"queue": f"provider.{job.provider}.write"})
+        try:
+            org_id = _org_id_for_project(job.project_id)
+            queue_label = _queue_label(org_id, job.provider, "write")
+        except Exception:  # noqa: BLE001
+            queue_label = f"org.*.provider.{job.provider}.write"
+        _event(session, action_id, "action_queued", {"queue": queue_label})
         session.commit()
         result = _public(job, approval)
     try:
@@ -392,7 +468,12 @@ def approve_action(action_id: str, approver: str) -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         pass
     try:
-        dispatch = enqueue_action(action_id, job.provider, job.access_scope)
+        dispatch = _dispatch_action(
+            action_id,
+            result["project_id"],
+            str(result.get("provider") or ""),
+            str(result.get("access_scope") or "write"),
+        )
         _record_dispatch_diagnostic(action_id, dispatch)
     except Exception as exc:  # noqa: BLE001
         mark_result(action_id, "failed", {}, f"Unable to queue action: {exc}")
@@ -443,18 +524,29 @@ def cancel_action(action_id: str, requested_by: str = "user") -> dict[str, Any]:
         return _public(job, approval)
 
 
-def claim_for_executor(action_id: str, provider: str) -> dict[str, Any]:
+def claim_for_executor(
+    action_id: str, provider: str, *, executor_org_id: str = ""
+) -> dict[str, Any]:
     with SessionLocal() as session:
         job, approval = _load(session, action_id)
         if job.provider != provider:
             raise ValueError("Action is assigned to a different provider executor")
+        project = session.get(Project, job.project_id)
+        if project is None:
+            raise KeyError("Project not found")
+        job_org_id = (project.org_id or "").strip()
+        expected_org = (executor_org_id or "").strip()
+        if not expected_org:
+            raise ValueError("Executor org id is required")
+        if not job_org_id or job_org_id != expected_org:
+            raise ValueError("Executor org does not match action project organization")
         if job.status != "queued":
             raise ValueError("Action is not queued")
         if job.access_scope == "write" and (approval is None or approval.decision != "approved"):
             raise ValueError("Write action has not been approved")
         job.status = "running"
         job.started_at = _now()
-        _event(session, action_id, "action_started", {"provider": provider})
+        _event(session, action_id, "action_started", {"provider": provider, "org_id": job_org_id})
         session.commit()
         if provider == "terraform":
             cloud = str((job.operation or {}).get("cloud_provider") or "azure")
@@ -462,7 +554,33 @@ def claim_for_executor(action_id: str, provider: str) -> dict[str, Any]:
             fields = {**fields, "cloud_provider": cloud}
         else:
             fields = connections.get_secret_fields(job.project_id, provider) or {}
-        return {"id": job.id, "project_id": job.project_id, "provider": job.provider, "operation": job.operation, "access_scope": job.access_scope, "credentials": fields}
+        return {
+            "id": job.id,
+            "project_id": job.project_id,
+            "org_id": job_org_id,
+            "provider": job.provider,
+            "operation": job.operation,
+            "access_scope": job.access_scope,
+            "credentials": fields,
+        }
+
+
+def validate_executor_org(action_id: str, executor_org_id: str) -> str:
+    """Ensure the executor org owns the action's project; return the org id."""
+    expected = (executor_org_id or "").strip()
+    if not expected:
+        raise ValueError("Executor org id is required")
+    with SessionLocal() as session:
+        job = session.get(ExecutionJob, action_id)
+        if job is None:
+            raise KeyError("Action not found")
+        project = session.get(Project, job.project_id)
+        if project is None:
+            raise KeyError("Project not found")
+        job_org_id = (project.org_id or "").strip()
+        if job_org_id != expected:
+            raise ValueError("Executor org does not match action project organization")
+        return job_org_id
 
 
 def is_canceled(action_id: str, provider: str) -> bool:

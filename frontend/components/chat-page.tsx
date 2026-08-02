@@ -38,11 +38,16 @@ function actionEventText(event: ActionEvent) {
   const phase = String(payload.phase || event.type.replace(/^action_/, "").replaceAll("_", " "));
   const status = payload.status ? ` · ${String(payload.status)}` : "";
   const output = String(payload.stdout || payload.stderr || payload.message || payload.recommendation || "").trim();
+  const poolState = payload.executor_pool_state
+    ? ` · pool ${String(payload.executor_pool_state).replaceAll("_", " ")}`
+    : payload.executor_warming
+      ? " · pool warming"
+      : "";
   const queueState = payload.queue_depth !== undefined
     ? ` · queue depth ${String(payload.queue_depth)} · executor ${payload.executor_available ? "available" : "unavailable"}`
     : "";
   const jobId = payload.rq_job_id ? ` · RQ ${String(payload.rq_job_id)}` : "";
-  return `${phase}${status}${queueState}${jobId}${output ? `: ${output}` : ""}`;
+  return `${phase}${status}${poolState}${queueState}${jobId}${output ? `: ${output}` : ""}`;
 }
 
 export function ChatPage() {

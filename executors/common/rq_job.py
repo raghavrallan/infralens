@@ -21,10 +21,14 @@ from executors.common.runner import CliResult, run_cli
 
 
 def _headers() -> dict[str, str]:
-    return {
+    headers = {
         "X-Executor-Key": os.environ.get("EXECUTOR_SERVICE_KEY", "dev-executor-key"),
         "X-Executor-Provider": os.environ.get("EXECUTOR_PROVIDER", ""),
     }
+    org_id = (os.environ.get("EXECUTOR_ORG_ID") or "").strip()
+    if org_id:
+        headers["X-Executor-Org-Id"] = org_id
+    return headers
 
 
 def _control_url(path: str) -> str:

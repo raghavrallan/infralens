@@ -13,6 +13,13 @@ case "$provider" in
     ;;
 esac
 
+org_id="${EXECUTOR_ORG_ID:-}"
+if [ -z "$org_id" ]; then
+  echo "EXECUTOR_ORG_ID is required for org-scoped queues" >&2
+  exit 64
+fi
+echo "[executor] org=$org_id provider=$provider"
+
 has_command() {
   command -v "$1" >/dev/null 2>&1
 }
