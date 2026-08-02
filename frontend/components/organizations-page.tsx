@@ -62,6 +62,28 @@ type Me = {
   primary_org_id?: string;
 };
 
+type ExecutorStatus = {
+  org_id: string;
+  mode: "on_demand" | "window" | "schedule" | string;
+  window_hours: number;
+  window_ends_at?: string | null;
+  schedule?: {
+    timezone?: string;
+    weekly?: Array<{ days: number[]; start: string; end: string }>;
+  };
+  idle_scale_down_minutes: number;
+  max_replicas: number;
+  desired_state: string;
+  actual_state: string;
+  last_job_at?: string | null;
+  last_error?: string;
+  in_warm_window?: boolean;
+  queue_depth?: number;
+  message?: string;
+};
+
+const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
 const ROLE_LABELS: Record<string, string> = {
   super_admin: "Super Admin",
   org_admin: "Org Admin",
@@ -88,7 +110,9 @@ export function OrganizationsPage() {
 
   const [orgs, setOrgs] = useState<Org[]>([]);
   const [selectedOrg, setSelectedOrg] = useState("");
-  const [tab, setTab] = useState<"overview" | "invites" | "requests" | "projects" | "admins">("overview");
+  const [tab, setTab] = useState<
+    "overview" | "invites" | "requests" | "projects" | "admins" | "executors"
+  >("overview");
   const [message, setMessage] = useState("");
   const [newOrgName, setNewOrgName] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
@@ -101,6 +125,18 @@ export function OrganizationsPage() {
   const [projectMembers, setProjectMembers] = useState<ProjectMember[]>([]);
   const [memberEmail, setMemberEmail] = useState("");
   const [memberRole, setMemberRole] = useState("developer");
+  const [executor, setExecutor] = useState<ExecutorStatus | null>(null);
+  const [execMode, setExecMode] = useState<"on_demand" | "window" | "schedule">(
+    "on_demand",
+  );
+  const [windowHours, setWindowHours] = useState(12);
+  const [maxReplicas, setMaxReplicas] = useState(1);
+  const [idleMinutes, setIdleMinutes] = useState(15);
+  const [scheduleTz, setScheduleTz] = useState("UTC");
+  const [scheduleDays, setScheduleDays] = useState<number[]>([0, 1, 2, 3, 4]);
+  const [scheduleStart, setScheduleStart] = useState("09:00");
+  const [scheduleEnd, setScheduleEnd] = useState("18:00");
+  const [executorSaving, setExecutorSaving] = useState(false);
 
   useEffect(() => {
     void fetchCurrentUser().then((u) => {
@@ -121,6 +157,38 @@ export function OrganizationsPage() {
       setMessage(error instanceof Error ? error.message : "Could not load orgs");
     }
   }, [me?.primary_org_id, selectedOrg]);
+
+  const loadExecutor = useCallback(async () => {
+    if (!selectedOrg) {
+      setExecutor(null);
+      return;
+    }
+    try {
+      const status = await api<ExecutorStatus>(
+        `/api/orgs/${selectedOrg}/executor-status`,
+      );
+      setExecutor(status);
+      const mode = (status.mode || "on_demand") as
+        | "on_demand"
+        | "window"
+        | "schedule";
+      setExecMode(mode);
+      setWindowHours(status.window_hours || 12);
+      setMaxReplicas(status.max_replicas || 1);
+      setIdleMinutes(status.idle_scale_down_minutes || 15);
+      const weekly = status.schedule?.weekly?.[0];
+      setScheduleTz(status.schedule?.timezone || "UTC");
+      if (weekly) {
+        setScheduleDays(weekly.days || [0, 1, 2, 3, 4]);
+        setScheduleStart(weekly.start || "09:00");
+        setScheduleEnd(weekly.end || "18:00");
+      }
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Could not load executor status",
+      );
+    }
+  }, [selectedOrg]);
 
   const loadOrgDetail = useCallback(async () => {
     if (!selectedOrg) return;
@@ -144,10 +212,11 @@ export function OrganizationsPage() {
         setInvites(inviteList);
         setRequests(requestList);
       }
+      await loadExecutor();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not load org detail");
     }
-  }, [selectedOrg, isOrgAdmin, projectId]);
+  }, [selectedOrg, isOrgAdmin, projectId, loadExecutor]);
 
   const loadProjectMembers = useCallback(async () => {
     if (!projectId) {
@@ -174,6 +243,66 @@ export function OrganizationsPage() {
   useEffect(() => {
     void loadProjectMembers();
   }, [loadProjectMembers]);
+
+  const saveExecutorSettings = async () => {
+    if (!selectedOrg) return;
+    setExecutorSaving(true);
+    setMessage("Saving executor capacity…");
+    try {
+      const body: Record<string, unknown> = {
+        mode: execMode,
+        window_hours: windowHours,
+        idle_scale_down_minutes: idleMinutes,
+        max_replicas: maxReplicas,
+        refresh_window: execMode === "window",
+      };
+      if (execMode === "schedule") {
+        body.schedule = {
+          timezone: scheduleTz || "UTC",
+          weekly: [
+            {
+              days: scheduleDays,
+              start: scheduleStart,
+              end: scheduleEnd,
+            },
+          ],
+        };
+      }
+      const status = await api<ExecutorStatus>(
+        `/api/orgs/${selectedOrg}/executor-settings`,
+        { method: "PUT", body: JSON.stringify(body) },
+      );
+      setExecutor(status);
+      setMessage("Executor capacity updated.");
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Could not save executor settings",
+      );
+    } finally {
+      setExecutorSaving(false);
+    }
+  };
+
+  const wakeExecutors = async () => {
+    if (!selectedOrg) return;
+    setMessage("Waking executor pool…");
+    try {
+      const status = await api<ExecutorStatus>(
+        `/api/orgs/${selectedOrg}/executor-wake`,
+        { method: "POST", body: "{}" },
+      );
+      setExecutor(status);
+      setMessage(status.message || "Wake requested.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Wake failed");
+    }
+  };
+
+  const toggleScheduleDay = (day: number) => {
+    setScheduleDays((prev) =>
+      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day].sort(),
+    );
+  };
 
   const createOrg = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -341,6 +470,7 @@ export function OrganizationsPage() {
                       "requests",
                       "projects",
                       "admins",
+                      "executors",
                     ] as const
                   ).map((t) => (
                     <button
@@ -349,7 +479,11 @@ export function OrganizationsPage() {
                       className={`org-tab${tab === t ? " active" : ""}`}
                       onClick={() => setTab(t)}
                     >
-                      {t === "admins" ? "Admins" : t}
+                      {t === "admins"
+                        ? "Admins"
+                        : t === "executors"
+                          ? "Executor capacity"
+                          : t}
                     </button>
                   ))}
                 </div>
@@ -565,6 +699,216 @@ export function OrganizationsPage() {
                       <p className="empty-note">No org admins assigned.</p>
                     )}
                   </div>
+                </div>
+              )}
+
+              {tab === "executors" && (
+                <div className="org-panel executor-panel">
+                  <div className="executor-status-row">
+                    <div>
+                      <p className="modal-eyebrow">CLI executor pool</p>
+                      <h4>Azure · AWS · GitHub workers for this org</h4>
+                      <p className="page-sub">
+                        Shared by every project in the org. Chat stays always-on; only CLI
+                        executors scale.
+                      </p>
+                    </div>
+                    <div className="executor-pills">
+                      <span
+                        className={`pill ${
+                          executor?.actual_state === "active"
+                            ? "ok"
+                            : executor?.actual_state === "error"
+                              ? "warn"
+                              : "off"
+                        }`}
+                      >
+                        {(executor?.actual_state || "unknown").replace(/_/g, " ")}
+                      </span>
+                      {executor?.in_warm_window ? (
+                        <span className="pill ok">warm window</span>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="org-stat-row">
+                    <div className="org-stat">
+                      <span>Queue depth</span>
+                      <strong>{executor?.queue_depth ?? 0}</strong>
+                    </div>
+                    <div className="org-stat">
+                      <span>Mode</span>
+                      <strong>{(executor?.mode || "—").replace(/_/g, " ")}</strong>
+                    </div>
+                    <div className="org-stat">
+                      <span>Window ends</span>
+                      <strong>
+                        {executor?.window_ends_at
+                          ? new Date(executor.window_ends_at).toLocaleString()
+                          : "—"}
+                      </strong>
+                    </div>
+                    <div className="org-stat">
+                      <span>Last job</span>
+                      <strong>
+                        {executor?.last_job_at
+                          ? new Date(executor.last_job_at).toLocaleString()
+                          : "—"}
+                      </strong>
+                    </div>
+                  </div>
+
+                  {executor?.message ? (
+                    <p className="executor-message">{executor.message}</p>
+                  ) : null}
+                  {executor?.last_error ? (
+                    <p className="executor-error">{executor.last_error}</p>
+                  ) : null}
+
+                  {!isOrgAdmin ? (
+                    <p className="empty-note">
+                      Org Admin required to change executor capacity.
+                    </p>
+                  ) : (
+                    <>
+                      <div className="executor-mode-tabs">
+                        {(
+                          [
+                            ["on_demand", "On demand"],
+                            ["window", "Timed window"],
+                            ["schedule", "Custom schedule"],
+                          ] as const
+                        ).map(([value, label]) => (
+                          <button
+                            key={value}
+                            type="button"
+                            className={`org-tab${execMode === value ? " active" : ""}`}
+                            onClick={() => setExecMode(value)}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {execMode === "window" && (
+                        <div className="executor-window-tabs">
+                          {[6, 12, 24].map((hours) => (
+                            <button
+                              key={hours}
+                              type="button"
+                              className={`tiny-btn${windowHours === hours ? " solid" : ""}`}
+                              onClick={() => setWindowHours(hours)}
+                            >
+                              {hours}h
+                            </button>
+                          ))}
+                          <p className="empty-note">
+                            Keep executors warm for the next {windowHours} hours from save.
+                          </p>
+                        </div>
+                      )}
+
+                      {execMode === "on_demand" && (
+                        <label className="executor-field">
+                          Idle scale-down (minutes)
+                          <input
+                            type="number"
+                            min={1}
+                            max={1440}
+                            value={idleMinutes}
+                            onChange={(e) =>
+                              setIdleMinutes(Number(e.target.value) || 15)
+                            }
+                          />
+                        </label>
+                      )}
+
+                      {execMode === "schedule" && (
+                        <div className="executor-schedule">
+                          <label className="executor-field">
+                            Timezone
+                            <input
+                              value={scheduleTz}
+                              onChange={(e) => setScheduleTz(e.target.value)}
+                              placeholder="UTC"
+                            />
+                          </label>
+                          <div className="executor-days">
+                            {WEEKDAY_LABELS.map((label, index) => (
+                              <button
+                                key={label}
+                                type="button"
+                                className={`tiny-btn${
+                                  scheduleDays.includes(index) ? " solid" : ""
+                                }`}
+                                onClick={() => toggleScheduleDay(index)}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="executor-time-row">
+                            <label className="executor-field">
+                              Start
+                              <input
+                                type="time"
+                                value={scheduleStart}
+                                onChange={(e) => setScheduleStart(e.target.value)}
+                              />
+                            </label>
+                            <label className="executor-field">
+                              End
+                              <input
+                                type="time"
+                                value={scheduleEnd}
+                                onChange={(e) => setScheduleEnd(e.target.value)}
+                              />
+                            </label>
+                          </div>
+                          <p className="empty-note">
+                            Outside the schedule the pool stays scaled to zero.
+                          </p>
+                        </div>
+                      )}
+
+                      <label className="executor-field">
+                        Max replicas per provider
+                        <input
+                          type="range"
+                          min={1}
+                          max={5}
+                          value={maxReplicas}
+                          onChange={(e) => setMaxReplicas(Number(e.target.value) || 1)}
+                        />
+                        <span>{maxReplicas}</span>
+                      </label>
+
+                      <div className="executor-actions">
+                        <button
+                          type="button"
+                          className="tiny-btn solid"
+                          disabled={executorSaving}
+                          onClick={() => void saveExecutorSettings()}
+                        >
+                          {executorSaving ? "Saving…" : "Save capacity"}
+                        </button>
+                        <button
+                          type="button"
+                          className="tiny-btn"
+                          onClick={() => void wakeExecutors()}
+                        >
+                          Wake now
+                        </button>
+                        <button
+                          type="button"
+                          className="tiny-btn"
+                          onClick={() => void loadExecutor()}
+                        >
+                          Refresh status
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </>

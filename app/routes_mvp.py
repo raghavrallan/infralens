@@ -565,6 +565,15 @@ class MemberDecideBody(BaseModel):
     token: Optional[str] = None
 
 
+class OrgExecutorSettingsUpdate(BaseModel):
+    mode: Optional[Literal["on_demand", "window", "schedule"]] = None
+    window_hours: Optional[int] = None
+    schedule: Optional[dict[str, Any]] = None
+    idle_scale_down_minutes: Optional[int] = None
+    max_replicas: Optional[int] = None
+    refresh_window: bool = False
+
+
 @router.get("/api/orgs")
 def list_orgs(user: dict[str, Any] = Depends(auth.require_user)) -> list[dict[str, Any]]:
     return orgs.list_orgs_for_user(user)
@@ -626,6 +635,79 @@ def list_org_projects(
 ) -> list[dict[str, Any]]:
     memberships.assert_org_access(user, org_id)
     return orgs.list_org_projects(org_id)
+
+
+@router.get("/api/orgs/{org_id}/executor-settings")
+def get_org_executor_settings(
+    org_id: str,
+    user: dict[str, Any] = Depends(auth.require_user),
+) -> dict[str, Any]:
+    memberships.assert_org_access(user, org_id)
+    from app.org_executors import settings as org_executor_settings
+
+    return org_executor_settings.ensure_settings(org_id)
+
+
+@router.put("/api/orgs/{org_id}/executor-settings")
+def put_org_executor_settings(
+    org_id: str,
+    body: OrgExecutorSettingsUpdate,
+    user: dict[str, Any] = Depends(auth.require_user),
+) -> dict[str, Any]:
+    memberships.assert_org_admin(user, org_id)
+    from app.org_executors import settings as org_executor_settings
+    from app.org_executors.controller import tick_once
+
+    try:
+        updated = org_executor_settings.update_settings(
+            org_id,
+            mode=body.mode,
+            window_hours=body.window_hours,
+            schedule=body.schedule,
+            idle_scale_down_minutes=body.idle_scale_down_minutes,
+            max_replicas=body.max_replicas,
+            refresh_window=body.refresh_window or body.mode == "window",
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        tick_once(org_id)
+    except Exception:
+        pass
+    return org_executor_settings.status_payload(org_id)
+
+
+@router.get("/api/orgs/{org_id}/executor-status")
+def get_org_executor_status(
+    org_id: str,
+    user: dict[str, Any] = Depends(auth.require_user),
+) -> dict[str, Any]:
+    memberships.assert_org_access(user, org_id)
+    from app.org_executors import settings as org_executor_settings
+
+    return org_executor_settings.status_payload(org_id)
+
+
+@router.post("/api/orgs/{org_id}/executor-wake")
+def wake_org_executors(
+    org_id: str,
+    user: dict[str, Any] = Depends(auth.require_user),
+) -> dict[str, Any]:
+    memberships.assert_org_admin(user, org_id)
+    from app.org_executors import settings as org_executor_settings
+    from app.org_executors.controller import request_wake
+
+    try:
+        org_executor_settings.ensure_settings(org_id)
+        wake = request_wake(org_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)[:300]) from exc
+    status = org_executor_settings.status_payload(org_id)
+    return {**status, "wake": wake}
 
 
 @router.post("/api/orgs/{org_id}/invites")

@@ -18,6 +18,9 @@ DEFAULT_DATABASE_URL = (
 
 DEFAULT_PROJECT_ID = "default"
 DEFAULT_PROJECT_CONFIG_KEY = "default_project_id"
+# Stable ID for the seeded default org so local executors can set EXECUTOR_ORG_ID.
+DEFAULT_ORG_ID = "00000000-0000-4000-8000-000000000001"
+DEFAULT_ORG_SLUG = "infralens"
 # JSON list of project ids hidden when the DB role cannot DELETE root_admin tables.
 DELETED_PROJECTS_CONFIG_KEY = "deleted_project_ids"
 
@@ -90,6 +93,33 @@ class Organization(Base):
     slug: Mapped[str] = mapped_column(String(120), unique=True, index=True)
     created_by: Mapped[str] = mapped_column(String(36), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+
+class OrgExecutorSettings(Base):
+    """Per-org CLI executor pool schedule and scale state."""
+
+    __tablename__ = "org_executor_settings"
+
+    org_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    # on_demand | window | schedule
+    mode: Mapped[str] = mapped_column(String(32), default="on_demand")
+    window_hours: Mapped[int] = mapped_column(Integer, default=12)
+    window_ends_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    schedule: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    idle_scale_down_minutes: Mapped[int] = mapped_column(Integer, default=15)
+    max_replicas: Mapped[int] = mapped_column(Integer, default=1)
+    desired_state: Mapped[str] = mapped_column(String(32), default="scaled_to_zero")
+    actual_state: Mapped[str] = mapped_column(String(32), default="scaled_to_zero")
+    last_job_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_error: Mapped[str] = mapped_column(String, default="")
+    aca_app_names: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now
     )
@@ -609,20 +639,30 @@ def ensure_tenancy_seed() -> None:
 
     from sqlalchemy import select as _select
 
-    DEFAULT_ORG_SLUG = "infralens"
     with SessionLocal() as session:
         org = session.scalar(
             _select(Organization).where(Organization.slug == DEFAULT_ORG_SLUG)
         )
         if org is None:
             org = Organization(
-                id=str(_uuid.uuid4()),
+                id=DEFAULT_ORG_ID,
                 name="InfraLens",
                 slug=DEFAULT_ORG_SLUG,
                 created_by="",
             )
             session.add(org)
             session.flush()
+        # Ensure default org executor settings exist.
+        if session.get(OrgExecutorSettings, org.id) is None:
+            session.add(
+                OrgExecutorSettings(
+                    org_id=org.id,
+                    mode="on_demand",
+                    window_hours=12,
+                    idle_scale_down_minutes=15,
+                    max_replicas=1,
+                )
+            )
 
         for project in session.scalars(_select(Project)).all():
             if not (project.org_id or "").strip():

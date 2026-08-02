@@ -20,4 +20,4 @@ RUN chmod 0755 /usr/local/bin/devsecops-startup
 ENV PYTHONUNBUFFERED=1
 ENV EXECUTOR_PROVIDER=github
 ENTRYPOINT ["/usr/local/bin/devsecops-startup"]
-CMD ["rq", "worker", "provider.github.read", "provider.github.write", "--worker-class", "executors.common.worker.Worker", "--url", "redis://redis:6379/0"]
+CMD ["python3", "-m", "executors.common.entrypoint"]

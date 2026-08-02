@@ -20,7 +20,7 @@ COPY executors ./executors
 COPY executors/common/startup.sh /usr/local/bin/devsecops-startup
 RUN chmod 0755 /usr/local/bin/devsecops-startup
 ENV PYTHONUNBUFFERED=1
-ENV PYTHONPATH=/opt/executor-deps
+ENV PYTHONPATH=/app:/opt/executor-deps
 ENV EXECUTOR_PROVIDER=azure
 ENTRYPOINT ["/usr/local/bin/devsecops-startup"]
-CMD ["python3", "-c", "from rq.cli import main; main()", "worker", "provider.azure.read", "provider.azure.write", "--worker-class", "executors.common.worker.Worker", "--url", "redis://redis:6379/0"]
+CMD ["python3", "-m", "executors.common.entrypoint"]
