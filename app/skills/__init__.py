@@ -16,16 +16,21 @@ from app.skills.cloud_posture import skill as cloud_posture
 from app.skills.code_reviewer import skill as code_reviewer
 from app.skills.compliance_mapper import skill as compliance_mapper
 from app.skills.cost_analyzer import skill as cost_analyzer
+from app.skills.deployment_manager import skill as deployment_manager
 from app.skills.drift_auditor import skill as drift_auditor
 from app.skills.iac_reviewer import skill as iac_reviewer
 from app.skills.incident_analyzer import skill as incident_analyzer
+from app.skills.infra_debugger import skill as infra_debugger
 from app.skills.infrastructure_architect import skill as infrastructure_architect
 from app.skills.log_analyzer import skill as log_analyzer
 from app.skills.metrics_analyzer import skill as metrics_analyzer
 from app.skills.pipeline_auditor import skill as pipeline_auditor
 from app.skills.pipeline_generator import skill as pipeline_generator
 from app.skills.policy_generator import skill as policy_generator
+from app.skills.project_analyzer import skill as project_analyzer
 from app.skills.report_writer import skill as report_writer
+from app.skills.terraform_executor import skill as terraform_executor
+from app.skills.terraform_generator import skill as terraform_generator
 from app.skills.vuln_triage import skill as vuln_triage
 
 for _skill in (
@@ -43,6 +48,11 @@ for _skill in (
     compliance_mapper,
     incident_analyzer,
     infrastructure_architect,
+    terraform_generator,
+    terraform_executor,
+    infra_debugger,
+    deployment_manager,
+    project_analyzer,
     report_writer,
 ):
     registry.register(_skill)

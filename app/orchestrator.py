@@ -34,6 +34,14 @@ _GENERIC_TRIGGERS = (
     "security review",
     "harden",
     "improve my",
+    "drift",
+    "public exposure",
+    "publicly exposed",
+    "missing iac",
+    "missing in code",
+    "not in code",
+    "out of sync",
+    "in sync",
 )
 
 _PROVIDER_SPECS: tuple[dict[str, Any], ...] = (
@@ -267,6 +275,96 @@ _INFRA_CODE_TERMS = (
     "my repo",
     "my repository",
     "my project",
+    "drift",
+    "missing iac",
+    "missing in code",
+    "not in code",
+    "out of sync",
+    "in sync",
+    "exist in the code",
+    "exists in the code",
+    "defined in code",
+    "public exposure",
+    "posture",
+)
+_DIAGNOSTIC_TERMS = (
+    "drift",
+    "drft",
+    "posture",
+    "postur",
+    "public exposure",
+    "public exposur",
+    "publicly exposed",
+    "missing iac",
+    "missin iac",
+    "missing in code",
+    "not in code",
+    "out of sync",
+    "in sync",
+    "compare azure",
+    "compare github",
+    "azure vs",
+    "vs github",
+    "against my code",
+    "against github",
+    "against the code",
+    "exist in the code",
+    "exists in the code",
+    "present in code",
+    "present in the code",
+    "every resource",
+    "every service",
+    "everything",
+    "evrything",
+    "evrthing",
+    "all of it",
+    "all of them",
+    "whole setup",
+    "what resources",
+    "inventory",
+    "inventry",
+    "what's missing",
+    "whats missing",
+    "what is missing",
+    "undeclared",
+    "against what's in",
+    "risky public",
+    "reviw",
+    "go thru",
+    "go through",
+    "any issues",
+    "any risk",
+    "securty",
+    "hardning",
+)
+_DIAGNOSTIC_FOLLOWUP_RE = re.compile(
+    r"^(?:ok|okay|k|bro|pls|please|yeah|ya|yep|same|also|and|"
+    r"now|then|next)?[\s,.-]*"
+    r"(?:all|everything|evrything|evrthing|all of (?:it|them)|"
+    r"every(?:thing| service| resource| app| repo)?|"
+    r"same for (?:github|azure|all|the code|code|cloud)|"
+    r"for (?:all|everything|github|azure)|"
+    r"the code|in (?:the )?code|present in code|"
+    r"(?:same for the code|not just cloud|use whatever is mapped|"
+    r"subscription is fine|whole (?:thing|sub|subscription)|"
+    r"idk which repo|dont know which repo|don't know which repo)|"
+    r"and (?:cost|metrics|logs|cpu|drift|posture|the code)|"
+    r"what about (?:cost|metrics|logs|cpu|github|azure|drift|errors|5xx)|"
+    r"now (?:cost|metrics|logs|cpu|drift)|"
+    r"do (?:both|all)|check (?:both|all|everything)|"
+    r"just (?:do|check|run) (?:it|all|everything)|"
+    r"container app|container apps)"
+    r".*$",
+    re.IGNORECASE,
+)
+_REPO_NAME_RE = re.compile(r"\b([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)\b")
+_SCOPE_CLARIFY_RE = re.compile(
+    r"which (repo|repository|repos|azure|subscription|resource group|scope|rg)|"
+    r"azure scope|subscription vs|resource group vs|"
+    r"(repo|repository) (name|to use|should)|"
+    r"tell me (the |which )?(repo|repository|subscription|scope)|"
+    r"(confirm|specify|provide).{0,40}(repo|subscription|resource group|scope)",
+    re.IGNORECASE,
 )
 _DEFAULT_INFRA_KINDS = (
     "terraform",
@@ -329,6 +427,107 @@ def _detect_code_kinds(task_lower: str) -> list[str]:
     return list(kinds)
 
 
+def _extract_named_repos(task: str) -> list[str]:
+    """Pull owner/name repo references from the user message."""
+    found: list[str] = []
+    for match in _REPO_NAME_RE.finditer(task or ""):
+        owner, repo = match.group(1), match.group(2)
+        if owner.lower() in {"http", "https", "www"}:
+            continue
+        if repo.lower().endswith(
+            (".py", ".md", ".tf", ".yml", ".yaml", ".json", ".txt", ".toml")
+        ):
+            continue
+        full = f"{owner}/{repo}"
+        if full.lower() not in {item.lower() for item in found}:
+            found.append(full)
+    return found
+
+
+def _looks_like_diagnostic_intent(task: str) -> bool:
+    """Read-only drift / posture / inventory asks that must not interview for scope."""
+    lowered = (task or "").lower()
+    if not lowered:
+        return False
+    if any(term in lowered for term in _DIAGNOSTIC_TERMS):
+        return True
+    if _extract_named_repos(task) and any(
+        term in lowered for term in ("azure", "github", "infra", "resource", "code", "iac")
+    ):
+        return True
+    # CURRENT USER REQUEST may be a messy follow-up; body still has prior context.
+    current = lowered
+    if "current user request:" in lowered:
+        current = lowered.split("current user request:", 1)[1]
+        current = current.split("conversation context:", 1)[0].strip()
+    if _DIAGNOSTIC_FOLLOWUP_RE.match(current.strip()):
+        return True
+    return False
+
+
+def _looks_like_drift_intent(task: str) -> bool:
+    lowered = (task or "").lower()
+    drift_terms = (
+        "drift",
+        "missing iac",
+        "missing in code",
+        "not in code",
+        "out of sync",
+        "in sync",
+        "against my code",
+        "against github",
+        "against the code",
+        "exist in the code",
+        "exists in the code",
+        "compare azure",
+        "compare github",
+        "azure vs",
+        "vs github",
+        "undeclared",
+        "what's missing",
+        "what is missing",
+    )
+    return any(term in lowered for term in drift_terms)
+
+
+def _looks_like_posture_intent(task: str) -> bool:
+    lowered = (task or "").lower()
+    return any(
+        term in lowered
+        for term in (
+            "posture",
+            "public exposure",
+            "publicly exposed",
+            "security review",
+            "harden",
+        )
+    )
+
+
+def _filter_scope_clarifications(
+    questions: list[str], live_context: Optional[str], task: str
+) -> list[str]:
+    """Drop repo/Azure-scope interviews when connections + topology already answer them."""
+    live = live_context or ""
+    connected_ready = any(
+        marker in live
+        for marker in (
+            "PROJECT TOPOLOGY",
+            "ENVIRONMENT DATA",
+            "LIVE GITHUB CODE",
+            "LIVE AZURE",
+            "Provider azure: connected",
+            "Provider github: connected",
+        )
+    )
+    if _looks_like_diagnostic_intent(task) and connected_ready:
+        return []
+    if not connected_ready:
+        return questions
+    kept = [q for q in questions if not _SCOPE_CLARIFY_RE.search(q)]
+    return kept
+
+
 def _gather_code_context(
     task: str, project_id: str, force: bool = False
 ) -> Optional[str]:
@@ -339,6 +538,8 @@ def _gather_code_context(
     """
     if len(task) > _PASTED_CONTENT_CHARS or not github_infra.is_connected(project_id):
         return None
+    if _looks_like_diagnostic_intent(task):
+        force = True
     kinds = _detect_code_kinds(task.lower())
     if not kinds and force:
         kinds = list(_DEFAULT_INFRA_KINDS) + ["source", "workflows"]
@@ -346,9 +547,14 @@ def _gather_code_context(
         return None
     env = _detect_env(task)
     branch = _detect_branch(task)
+    prefer_repos = _extract_named_repos(task)
     try:
         report = github_infra.build_code_report(
-            project_id, kinds, env=env, branch=branch
+            project_id,
+            kinds,
+            env=env,
+            branch=branch,
+            prefer_repos=prefer_repos or None,
         )
     except github_infra.GitHubConnectionError:
         return None
@@ -572,29 +778,67 @@ _METRIC_TRIGGERS = (
 _METRIC_INTENT_PROMPT = (
     "From a user's request about cloud resource telemetry, extract which Azure "
     "resource they mean and which metrics they want. Respond ONLY with JSON:\n"
-    '{"resource_types": [], "resource_name": null, "metrics": []}\n'
+    '{"resource_types": [], "resource_name": null, "metrics": [], "all_resources": false}\n'
     "resource_types: zero or more of exactly these keys — container_app, "
     "postgresql, mysql, mariadb, vm, vmss, sql_database, storage, web_app, aks, "
     "redis, cosmos, app_gateway, service_bus, event_hub, cognitive. Use "
     "'cognitive' for Azure OpenAI / AI Foundry / Cognitive Services / AI models. "
-    "Pick the type(s) the user names; leave empty if truly unclear.\n"
-    "resource_name: a specific resource name the user mentions, else null.\n"
-    "metrics: zero or more short keywords the user asks for — cpu, memory, "
-    "connections, iops, disk, storage, requests, latency, network, replicas, "
-    "restarts, errors, transactions, tokens, input_tokens, output_tokens, calls. "
-    "Use input_tokens/output_tokens/tokens for Azure OpenAI token usage. Include "
-    "every metric they mention (e.g. both input_tokens and output_tokens). Leave "
-    "empty if they don't name one. The input may include recent chat context. "
-    "When the current request says this, that, same, or another follow-up, "
-    "resolve it from the earlier concrete user or assistant turn instead of "
-    "returning null or asking which service the user means."
+    "Pick the type(s) the user names or that earlier turns named.\n"
+    "resource_name: ONLY a concrete Azure resource name (e.g. my-api-ca). "
+    "Never put type labels or scope words here: null for container app, app, "
+    "all, every, everyone, existing, all of them, which exist.\n"
+    "all_resources: true when the user wants every matching resource of that type.\n"
+    "metrics: zero or more short keywords — cpu, memory, connections, iops, disk, "
+    "storage, requests, latency, network, replicas, restarts, errors, transactions, "
+    "tokens, input_tokens, output_tokens, calls. Include every metric they mention. "
+    "If they said CPU/memory (or request metrics), include cpu, memory, and requests.\n"
+    "The input may include recent chat context. Follow-ups like 'container app', "
+    "'all', or 'everyone which exist' MUST resolve from the earlier metrics request. "
+    "Never invent a need to ask the user which app when they asked for all or named "
+    "only a resource type — leave resource_name null and set all_resources true."
 )
+
+_TYPE_FOLLOWUP_KEYWORDS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("container app", "container apps", "aca", "containerapp"), "container_app"),
+    (("postgres", "postgresql", "psql"), "postgresql"),
+    (("web app", "app service"), "web_app"),
+    (("virtual machine", " vm ", "vms"), "vm"),
+    (("aks", "kubernetes"), "aks"),
+    (("redis",), "redis"),
+    (("storage account", "blob"), "storage"),
+    (("openai", "foundry", "cognitive"), "cognitive"),
+)
+
+
+def _keyword_metric_scope(
+    task: str,
+) -> tuple[Optional[list[str]], Optional[str], Optional[list[str]], bool]:
+    """Deterministic fallback so short follow-ups still fetch the right metrics."""
+    lowered = f" {(task or '').lower()} "
+    types: list[str] = []
+    for keywords, key in _TYPE_FOLLOWUP_KEYWORDS:
+        if any(k in lowered for k in keywords):
+            types.append(key)
+    all_resources = azure_infra.wants_all_resources(task)
+    metrics: list[str] = []
+    if "cpu" in lowered:
+        metrics.append("cpu")
+    if "memory" in lowered or "mem " in lowered:
+        metrics.append("memory")
+    if "request" in lowered or "throughput" in lowered:
+        metrics.append("requests")
+    if any(term in lowered for term in ("health", "utilization", "utilisation", "how busy")):
+        for hint in ("cpu", "memory", "requests"):
+            if hint not in metrics:
+                metrics.append(hint)
+    return (types or None), None, (metrics or None), all_resources
 
 
 def _parse_metric_intent(
     task: str,
 ) -> tuple[Optional[list[str]], Optional[str], Optional[list[str]]]:
-    """Use the LLM to resolve the resource type(s) and metrics the user wants."""
+    """Resolve resource type(s) and metrics; never treat 'all' as a resource name."""
+    kw_types, _kw_name, kw_metrics, kw_all = _keyword_metric_scope(task)
     try:
         completion = azure_client.chat(
             messages=[
@@ -606,15 +850,207 @@ def _parse_metric_intent(
         )
         parsed = json.loads(completion.choices[0].message.content or "{}")
     except Exception:  # noqa: BLE001 - fall back to keyword inference on any failure
-        return None, None, None
+        types = kw_types or ["container_app"]
+        metrics = kw_metrics or ["cpu", "memory"]
+        return types, None, metrics
     types = parsed.get("resource_types") or None
     name = parsed.get("resource_name") or None
     metrics = parsed.get("metrics") or None
+    all_resources = bool(parsed.get("all_resources")) or kw_all
     types = [t for t in types if isinstance(t, str)] if isinstance(types, list) else None
     metrics = (
         [m for m in metrics if isinstance(m, str)] if isinstance(metrics, list) else None
     )
+    if kw_types:
+        types = list(dict.fromkeys([*(types or []), *kw_types]))
+    if kw_metrics:
+        metrics = list(dict.fromkeys([*(metrics or []), *kw_metrics]))
+    if all_resources or azure_infra.wants_all_resources(str(name or "")):
+        name = None
+    if isinstance(name, str) and name.lower() in {
+        "all", "every", "everyone", "existing", "container app", "container apps", "app", "apps"
+    }:
+        name = None
+    # Short follow-ups often omit the type in the LLM parse; keep keyword type.
+    if not types and kw_types:
+        types = kw_types
+    if not types and ("main azure app" in (task or "").lower() or "my app" in (task or "").lower()):
+        types = ["container_app"]
     return (types or None), (name if isinstance(name, str) else None), (metrics or None)
+
+
+def _current_request_text(task: str) -> str:
+    """Strip conversation wrappers so follow-up detectors see only the latest ask."""
+    lowered = (task or "").strip()
+    if not lowered:
+        return ""
+    # _contextual_task wraps as CURRENT USER REQUEST / CONVERSATION CONTEXT.
+    marker = "CURRENT USER REQUEST:"
+    if marker in lowered:
+        body = lowered.split(marker, 1)[1]
+        body = re.split(r"\n\s*CONVERSATION CONTEXT:", body, maxsplit=1)[0]
+        return body.strip()
+    return lowered
+
+
+def _looks_like_metrics_followup(task: str) -> bool:
+    """Short answers that continue a metrics ask (e.g. 'container app', 'all')."""
+    lowered = _current_request_text(task).lower().strip()
+    if not lowered:
+        return False
+    # Structural / repo questions must not be treated as metrics follow-ups.
+    if any(
+        term in lowered
+        for term in (
+            "backend vs frontend",
+            "frontend vs backend",
+            "which one is backend",
+            "which one is frontend",
+            "which repo",
+            "rollback",
+            "read only",
+            "read-only",
+            "dependabot",
+            "vuln",
+            "summarise",
+            "summarize",
+            "worst 5",
+            "executive",
+            "acr",
+            "image pull",
+        )
+    ):
+        return False
+    if any(term in lowered for term in _METRIC_TRIGGERS):
+        return True
+    if azure_infra.wants_all_resources(lowered):
+        return True
+    types, _, _, _ = _keyword_metric_scope(lowered)
+    return bool(types)
+
+
+def _prior_turn_was_metrics(messages: list[dict[str, Any]]) -> bool:
+    """True when an earlier user turn in this chat was clearly about metrics."""
+    for item in messages:
+        if item.get("role") != "user":
+            continue
+        text = str(item.get("content") or "").lower()
+        if any(term in text for term in _METRIC_TRIGGERS):
+            return True
+    return False
+
+
+def _is_ack_or_policy_nudge(task: str) -> bool:
+    """Short turns that should answer directly (no specialist re-run)."""
+    lowered = (task or "").lower().strip()
+    if not lowered or len(lowered) > 56:
+        return False
+    return any(
+        term in lowered
+        for term in (
+            "read only",
+            "read-only",
+            "stick to",
+            "dont change",
+            "don't change",
+            "thanks",
+            "thank you",
+            "thx",
+            "ok thanks",
+            "got it",
+        )
+    )
+
+
+def _correct_misrouted_steps(
+    task: str, steps: list["PlanStep"], messages: list[dict[str, Any]]
+) -> list["PlanStep"]:
+    """Override clear LLM mis-routes (metrics stealing structural follow-ups)."""
+    lowered = (task or "").lower().strip()
+    if not lowered:
+        return steps
+    if _is_ack_or_policy_nudge(task):
+        return []
+    only_metrics = bool(steps) and all(step.skill == "metrics_analyzer" for step in steps)
+    skill_names = {step.skill for step in steps}
+
+    def _one(skill: str, objective: str) -> list[PlanStep]:
+        if registry.get(skill) is None:
+            return steps
+        return [PlanStep(skill=skill, objective=objective)]
+
+    if any(
+        term in lowered
+        for term in (
+            "backend vs frontend",
+            "frontend vs backend",
+            "which one is backend",
+            "which one is frontend",
+            "which repo",
+            "mapped repo",
+        )
+    ) and (only_metrics or not steps or skill_names <= {"metrics_analyzer", "drift_auditor"}):
+        return _one(
+            "project_analyzer",
+            "Answer which repos/apps are backend vs frontend from PROJECT TOPOLOGY "
+            "and mapped GitHub repos. Do not run metrics.",
+        )
+    if any(
+        term in lowered for term in ("dependabot", "vuln", "vulnerabilit", "cve")
+    ) and (
+        only_metrics
+        or not steps
+        or skill_names <= {"metrics_analyzer", "cloud_posture", "drift_auditor"}
+    ):
+        return _one(
+            "vuln_triage",
+            "Triage Dependabot / vulnerability coverage for connected GitHub repos.",
+        )
+    if any(
+        term in lowered
+        for term in (
+            "rollback",
+            "if apply failed",
+            "apply failed later",
+            "tf apply",
+            "terraform apply",
+        )
+    ) and (
+        only_metrics
+        or skill_names <= {"metrics_analyzer", "drift_auditor", "cloud_posture"}
+    ):
+        return _one(
+            "terraform_executor",
+            "Explain a safe Terraform plan/apply/rollback workflow. Read-only guidance.",
+        )
+    if any(
+        term in lowered
+        for term in ("acr", "image pull", "pull fail", "revision not healthy")
+    ) and (
+        only_metrics
+        or skill_names <= {"metrics_analyzer", "drift_auditor", "cloud_posture"}
+    ):
+        return _one(
+            "infra_debugger",
+            "Explain whether ACR/image-pull is a likely deploy failure cause using live context.",
+        )
+    if (
+        ("worst" in lowered and ("summar" in lowered or "5 thing" in lowered))
+        or ("exec report" in lowered)
+    ) and (only_metrics or skill_names <= {"metrics_analyzer"}):
+        return _one(
+            "report_writer",
+            "Summarize the worst issues from this conversation's live evidence.",
+        )
+    # Short type follow-ups only keep metrics when a prior turn was metrics.
+    if (
+        only_metrics
+        and _looks_like_metrics_followup(task)
+        and not any(term in lowered for term in _METRIC_TRIGGERS)
+        and not _prior_turn_was_metrics(messages)
+    ):
+        return []
+    return steps
 
 
 def _gather_metrics_context(
@@ -628,12 +1064,27 @@ def _gather_metrics_context(
     Returns a (text_block, charts) pair; ``charts`` is empty when nothing was
     fetched.
     """
-    task_lower = task.lower()
-    if not force and not any(term in task_lower for term in _METRIC_TRIGGERS):
+    current = _current_request_text(task) or task
+    current_lower = current.lower()
+    if (
+        not force
+        and not any(term in current_lower for term in _METRIC_TRIGGERS)
+        and not _looks_like_metrics_followup(current)
+    ):
         return None, []
+    # Follow-ups like "all" / "container app" still need metrics when the prior
+    # turn asked for CPU/memory; force discovery rather than asking again.
+    if not force and _looks_like_metrics_followup(current):
+        force = True
     if not azure_infra.is_connected(project_id):
         return None, []
     resource_types, resource_name, metric_hints = _parse_metric_intent(task)
+    if azure_infra.wants_all_resources(current):
+        resource_name = None
+        if not resource_types:
+            resource_types = ["container_app"]
+        # Ensure the task text keeps the "all" signal for resource selection.
+        task = f"{task}\nScope: all matching resources"
     try:
         report = azure_infra.build_metrics_report(
             project_id,
@@ -818,7 +1269,9 @@ def _gather_live_context(
         blocks.append(logs_block)
     if logs_charts:
         charts = charts + logs_charts
-    code_block = _gather_code_context(task, project_id)
+    diagnostic = _looks_like_diagnostic_intent(task)
+    force_env = force or diagnostic
+    code_block = _gather_code_context(task, project_id, force=diagnostic)
     if code_block:
         blocks.append(code_block)
     if force_security:
@@ -829,7 +1282,28 @@ def _gather_live_context(
         blocks.extend(
             block
             for spec in _PROVIDER_SPECS
-            if (block := _provider_block(spec, force, task_lower, project_id))
+            if (block := _provider_block(spec, force_env, task_lower, project_id))
+        )
+    if diagnostic and azure_infra.is_connected(project_id):
+        blocks.insert(
+            0,
+            "DEFAULT AZURE SCOPE: the connected subscription already configured "
+            "for this project. Do NOT ask the user to choose subscription vs "
+            "resource group vs resource names — inventory the connected "
+            "subscription and compare against the fetched GitHub code.",
+        )
+    if diagnostic and github_infra.is_connected(project_id):
+        named = _extract_named_repos(task)
+        repo_note = (
+            f" Prefer repository {', '.join(named)} when present in the fetch."
+            if named
+            else " Use mapped project repositories (and any repo named in the request)."
+        )
+        blocks.insert(
+            0,
+            "DEFAULT GITHUB SCOPE: GitHub is already connected."
+            + repo_note
+            + " Do NOT ask which repository to use.",
         )
     text = "\n\n---\n\n".join(blocks) if blocks else None
     return text, charts
@@ -883,10 +1357,20 @@ def _ensure_planned_context(
         "drift_auditor",
         "code_reviewer",
         "incident_analyzer",
+        "project_analyzer",
+        "terraform_generator",
+        "infrastructure_architect",
     } and "LIVE GITHUB CODE" not in ctx:
         code = _gather_code_context(task, project_id, force=True)
         if code:
             extra.append(code)
+    if "project_analyzer" in names and "REPOSITORY ANALYSIS" not in ctx:
+        try:
+            from app.intelligence.repo_analyzer import analyze_to_prompt
+
+            extra.append(analyze_to_prompt(project_id))
+        except Exception:  # noqa: BLE001
+            pass
     if names & _SECURITY_SKILLS and "SECURITY EVIDENCE BUNDLE" not in ctx:
         security = _gather_security_context(task, project_id)
         if security:
@@ -967,20 +1451,27 @@ def _skill_args(
 ORCHESTRATOR_SYSTEM_PROMPT = (
     "You are the DevSecOps Skills Suite assistant for a managed service, "
     "helping engineers and service leads across the delivery lifecycle: "
-    "mobilise, baseline, transform, operate and improve. Answer general "
-    "questions directly and concisely. When a request would be better served "
-    "by a specialist skill (auditing a pipeline, reviewing IaC, generating "
-    "policy, triaging vulnerabilities, mapping compliance, analysing an "
-    "incident, or writing a report), briefly say so and tell the user they can "
-    "paste the relevant artefact or type '/' to invoke that skill. Never "
-    "fabricate scan data, CVEs, or metrics the user did not provide, and always "
-    "keep security and least-privilege front of mind. Provider deployment and "
-    "resource-change requests are handled as structured az/aws/gh CLI actions, "
-    "not as plain-text commands: preserve the user's target and conversation "
-    "context, ask only for missing deployment inputs, and never invent an image, "
-    "repository, region, file, or subscription. In agent mode, report the work "
-    "performed and its results; do not add an approval checkpoint or defer the "
-    "response into a second plan."
+    "mobilise, baseline, transform, operate and improve. You are project-aware: "
+    "use the PROJECT TOPOLOGY and live data already provided. Never pretend you "
+    "lack access to repos, IaC, or cloud inventory that is present in context. "
+    "Answer general questions directly and concisely. Prefer specialist skills "
+    "for audits, IaC/Terraform generation, deployments, debugging, compliance, "
+    "and reports. Never fabricate scan data, CVEs, or metrics the user did not "
+    "provide, and always keep security and least-privilege front of mind. "
+    "Provider deployment and resource-change requests are handled as structured "
+    "az/aws/gh CLI actions or Terraform workflows, not as plain-text shell "
+    "scripts: preserve the user's target and conversation context, ask only for "
+    "genuinely missing deployment inputs, and never invent an image, repository, "
+    "region, file, or subscription. For every proposed write, include a clear "
+    "rollback plan. For read-only metrics/logs/cost/inventory/drift/posture: "
+    "when Azure and/or GitHub are connected, DO NOT ask which subscription, "
+    "resource group, or repository — use PROJECT TOPOLOGY and LIVE data for "
+    "the connected subscription and mapped/named repos. When the user names a "
+    "resource type or says all/every/existing, use every matching resource. "
+    "Short follow-ups like 'container app', 'all', or 'every resource in the "
+    "code' continue the prior diagnostic. In agent mode, report the work "
+    "performed and its results; do not add an approval checkpoint or defer "
+    "the response into a second plan."
 )
 
 
@@ -995,6 +1486,60 @@ def _orchestrator_system(policy: str, live_context: Optional[str] = None) -> str
     if live_context:
         system += "\n\n" + live_context
     return system
+
+
+def _gather_project_topology(
+    project_id: str, messages: list[dict[str, Any]]
+) -> str:
+    """Build a complete project picture for planner and skill routing."""
+    from app import chat_memory
+    from app.project_context import gather_project_topology
+
+    user_messages = [
+        str(item.get("content", ""))
+        for item in messages
+        if item.get("role") == "user" and item.get("content")
+    ][-8:]
+    requirements: list[str] = []
+    # Prefer structured requirements already stored for this chat when available.
+    for item in messages:
+        content = str(item.get("content", ""))
+        if item.get("role") == "system" and "Requirements:" in content:
+            for line in content.splitlines():
+                if line.startswith("- "):
+                    requirements.append(line[2:].strip())
+    chat_id = None
+    for item in messages:
+        meta = item.get("meta") if isinstance(item.get("meta"), dict) else {}
+        if meta.get("chat_id"):
+            chat_id = str(meta["chat_id"])
+            break
+    if chat_id:
+        try:
+            requirements = chat_memory.get_requirements(chat_id) or requirements
+        except Exception:  # noqa: BLE001
+            pass
+    return gather_project_topology(
+        project_id,
+        user_messages=user_messages,
+        requirements=requirements or None,
+    )
+
+
+def _merge_context(*blocks: Optional[str]) -> Optional[str]:
+    parts = [block for block in blocks if block]
+    return "\n\n---\n\n".join(parts) if parts else None
+
+
+def _clarification_reply(questions: list[str], summary: str = "") -> str:
+    lines = [
+        "I understand the request direction, but I need a few details before I continue:",
+    ]
+    for index, question in enumerate(questions[:5], start=1):
+        lines.append(f"{index}. {question}")
+    if summary:
+        lines.extend(["", f"_Context:_ {summary}"])
+    return "\n".join(lines)
 
 
 @dataclass
@@ -1024,6 +1569,8 @@ class ChatTurn:
     agents: list[AgentRun] = field(default_factory=list)
     skills_used: list[str] = field(default_factory=list)
     charts: list[dict[str, Any]] = field(default_factory=list)
+    needs_clarification: bool = False
+    clarification_questions: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         payload = {
@@ -1032,6 +1579,8 @@ class ChatTurn:
             "agents": [asdict(a) for a in self.agents],
             "skills_used": self.skills_used,
             "charts": self.charts,
+            "needs_clarification": self.needs_clarification,
+            "clarification_questions": self.clarification_questions,
         }
         if self.plan:
             payload["plan"] = [asdict(s) for s in self.plan]
@@ -1090,24 +1639,37 @@ PLANNER_SYSTEM_PROMPT_TEMPLATE = (
     "decide — precisely — which specialist skills (if any) a user's request "
     "needs, and in what order.\n\n"
     "DECISION PROCEDURE:\n"
-    "1. Determine the user's true intent and the concrete artefacts they "
-    "provided (a pipeline file, IaC, scan output, metrics, incident signals, "
-    "a natural-language rule, etc.).\n"
+    "1. Determine the user's true intent using the current request PLUS "
+    "accumulated requirements and PROJECT TOPOLOGY. Prefer evidence already in "
+    "context over asking the user to paste files.\n"
     "2. Match intent to skills by capability, not keywords. Choose the MINIMAL "
     "set that fully satisfies the request — usually one skill. Add more only "
     "when the task genuinely has distinct sub-goals (e.g. 'audit my pipeline "
     "AND generate a hardened replacement' = two skills).\n"
-    "3. Order steps by dependency: analysis/discovery before generation; a "
-    "later step may build on an earlier step's output.\n"
-    "4. If NO skill fits — the request is a general question, a greeting, or "
-    "conversational — return an EMPTY steps list so the assistant answers "
-    "directly. Do not force an irrelevant skill.\n\n"
+    "3. Order steps by dependency: analysis/discovery before generation; "
+    "Terraform generation before execution; debug after a failed deploy.\n"
+    "4. Clarification is RARE. Set needs_clarification=true ONLY when a "
+    "state-changing write cannot proceed without a missing concrete value "
+    "(e.g. destroy vs create, missing region for a new resource). Do NOT ask "
+    "which Container App / resource name for read-only metrics, logs, cost, "
+    "inventory, drift, or posture when the user named a resource TYPE or said "
+    "all/every/existing — route to the matching skill and let live discovery "
+    "list every matching resource. NEVER ask which GitHub repo or Azure "
+    "scope (subscription vs RG vs names) when PROJECT TOPOLOGY shows those "
+    "providers connected — default to the connected subscription and mapped "
+    "or named repos. Never clarify between CPU/memory vs requests when the "
+    "user already said CPU/memory (or request metrics); include all of them.\n"
+    "5. If NO skill fits — greeting or general question — return an EMPTY "
+    "steps list so the assistant answers directly.\n\n"
     "Each step is executed by exactly one skill acting as an independent agent, "
     "so its objective must be self-contained and reference the relevant input. "
     "Never invent skills that are not in the catalog; use exact skill names.\n\n"
     "Respond ONLY with JSON of the form:\n"
     '{"reasoning": "<one or two sentences on why these skills>", '
-    '"summary": "<one sentence plan overview>", "steps": ['
+    '"summary": "<one sentence plan overview>", '
+    '"needs_clarification": false, '
+    '"clarification_questions": [], '
+    '"steps": ['
     '{"skill": "<exact skill name>", "objective": "<clear, self-contained '
     'instruction for that agent>"}]}\n\n'
     "Available skills:\n{{catalog}}"
@@ -1118,8 +1680,12 @@ PLANNER_SYSTEM_PROMPT = PLANNER_SYSTEM_PROMPT_TEMPLATE
 
 def _build_plan(
     messages: list[dict[str, Any]], live_context: Optional[str] = None
-) -> tuple[str, list[PlanStep]]:
-    """Ask the planner LLM for an ordered set of skill steps."""
+) -> tuple[str, list[PlanStep], list[str]]:
+    """Ask the planner LLM for an ordered set of skill steps.
+
+    Returns ``(summary, steps, clarification_questions)``. When clarification
+    questions are non-empty, the caller should ask the user instead of running.
+    """
     catalog = _skill_catalog_text()
     from app.prompts import get_text_prompt
 
@@ -1130,31 +1696,43 @@ def _build_plan(
     )
     if live_context:
         system_content += (
-            "\n\nIMPORTANT: The user's live data has already been fetched "
-            "(read-only) and will be handed to whichever skill you choose — this "
-            "may include real source files located in their GitHub repositories "
-            "and/or a live cloud/account inventory. Route by intent:\n"
+            "\n\nIMPORTANT: The user's live data and PROJECT TOPOLOGY have already "
+            "been fetched (read-only) and will be handed to whichever skill you "
+            "choose — this may include real source files, Terraform, and/or a live "
+            "cloud/account inventory. Route by intent:\n"
+            "- Design / generate Terraform for create/update/delete infra → "
+            "'terraform_generator' (then 'terraform_executor' when applying).\n"
+            "- End-to-end deploy / canary / rollout → 'deployment_manager'.\n"
+            "- Debug a failed deploy / apply / build → 'infra_debugger'.\n"
+            "- Deep analysis of an existing repo/app/infra layout → "
+            "'project_analyzer'.\n"
+            "- Multi-resource infra design without immediate TF → "
+            "'infrastructure_architect'.\n"
             "- Reviewing Terraform / Bicep / IaC / Kubernetes / Dockerfiles → "
             "'iac_reviewer'.\n"
             "- Reviewing CI/CD pipelines, GitHub Actions or Azure DevOps YAML "
             "pipelines → 'pipeline_auditor'.\n"
-            "- Reviewing / optimizing / refactoring / comparing APPLICATION source "
-            "code (finding bugs, code smells, improvements) → 'code_reviewer'.\n"
-            "- Comparing LIVE infra against IaC/pipelines, drift, 'what's missing "
-            "in my code', 'is my code in sync with what's deployed' → "
-            "'drift_auditor'.\n"
-            "- A failed/unhealthy container app revision, a crash, an outage, "
-            "'why did it fail', diagnosing from logs → 'incident_analyzer'.\n"
-            "- Overall live cloud/account/repository security posture → "
-            "'cloud_posture'.\n"
-            "- Billing / cost / spend / invoice questions → 'cost_analyzer'.\n"
-            "- Performance / metrics / CPU / memory / utilization / tokens / "
-            "'last 24 hours' / graph questions → 'metrics_analyzer'.\n"
-            "- Error / HTTP status counts / 4xx / 5xx / 400 / 500 / 'error rate' → "
-            "'log_analyzer'.\n"
-            "Never ask the user to paste files — the real code/inventory is "
-            "already provided below and will reach the skill you pick."
+            "- Reviewing / optimizing / refactoring APPLICATION source → "
+            "'code_reviewer'.\n"
+            "- Comparing LIVE infra against IaC/pipelines / drift / missing in "
+            "code / every resource in the code → 'drift_auditor'.\n"
+            "- Failed/unhealthy revision, crash, outage, logs → "
+            "'incident_analyzer'.\n"
+            "- Overall live cloud/account/repository security posture / public "
+            "exposure → 'cloud_posture' (pair with 'drift_auditor' when the "
+            "user also asks about IaC gaps).\n"
+            "- Billing / cost / spend → 'cost_analyzer'.\n"
+            "- Performance / metrics / CPU / memory / tokens / 'last 24 hours' / "
+            "follow-ups like 'container app' or 'all' → 'metrics_analyzer'. Do "
+            "NOT clarify the app name; live metrics below already enumerate "
+            "resources when the user asked for all or a type.\n"
+            "- Error / HTTP status counts / 4xx / 5xx → 'log_analyzer'.\n"
+            "Never ask the user to paste files that are already provided below. "
+            "Never ask which Azure app, subscription, resource group, or GitHub "
+            "repo when PROVIDERS ARE CONNECTED or LIVE/TOPOLOGY data is present "
+            "— use the connected subscription and mapped/named repositories."
         )
+        system_content += "\n\n" + live_context
     planning_messages = [
         {
             "role": "system",
@@ -1177,6 +1755,48 @@ def _build_plan(
         parsed = {}
 
     summary = parsed.get("summary", "")
+    questions = [
+        str(item).strip()
+        for item in (parsed.get("clarification_questions") or [])
+        if str(item).strip()
+    ][:5]
+    # Live telemetry/inventory/topology already answers scope — do not block on it.
+    live = live_context or ""
+    task_text = _last_user_message(messages)
+    contextual = _contextual_task(messages)
+    discoverable = any(
+        marker in live
+        for marker in (
+            "LIVE AZURE METRICS",
+            "LIVE AZURE BILLING",
+            "LIVE AZURE LOGS",
+            "ENVIRONMENT DATA",
+            "PROJECT TOPOLOGY",
+            "LIVE GITHUB CODE",
+            "DEFAULT AZURE SCOPE",
+            "DEFAULT GITHUB SCOPE",
+        )
+    )
+    questions = _filter_scope_clarifications(questions, live, contextual or task_text)
+    if parsed.get("needs_clarification") and questions and not discoverable:
+        # Still allow clarification for true write gaps, but drop questions that
+        # only ask which existing Container App / resource to pick.
+        useful = [
+            q
+            for q in questions
+            if not re.search(
+                r"which (azure )?(container )?app|which resource|app name|resource id",
+                q,
+                re.IGNORECASE,
+            )
+        ]
+        useful = _filter_scope_clarifications(useful, live, contextual or task_text)
+        if (
+            useful
+            and not _looks_like_metrics_followup(task_text)
+            and not _looks_like_diagnostic_intent(contextual or task_text)
+        ):
+            return summary, [], useful[:5]
     steps: list[PlanStep] = []
     for item in parsed.get("steps", []):
         skill_name = item.get("skill", "")
@@ -1185,33 +1805,100 @@ def _build_plan(
         steps.append(
             PlanStep(skill=skill_name, objective=item.get("objective", ""))
         )
-    return summary, steps
+    # Metrics follow-ups must hit metrics_analyzer when the CURRENT turn is a
+    # metrics ask/follow-up — never because an earlier turn left metrics in context.
+    if not steps and (
+        _looks_like_metrics_followup(task_text)
+        or any(term in task_text.lower() for term in _METRIC_TRIGGERS)
+    ):
+        steps = [
+            PlanStep(
+                skill="metrics_analyzer",
+                objective=(
+                    "Answer the user's metrics/health question from the live Azure "
+                    "Monitor data for every matching resource in scope. Do not ask "
+                    "which app to target."
+                ),
+            )
+        ]
+    steps = _correct_misrouted_steps(task_text, steps, messages)
+    # Drift / posture: connected Azure+GitHub means act, never interview.
+    if (
+        not steps
+        and not _is_ack_or_policy_nudge(task_text)
+        and (
+        _looks_like_drift_intent(task_text)
+        or _looks_like_drift_intent(contextual)
+        or _looks_like_diagnostic_intent(contextual or task_text)
+        )
+    ):
+        if _looks_like_drift_intent(task_text) or _looks_like_drift_intent(contextual):
+            steps.append(
+                PlanStep(
+                    skill="drift_auditor",
+                    objective=(
+                        "Compare the live Azure subscription inventory against the "
+                        "fetched GitHub IaC/pipelines (prefer any repo named by the "
+                        "user). Report drift, resources in cloud-only / code-only, "
+                        "and public-exposure gaps. Do not ask for Azure scope or "
+                        "repository — both are already connected."
+                    ),
+                )
+            )
+        if _looks_like_posture_intent(task_text) or _looks_like_posture_intent(
+            contextual
+        ):
+            if not any(step.skill == "cloud_posture" for step in steps):
+                steps.append(
+                    PlanStep(
+                        skill="cloud_posture",
+                        objective=(
+                            "Review live Azure/GitHub posture for public exposure "
+                            "and hardening gaps using connected inventory. Do not "
+                            "ask which subscription or repo."
+                        ),
+                    )
+                )
+        if not steps:
+            steps = [
+                PlanStep(
+                    skill="drift_auditor",
+                    objective=(
+                        "Run a read-only Azure vs GitHub drift/posture review from "
+                        "connected providers. Do not ask for scope or repo."
+                    ),
+                )
+            ]
+    return summary, steps, []
 
 
 DETAILED_PLAN_SYSTEM_PROMPT_TEMPLATE = (
     "You are a lead DevSecOps engineer scoping a piece of work and writing a "
     "DETAILED, researched plan BEFORE anything runs. You have already explored "
-    "the user's environment: any live data below (their real repositories, cloud "
-    "inventory, cost, source code, scan output) is the result of that "
-    "exploration — read it carefully and ground every statement in it. Do NOT "
-    "guess or hand-wave; if something is unknown, say precisely what you would "
-    "check and where.\n\n"
+    "the user's environment: any live data and PROJECT TOPOLOGY below (their "
+    "real repositories, cloud inventory, cost, source code, scan output, fresh "
+    "vs existing mode) is the result of that exploration — read it carefully "
+    "and ground every statement in it. Do NOT guess or hand-wave; if something "
+    "is unknown, say precisely what you would check and where.\n\n"
     "Think like an engineer picking up a ticket and produce:\n"
     "1. UNDERSTANDING — restate, in your own words, exactly what the user wants "
-    "and why.\n"
+    "and why, including whether this is a fresh or existing project.\n"
     "2. FINDINGS — what your exploration actually shows. Cite concrete specifics "
-    "from the live data (repo names, resource counts, the actual "
-    "misconfigurations, cost drivers, file paths). If no live data is present, "
-    "state what inputs you still need to proceed.\n"
+    "from the live data (repo names, resource counts, Terraform files, "
+    "misconfigurations, cost drivers, file paths).\n"
     "3. ISSUES — the specific problems, risks or gaps this work must address, "
     "each tied to evidence from the findings.\n"
-    "4. RESOLUTION — the approach you will take to resolve those issues.\n"
+    "4. RESOLUTION — the approach you will take, preferring Terraform for "
+    "infrastructure create/update/delete and including a rollback strategy.\n"
     "5. STEPS — an ordered TODO list where each item is executed by exactly ONE "
     "specialist skill (use exact catalog names). Order by dependency: "
-    "explore/analyse before generate/report; a later step may build on an "
-    "earlier one. Each step has a self-contained 'objective' (the instruction "
-    "the skill will receive) and a short 'detail' explaining what it does and "
-    "why it matters here.\n\n"
+    "explore/analyse before generate/apply; a later step may build on an "
+    "earlier one. Each step has a self-contained 'objective' and a short "
+    "'detail'.\n"
+    "6. Clarification is RARE and only for missing write inputs. When Azure/"
+    "GitHub are connected (see PROJECT TOPOLOGY / DEFAULT SCOPE notes), never "
+    "ask which subscription, resource group, or repository — use connected "
+    "defaults and named/mapped repos.\n\n"
     "If the request genuinely needs no specialist skill (a general question or "
     "greeting), return an empty steps list.\n\n"
     "Respond ONLY with JSON of the form:\n"
@@ -1219,6 +1906,8 @@ DETAILED_PLAN_SYSTEM_PROMPT_TEMPLATE = (
     '"findings": "<what exploration shows, with specifics>", '
     '"issues": ["<issue tied to evidence>", ...], '
     '"resolution": "<the approach>", '
+    '"needs_clarification": false, '
+    '"clarification_questions": [], '
     '"steps": [{"skill": "<exact skill name>", "objective": "<instruction for '
     'that agent>", "detail": "<what this step does and why>"}]}\n\n'
     "Available skills:\n{{catalog}}"
@@ -1265,6 +1954,28 @@ def _build_detailed_plan(
         parsed = json.loads(raw)
     except json.JSONDecodeError:
         parsed = {}
+
+    questions = [
+        str(item).strip()
+        for item in (parsed.get("clarification_questions") or [])
+        if str(item).strip()
+    ][:5]
+    task_text = _last_user_message(messages)
+    contextual = _contextual_task(messages)
+    questions = _filter_scope_clarifications(
+        questions, live_context, contextual or task_text
+    )
+    if (
+        parsed.get("needs_clarification")
+        and questions
+        and not _looks_like_diagnostic_intent(contextual or task_text)
+    ):
+        parsed["clarification_questions"] = questions
+        parsed["needs_clarification"] = True
+        parsed["steps"] = []
+        return parsed, []
+    parsed["needs_clarification"] = False
+    parsed["clarification_questions"] = []
 
     steps: list[PlanStep] = []
     valid_items: list[dict[str, Any]] = []
@@ -1345,7 +2056,15 @@ def _run_multi_agent(
     """Plan the task, run each step as a skill agent, then synthesise."""
     task = _last_user_message(messages)
     charts = charts or []
-    summary, steps = _build_plan(messages, live_context)
+    summary, steps, questions = _build_plan(messages, live_context)
+    if questions:
+        return ChatTurn(
+            mode="agent",
+            reply=_clarification_reply(questions, summary),
+            charts=charts,
+            needs_clarification=True,
+            clarification_questions=questions,
+        )
     live_context, charts = _ensure_planned_context(
         task, project_id, steps, live_context, charts
     )
@@ -1438,6 +2157,27 @@ def _run_plan_mode(
 ) -> ChatTurn:
     """Explore, understand the request, and produce a detailed plan — no execution."""
     parsed, steps = _build_detailed_plan(messages, live_context)
+    questions = [
+        str(item).strip()
+        for item in (parsed.get("clarification_questions") or [])
+        if str(item).strip()
+    ]
+    task = _last_user_message(messages)
+    contextual = _contextual_task(messages)
+    questions = _filter_scope_clarifications(
+        questions, live_context, contextual or task
+    )
+    if (
+        questions
+        and parsed.get("needs_clarification")
+        and not _looks_like_diagnostic_intent(contextual or task)
+    ):
+        return ChatTurn(
+            mode="plan",
+            reply=_clarification_reply(questions, parsed.get("understanding") or ""),
+            needs_clarification=True,
+            clarification_questions=questions,
+        )
     if not steps:
         understanding = (parsed.get("understanding") or "").strip()
         reply = understanding or (
@@ -1475,17 +2215,21 @@ def run_chat(
     policy = build_agent_policy(action_scope, access_level) if mode == "agent" else build_policy(action_scope, access_level)
     task = _last_user_message(messages)
     contextual_task = _contextual_task(messages)
+    topology = _gather_project_topology(project_id, messages)
     live_context, charts = _gather_live_context(
         contextual_task,
         project_id,
-        force=(skill == "cloud_posture"),
+        force=(
+            skill in {"cloud_posture", "drift_auditor"}
+            or _looks_like_diagnostic_intent(contextual_task)
+        ),
         force_cost=(skill == "cost_analyzer"),
         force_metrics=(skill == "metrics_analyzer"),
         force_logs=(skill == "log_analyzer"),
         force_security=(skill in _SECURITY_SKILLS or _is_security_task(task)),
     )
     status_context = provider_status_text(project_id, action_scope)
-    live_context = f"{live_context}\n\n---\n\n{status_context}" if live_context else status_context
+    live_context = _merge_context(topology, live_context, status_context)
     if mode == "plan":
         turn = _run_plan_mode(messages, live_context)
         turn.charts = charts
@@ -1652,17 +2396,21 @@ def run_chat_stream(
     policy = build_agent_policy(action_scope, access_level) if mode == "agent" else build_policy(action_scope, access_level)
     task = _last_user_message(messages)
     contextual_task = _contextual_task(messages)
+    topology = _gather_project_topology(project_id, messages)
     live_context, charts = _gather_live_context(
         contextual_task,
         project_id,
-        force=(skill == "cloud_posture"),
+        force=(
+            skill in {"cloud_posture", "drift_auditor"}
+            or _looks_like_diagnostic_intent(contextual_task)
+        ),
         force_cost=(skill == "cost_analyzer"),
         force_metrics=(skill == "metrics_analyzer"),
         force_logs=(skill == "log_analyzer"),
         force_security=(skill in _SECURITY_SKILLS or _is_security_task(task)),
     )
     status_context = provider_status_text(project_id, action_scope)
-    live_context = f"{live_context}\n\n---\n\n{status_context}" if live_context else status_context
+    live_context = _merge_context(topology, live_context, status_context)
 
     if mode == "plan":
         yield {"type": "status", "text": "Planning"}
@@ -1695,7 +2443,19 @@ def run_chat_stream(
         return
 
     yield {"type": "status", "text": "Analyzing request"}
-    _summary, steps = _build_plan(messages, live_context)
+    _summary, steps, questions = _build_plan(messages, live_context)
+    if questions:
+        turn = ChatTurn(
+            mode="agent",
+            reply=_clarification_reply(questions, _summary),
+            charts=charts,
+            needs_clarification=True,
+            clarification_questions=questions,
+        )
+        for word in turn.reply.split(" "):
+            yield {"type": "delta", "text": word + " "}
+        yield {"type": "final", **turn.to_dict()}
+        return
     live_context, charts = _ensure_planned_context(
         contextual_task, project_id, steps, live_context, charts
     )
@@ -1726,7 +2486,9 @@ def execute_plan_stream(
         )
         yield {"type": "final", **turn.to_dict()}
         return
+    topology = _gather_project_topology(project_id, messages)
     live_context, charts = _gather_live_context(contextual_task, project_id)
+    live_context = _merge_context(topology, live_context)
     live_context, charts = _ensure_planned_context(
         contextual_task, project_id, valid, live_context, charts
     )

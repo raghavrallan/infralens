@@ -266,6 +266,10 @@ class ChatMemory(Base):
     facts: Mapped[list[Any]] = mapped_column(JSONB, default=list)
     references: Mapped[list[Any]] = mapped_column(JSONB, default=list)
     unresolved: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    # Structured requirement / infra / deployment tracking for smart chat.
+    requirements: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    infra_state: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    deployment_outcomes: Mapped[list[Any]] = mapped_column(JSONB, default=list)
     source_message_count: Mapped[int] = mapped_column(default=0)
     version: Mapped[int] = mapped_column(default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
@@ -581,6 +585,22 @@ def _migrate() -> None:
                     )
                 except Exception:
                     pass
+
+        if "chat_memories" in tables:
+            memory_columns = {c["name"] for c in inspector.get_columns("chat_memories")}
+            for column, ddl in (
+                ("requirements", "ADD COLUMN requirements JSONB NOT NULL DEFAULT '[]'::jsonb"),
+                ("infra_state", "ADD COLUMN infra_state JSONB NOT NULL DEFAULT '{}'::jsonb"),
+                (
+                    "deployment_outcomes",
+                    "ADD COLUMN deployment_outcomes JSONB NOT NULL DEFAULT '[]'::jsonb",
+                ),
+            ):
+                if column not in memory_columns:
+                    try:
+                        conn.execute(text(f"ALTER TABLE chat_memories {ddl}"))
+                    except Exception:
+                        pass
 
 
 def ensure_tenancy_seed() -> None:

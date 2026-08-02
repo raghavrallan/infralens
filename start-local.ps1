@@ -376,6 +376,30 @@ If you see 'pg_config executable not found', delete .venv and re-run setup with 
     Write-Host ("Setup complete (Python " + $confirm + "). Next: .\start-local.ps1 start")
 }
 
+function Invoke-DockerCompose {
+    # Docker Compose writes progress to stderr; keep $ErrorActionPreference=Stop
+    # from aborting the script on successful native-command noise.
+    param(
+        [Parameter(Mandatory = $true)][string]$ArgsLine,
+        [switch]$Quiet
+    )
+
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "SilentlyContinue"
+    try {
+        if ($Quiet) {
+            cmd.exe /c ("docker compose " + $ArgsLine + " >nul 2>&1") | Out-Null
+        }
+        else {
+            cmd.exe /c ("docker compose " + $ArgsLine)
+        }
+        return [int]$LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $prevEap
+    }
+}
+
 function Start-Infra {
     if ($SkipDocker) {
         Write-Host "==> Skipping Docker infra (-SkipDocker). Expecting local Postgres/Redis."
@@ -387,14 +411,31 @@ function Start-Infra {
     }
 
     Write-Host "==> Starting Postgres + Redis (Docker)"
-    docker compose up -d postgres redis
+    $upCode = Invoke-DockerCompose -ArgsLine "up -d postgres redis"
+    if ($upCode -ne 0) {
+        # Common after Docker Desktop restarts / partial stops: containers still
+        # reference a deleted compose network ("network ... not found").
+        Write-Host "==> Compose start failed; recreating postgres/redis network and containers"
+        Invoke-DockerCompose -ArgsLine "down --remove-orphans" -Quiet | Out-Null
+        $upCode = Invoke-DockerCompose -ArgsLine "up -d --force-recreate postgres redis"
+        if ($upCode -ne 0) {
+            throw "Failed to start Docker postgres/redis. Try: docker compose down && docker compose up -d postgres redis"
+        }
+    }
 
     Write-Host "==> Waiting for Postgres..."
     $ready = $false
-    for ($i = 0; $i -lt 30; $i++) {
-        docker exec devsecops-postgres pg_isready -U devsecops -d devsecops 2>$null | Out-Null
-        if ($LASTEXITCODE -eq 0) { $ready = $true; break }
-        Start-Sleep -Seconds 1
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "SilentlyContinue"
+    try {
+        for ($i = 0; $i -lt 45; $i++) {
+            cmd.exe /c "docker exec devsecops-postgres pg_isready -U devsecops -d devsecops >nul 2>&1" | Out-Null
+            if ($LASTEXITCODE -eq 0) { $ready = $true; break }
+            Start-Sleep -Seconds 1
+        }
+    }
+    finally {
+        $ErrorActionPreference = $prevEap
     }
     if (-not $ready) {
         throw "Postgres did not become ready in time."
@@ -402,10 +443,17 @@ function Start-Infra {
 
     Write-Host "==> Waiting for Redis..."
     $ready = $false
-    for ($i = 0; $i -lt 30; $i++) {
-        docker exec devsecops-redis redis-cli ping 2>$null | Out-Null
-        if ($LASTEXITCODE -eq 0) { $ready = $true; break }
-        Start-Sleep -Seconds 1
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "SilentlyContinue"
+    try {
+        for ($i = 0; $i -lt 45; $i++) {
+            cmd.exe /c "docker exec devsecops-redis redis-cli ping >nul 2>&1" | Out-Null
+            if ($LASTEXITCODE -eq 0) { $ready = $true; break }
+            Start-Sleep -Seconds 1
+        }
+    }
+    finally {
+        $ErrorActionPreference = $prevEap
     }
     if (-not $ready) {
         throw "Redis did not become ready in time."
@@ -949,9 +997,16 @@ function Invoke-Stop {
     if (-not $SkipDocker) {
         if (Get-Command docker -ErrorAction SilentlyContinue) {
             Write-Host "==> Stopping Docker infra (postgres/redis)"
-            docker compose stop postgres redis 2>$null
+            Invoke-DockerCompose -ArgsLine "stop postgres redis" -Quiet | Out-Null
             if ($WithExecutors -or (Test-Path (Join-Path $Root "docker-compose.local-executors.yml"))) {
-                docker compose -f docker-compose.local-executors.yml down 2>$null
+                $prevEap = $ErrorActionPreference
+                $ErrorActionPreference = "SilentlyContinue"
+                try {
+                    cmd.exe /c "docker compose -f docker-compose.local-executors.yml down >nul 2>&1" | Out-Null
+                }
+                finally {
+                    $ErrorActionPreference = $prevEap
+                }
             }
         }
     }

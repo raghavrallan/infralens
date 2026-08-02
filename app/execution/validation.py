@@ -10,7 +10,9 @@ import re
 import shlex
 from typing import Any
 
-PROVIDERS = {"azure": "az", "aws": "aws", "github": "gh"}
+PROVIDERS = {"azure": "az", "aws": "aws", "github": "gh", "terraform": "terraform"}
+# Write phases that must carry a machine-executable rollback operation.
+_TF_WRITE_PHASES = {"apply", "destroy"}
 _SHELL_MARKERS = re.compile(r"[\x00\r\n|;&><$()`\\]")
 _DANGEROUS_EXECUTABLES = {"sh", "bash", "cmd", "cmd.exe", "powershell", "pwsh"}
 _SECRET_FLAGS = {"--password", "--client-secret", "--secret", "--token", "--access-key", "--secret-key"}
@@ -61,6 +63,64 @@ def _check_args(args: list[str], label: str) -> list[str]:
     return clean
 
 
+def validate_rollback_plan(
+    rollback: str,
+    *,
+    provider: str,
+    args: list[str],
+    rollback_operation: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Require a machine-executable rollback for write actions.
+
+    Accepts either a structured ``rollback_operation`` (preferred) or a JSON
+    object embedded in the rollback text. Plain prose alone is rejected.
+    """
+    if rollback_operation and isinstance(rollback_operation, dict):
+        op = rollback_operation
+    else:
+        text = str(rollback or "").strip()
+        if not text:
+            raise ValueError("Write actions require a rollback plan")
+        try:
+            parsed = json.loads(text)
+        except (TypeError, json.JSONDecodeError):
+            # Allow a concise prose plan only when it clearly names an undo command
+            # for non-terraform providers (legacy chat path). Prefer structured ops.
+            lowered = text.lower()
+            has_undo = any(
+                marker in lowered
+                for marker in ("delete", "remove", "destroy", "rollback", "revert", "undo", "az ", "aws ", "gh ", "terraform ")
+            )
+            if not has_undo or len(text) < 12:
+                raise ValueError(
+                    "Write actions require a machine-executable rollback plan "
+                    "(structured rollback_operation or JSON undo command)"
+                ) from None
+            return {"mode": "prose", "summary": text[:1000]}
+        if not isinstance(parsed, dict):
+            raise ValueError("Rollback JSON must be an object describing the undo operation")
+        op = parsed
+
+    rb_provider = str(op.get("provider") or provider)
+    rb_executable = str(op.get("executable") or PROVIDERS.get(rb_provider, ""))
+    rb_args = [str(item) for item in op.get("args", [])]
+    if rb_provider not in PROVIDERS:
+        raise ValueError("Rollback operation uses an unsupported provider")
+    if rb_executable != PROVIDERS[rb_provider]:
+        raise ValueError("Rollback executable does not match provider")
+    if not rb_args:
+        raise ValueError("Rollback operation requires args")
+    _check_args(rb_args, "rollback.args")
+    return {
+        "mode": "structured",
+        "provider": rb_provider,
+        "executable": rb_executable,
+        "args": rb_args,
+        "target": str(op.get("target") or "")[:400],
+        "summary": str(op.get("expected_result") or op.get("risk") or rollback or "")[:1000],
+    }
+
+
 def validate_operation(
     provider: str,
     executable: str,
@@ -90,6 +150,10 @@ def validate_operation(
     }
     if access_scope == "write" and (not normalized["preflight"] or not normalized["verify"]):
         raise ValueError("Write actions require both a read-before-write preflight and verification command")
+    if provider == "terraform" and access_scope == "write":
+        phase = (normalized["args"][0] if normalized["args"] else "").lower()
+        if phase not in _TF_WRITE_PHASES and "apply" not in normalized["args"] and "destroy" not in normalized["args"]:
+            raise ValueError("Terraform write actions must be apply or destroy")
     return normalized
 
 

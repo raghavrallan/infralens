@@ -29,4 +29,5 @@ Thumbs.db
 # Local browser and CLI runtime artifacts
 .playwright-mcp/
 .local-run/
+.terraform-workspaces/
 ~/

@@ -3,7 +3,7 @@ import re
 from typing import Any, Optional
 
 from app import chat_memory, chats, connections
-from app.execution import action_planner, service
+from app.execution import action_planner, cicd, debug_loop, deploy_orchestrator, service, terraform_runner
 
 _REGION_NAMES = {
     "australiaeast", "brazilsouth", "canadacentral", "centralindia", "centralus",
@@ -659,6 +659,222 @@ def _missing_location_reply(name: str, project_id: str, action_scope: str = "rea
     }
 
 
+def _terraform_intent(message: str, history: list[dict[str, str]]) -> Optional[dict[str, Any]]:
+    if not action_planner.looks_like_terraform(message, history):
+        return None
+    lowered = message.lower()
+    # Reviews / propose-only / explain asks belong to skills, not the CLI runner.
+    if action_planner.looks_like_diagnostic(message, history):
+        return None
+    advisory = any(
+        term in lowered
+        for term in (
+            "review",
+            "propose",
+            "explain",
+            "outline",
+            "recommend",
+            "list every",
+            "what resources",
+            "do not apply",
+            "don't apply",
+            "read-only",
+            "read only",
+            "guidance only",
+            "recommendations only",
+            "workflow for",
+            "how would we",
+            "how we would",
+        )
+    )
+    # Advisory / analysis language always goes to skills — never the CLI runner.
+    if advisory:
+        if any(
+            term in lowered
+            for term in (
+                "generate terraform",
+                "write terraform",
+                "create terraform",
+                "propose terraform",
+                "tf code",
+            )
+        ):
+            return {"kind": "terraform_generate"}
+        return None
+    if any(
+        term in lowered
+        for term in (
+            "terraform apply",
+            "tf apply",
+            "terraform destroy",
+            "tf destroy",
+            "run terraform",
+            "execute terraform",
+        )
+    ):
+        phase = "destroy" if "destroy" in lowered else "apply"
+        return {"kind": "terraform", "phase": phase}
+    if any(
+        term in lowered
+        for term in ("terraform plan", "tf plan", "terraform validate", "terraform init")
+    ):
+        if "validate" in lowered:
+            phase = "validate"
+        elif "init" in lowered:
+            phase = "init"
+        else:
+            phase = "plan"
+        return {"kind": "terraform", "phase": phase}
+    if any(term in lowered for term in ("generate terraform", "write terraform", "create terraform", "tf code")):
+        return {"kind": "terraform_generate"}
+    # Bare "terraform" mentions are not enough to force a CLI plan.
+    return None
+
+
+def _debug_intent(message: str) -> bool:
+    lowered = message.lower()
+    return any(
+        term in lowered
+        for term in (
+            "fix the failed",
+            "debug the",
+            "retry the failed",
+            "why did it fail",
+            "auto fix",
+            "autofix",
+        )
+    )
+
+
+def _deploy_intent(message: str, history: list[dict[str, str]] | None = None) -> bool:
+    lowered = message.lower()
+    # Outline / propose / read-only rollout plans go to deployment_manager skill.
+    if action_planner.looks_like_diagnostic(message, history):
+        return False
+    if any(
+        term in lowered
+        for term in (
+            "outline",
+            "propose",
+            "recommend",
+            "read-only",
+            "read only",
+            "do not apply",
+            "don't apply",
+            "plan for deploying",
+            "rollout plan",
+            "canary / rollout plan",
+        )
+    ) and not any(
+        term in lowered
+        for term in ("deploy now", "run deploy", "execute deploy", "start deploy")
+    ):
+        return False
+    return any(
+        term in lowered
+        for term in (
+            "deploy to",
+            "full deployment",
+            "canary",
+            "roll out",
+            "rollout",
+            "promote this release",
+        )
+    )
+
+
+def _cicd_intent(message: str) -> bool:
+    lowered = message.lower()
+    return any(
+        term in lowered
+        for term in (
+            "failed build",
+            "failed workflow",
+            "rerun workflow",
+            "re-run workflow",
+            "retry the build",
+            "github actions failed",
+        )
+    )
+
+
+def _handle_terraform_route(
+    chat_id: str,
+    project_id: str,
+    message: str,
+    action_scope: str,
+    access_level: str,
+    intent: dict[str, Any],
+) -> dict[str, Any]:
+    phase = str(intent.get("phase") or "plan")
+    if phase in {"apply", "destroy"} and action_scope != "write":
+        return {
+            "reply": (
+                f"I can prepare Terraform `{phase}` for this project, but write "
+                "actions are not enabled for this request. Switch the chat to Write "
+                "and approve the plan after review."
+            ),
+            "action": None,
+            "required_action_scope": "write",
+        }
+    if phase == "apply":
+        result = terraform_runner.pipeline(
+            project_id,
+            access_level=access_level,
+            requested_by="chat",
+        )
+        if not result.get("ok"):
+            return {
+                "reply": (
+                    "Terraform pipeline could not prepare apply: "
+                    f"{result.get('error') or 'unknown error'}. "
+                    "Generate or fix Terraform files first, then retry."
+                ),
+                "action": None,
+            }
+        action = result.get("action")
+        summary = result.get("plan_summary") or {}
+        chat_memory.record_deployment_outcome(
+            chat_id,
+            action_id=str((action or {}).get("id") or ""),
+            status=(action or {}).get("status") or "planned",
+            summary=f"terraform apply prepared add={summary.get('add')} change={summary.get('change')} destroy={summary.get('destroy')}",
+        )
+        return {
+            "reply": (
+                "I prepared a Terraform apply after init/validate/plan.\n\n"
+                f"Plan summary: {summary or 'see workspace plan output'}\n"
+                f"Exact command:\n`{(action or {}).get('command_preview')}`\n\n"
+                "Rollback is attached as a machine-executable operation. "
+                "Approve in the action panel to apply.\n\n"
+                + provider_status_text(project_id, action_scope)
+            ),
+            "action": action,
+            "event_type": "approval_required" if (action or {}).get("status") == "awaiting_approval" else "action_queued",
+        }
+    try:
+        action = terraform_runner.create_terraform_action(
+            project_id=project_id,
+            phase=phase,
+            access_level=access_level,
+            requested_by="chat",
+            why=f"Chat requested terraform {phase}",
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "reply": f"I understood the Terraform request but could not prepare it: {exc}",
+            "action": None,
+        }
+    return {
+        "reply": (
+            f"I prepared Terraform `{phase}`:\n`{action['command_preview']}`\n\n"
+            + provider_status_text(project_id, action_scope)
+        ),
+        "action": action,
+        "event_type": "approval_required" if action.get("status") == "awaiting_approval" else "action_queued",
+    }
+
+
 def handle_turn(
     chat_id: str, project_id: str, message: str, action_scope: str,
     access_level: str = "ask_approval",
@@ -707,6 +923,117 @@ def handle_turn(
             "action": pending,
             "event_type": "approval_required",
         }
+
+    history_for_route = chat_memory.get_model_context(
+        chat_id, message, project_id=project_id
+    )
+
+    if _debug_intent(message):
+        latest = _latest_action(chat_id)
+        if latest and latest.get("status") in {"failed", "verification_failed"}:
+            try:
+                from app.project_context import gather_project_topology
+
+                topology = gather_project_topology(project_id)
+                result = debug_loop.run_debug_cycle(
+                    latest["id"],
+                    chat_id=chat_id,
+                    project_context=topology,
+                    access_level=access_level,
+                )
+            except Exception as exc:  # noqa: BLE001
+                return {"reply": f"I could not prepare an auto-fix retry: {exc}", "action": latest}
+            retry = result.get("retry_action")
+            proposal = result.get("proposal") or {}
+            return {
+                "reply": (
+                    f"Debug analysis for `{latest.get('command_preview')}`:\n\n"
+                    f"- Root cause: {proposal.get('root_cause') or 'see notes'}\n"
+                    f"- Fix: {proposal.get('fix_summary') or result.get('message')}\n\n"
+                    + (
+                        f"Retry action prepared:\n`{(retry or {}).get('command_preview')}`\n\n"
+                        if retry
+                        else f"{result.get('message')}\n\n"
+                    )
+                    + provider_status_text(project_id, action_scope)
+                ),
+                "action": retry or latest,
+                "event_type": "approval_required" if retry else "action_diagnostic",
+            }
+
+    if _cicd_intent(message):
+        prepared = cicd.auto_retry_failed_builds(
+            project_id, access_level=access_level, limit=2
+        )
+        if not prepared.get("prepared"):
+            return {
+                "reply": "I looked for failed GitHub Actions runs but found none to retry.",
+                "action": None,
+            }
+        lines = ["I prepared gated re-run actions for failed CI builds:"]
+        action = None
+        for item in prepared["prepared"]:
+            if item.get("action"):
+                action = item["action"]
+                run = item.get("run") or {}
+                lines.append(
+                    f"- `{run.get('repo')}` run {run.get('id')}: `{action.get('command_preview')}`"
+                )
+            elif item.get("error"):
+                lines.append(f"- error: {item['error']}")
+        lines.append("\nApprove a write action to re-run. " + provider_status_text(project_id, action_scope))
+        return {
+            "reply": "\n".join(lines),
+            "action": action,
+            "event_type": "approval_required" if action else None,
+            "required_action_scope": "write",
+        }
+
+    if _deploy_intent(message, history_for_route):
+        if action_scope != "write":
+            return {
+                "reply": (
+                    "I can orchestrate a full deployment (validate → plan → apply → "
+                    "verify/health-check), but write scope is required. Enable Write "
+                    "actions and ask again."
+                ),
+                "action": None,
+                "required_action_scope": "write",
+            }
+        strategy = "canary" if "canary" in message.lower() else "all_at_once"
+        result = deploy_orchestrator.run_deploy_pipeline(
+            project_id,
+            strategy=strategy,
+            access_level=access_level,
+            requested_by="chat",
+        )
+        action = (result.get("pipeline") or {}).get("action")
+        plan = result.get("plan") or {}
+        stage_lines = [
+            f"- {stage.get('name')}: {stage.get('status')} — {stage.get('detail')}"
+            for stage in plan.get("stages") or []
+        ]
+        return {
+            "reply": (
+                f"Deployment plan ({plan.get('strategy')}) prepared.\n\n"
+                + "\n".join(stage_lines)
+                + (
+                    f"\n\nApply action:\n`{(action or {}).get('command_preview')}`\n"
+                    if action
+                    else "\n\nNo apply action yet — generate Terraform first.\n"
+                )
+                + "\n"
+                + provider_status_text(project_id, action_scope)
+            ),
+            "action": action,
+            "event_type": "approval_required" if (action or {}).get("status") == "awaiting_approval" else None,
+        }
+
+    tf_intent = _terraform_intent(message, history_for_route)
+    if tf_intent and tf_intent.get("kind") != "terraform_generate":
+        return _handle_terraform_route(
+            chat_id, project_id, message, action_scope, access_level, tf_intent
+        )
 
     if _CONFIRMATION.fullmatch(message.strip()) and not pending:
         spec = _pending_action_spec(chat_id)
@@ -861,7 +1188,12 @@ def handle_turn(
     diagnostic_context = action_diagnostic_context(chat_id, message)
     if diagnostic_context:
         provider_context += "\n\n" + diagnostic_context
-    planned = action_planner.plan_action(message, history, provider_context)
+    # Read-only drift/posture/review must go to the orchestrator, not the CLI
+    # action planner (which was interviewing for repo/Azure scope forever).
+    if action_planner.looks_like_diagnostic(message, history):
+        planned = None
+    else:
+        planned = action_planner.plan_action(message, history, provider_context)
     if planned is not None and planned.get("kind") != "none":
         operation = planned.get("operation") or {}
         planned_operations = [
@@ -908,13 +1240,23 @@ def handle_turn(
                 "required_action_scope": "write",
             }
         if planned.get("kind") == "clarification":
-            required_scope = "write" if operation.get("access_scope") == "write" or action_planner.looks_like_action(message, history) else None
-            return {
-                "reply": planned.get("question") or "I understand this as a provider action. Tell me the target resource and artifact so I can prepare the exact CLI operation.",
-                "action": None,
-                **({"required_action_scope": required_scope} if required_scope else {}),
-            }
-        return _create_or_hold_action(operation, project_id, action_scope, "I understood this as a provider action and prepared a structured CLI operation.", access_level)
+            question = str(planned.get("question") or "")
+            # Fall through to normal chat when the planner is just asking for
+            # connected-provider scope (repo / subscription / RG).
+            if (
+                action_planner.looks_like_diagnostic(message, history)
+                or action_planner.looks_like_scope_clarification(question)
+            ):
+                planned = None
+            else:
+                required_scope = "write" if operation.get("access_scope") == "write" or action_planner.looks_like_action(message, history) else None
+                return {
+                    "reply": question or "I understand this as a provider action. Tell me the target resource and artifact so I can prepare the exact CLI operation.",
+                    "action": None,
+                    **({"required_action_scope": required_scope} if required_scope else {}),
+                }
+        if planned is not None and planned.get("kind") != "none":
+            return _create_or_hold_action(operation, project_id, action_scope, "I understood this as a provider action and prepared a structured CLI operation.", access_level)
     if request is None:
         return None
     if not request.get("name"):

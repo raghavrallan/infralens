@@ -9,7 +9,6 @@ from typing import Any, Optional
 from sqlalchemy import delete, select
 
 from app.db import DEFAULT_PROJECT_ID, Chat, Message, SessionLocal
-from app.presentation import display_text, display_value
 
 
 def _title_from_text(text: str) -> str:
@@ -35,7 +34,7 @@ def _chat_summary(chat: Chat) -> dict[str, Any]:
     return {
         "id": chat.id,
         "project_id": chat.project_id,
-        "title": display_text(chat.title),
+        "title": chat.title,
         "created_at": chat.created_at.isoformat() if chat.created_at else None,
         "updated_at": chat.updated_at.isoformat() if chat.updated_at else None,
     }
@@ -64,8 +63,8 @@ def get_chat(chat_id: str) -> Optional[dict[str, Any]]:
             {
                 "id": m.id,
                 "role": m.role,
-                "content": display_text(m.content),
-                "meta": display_value(m.meta or {}),
+                "content": m.content,
+                "meta": m.meta or {},
             }
             for m in rows
         ]

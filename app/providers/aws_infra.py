@@ -296,3 +296,43 @@ def build_environment_report(project_id: str) -> dict[str, Any]:
             "region": creds.region,
         },
     }
+
+
+def discover_topology(project_id: str) -> dict[str, Any]:
+    """Return a structured AWS inventory with simple relationship edges.
+
+    Read-only. Used by the project context engine for existing projects.
+    """
+    creds = load_credentials(project_id)
+    session = _session(creds)
+    identity = _caller_identity(session)
+    instances, open_rules = _ec2_summary(session)
+    buckets = _s3_summary(session)
+    rds_rows = _rds_summary(session)
+    edges: list[dict[str, str]] = []
+    for inst in instances:
+        sg = str(inst.get("security_groups") or inst.get("SecurityGroups") or "")
+        if sg:
+            edges.append(
+                {
+                    "from": str(inst.get("id") or inst.get("InstanceId") or ""),
+                    "to": sg.split(",")[0].strip(),
+                    "relation": "uses_security_group",
+                }
+            )
+    return {
+        "provider": "aws",
+        "account": identity.get("Account"),
+        "region": creds.region,
+        "resource_count": len(instances) + len(buckets) + len(rds_rows),
+        "ec2": instances,
+        "s3": buckets,
+        "rds": rds_rows,
+        "open_sg_rules": open_rules,
+        "relationships": edges[:500],
+        "text": (
+            f"AWS TOPOLOGY — account {identity.get('Account')} region {creds.region}; "
+            f"ec2={len(instances)} s3={len(buckets)} rds={len(rds_rows)}; "
+            f"{len(edges)} relationship edges."
+        ),
+    }

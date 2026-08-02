@@ -451,6 +451,7 @@ def build_code_report(
     max_repos: int = 25,
     env: Optional[str] = None,
     branch: Optional[str] = None,
+    prefer_repos: Optional[list[str]] = None,
 ) -> Optional[dict[str, Any]]:
     """Locate and fetch real source files of the given kinds from the project's repos.
 
@@ -460,6 +461,9 @@ def build_code_report(
     the default — then scans that branch's tree, matches files by artifact kind
     and fetches their raw contents (read-only, bounded). Returns a formatted
     ``text`` block plus ``meta``. Returns None when no requested kind is known.
+
+    ``prefer_repos`` (``owner/name`` from chat) are prioritized; named repos are
+    also allowed even when the project has a mapped-repo allowlist.
     """
     matchers = [_CODE_MATCHERS[k] for k in kinds if k in _CODE_MATCHERS]
     if not matchers:
@@ -468,6 +472,13 @@ def build_code_report(
 
     creds = load_credentials(project_id)
     allowed = _allowed_repos(project_id)
+    preferred = {
+        str(item).strip().lower()
+        for item in (prefer_repos or [])
+        if isinstance(item, str) and "/" in item
+    }
+    if preferred and allowed is not None:
+        allowed = set(allowed) | preferred
     with _client(creds) as client:
         who = _get(client, "/user")
         if who.status_code in (401, 403):
@@ -478,10 +489,29 @@ def build_code_report(
         login = who.json().get("login") if who.status_code == 200 else creds.username
 
         repos = _filter_repos(_list_repos(client, creds), allowed)
+        if preferred:
+            present = {(r.get("full_name") or "").lower() for r in repos}
+            for name in preferred:
+                if name in present:
+                    continue
+                owner, _, repo_name = name.partition("/")
+                if not owner or not repo_name:
+                    continue
+                resp = _get(client, f"/repos/{owner}/{repo_name}")
+                if resp.status_code == 200:
+                    repos.append(resp.json())
         active = [r for r in repos if not r.get("archived")]
-        active.sort(
-            key=lambda r: 0 if (r.get("language") or "").lower() in _PRIORITY_LANGS else 1
-        )
+        if preferred:
+            active.sort(
+                key=lambda r: (
+                    0 if (r.get("full_name") or "").lower() in preferred else 1,
+                    0 if (r.get("language") or "").lower() in _PRIORITY_LANGS else 1,
+                )
+            )
+        else:
+            active.sort(
+                key=lambda r: 0 if (r.get("language") or "").lower() in _PRIORITY_LANGS else 1
+            )
 
         files: list[dict[str, Any]] = []
         scanned = 0

@@ -19,6 +19,7 @@ from app.execution.validation import (
     delete_verification_confirms_absence,
     operation_hash,
     validate_operation,
+    validate_rollback_plan,
 )
 
 TERMINAL = {"succeeded", "failed", "verification_failed", "rolled_back", "canceled"}
@@ -62,10 +63,12 @@ def _public(job: ExecutionJob, approval: Optional[ExecutionApproval] = None) -> 
         "expected_result": (job.operation or {}).get("expected_result", ""),
         "risk": (job.operation or {}).get("risk", ""),
         "rollback": (job.operation or {}).get("rollback", ""),
+        "rollback_operation": (job.operation or {}).get("rollback_operation"),
         "why": (job.operation or {}).get("why", ""),
         "blast_radius": (job.operation or {}).get("blast_radius", ""),
         "degrade_plan": (job.operation or {}).get("degrade_plan", ""),
         "preflight_summary": (job.operation or {}).get("preflight_summary", {}),
+        "cloud_provider": (job.operation or {}).get("cloud_provider", ""),
         "result": job.result or {},
         "error": job.error,
         "created_at": job.created_at.isoformat() if job.created_at else None,
@@ -102,17 +105,35 @@ def create_action(
     why: str = "",
     blast_radius: str = "",
     degrade_plan: str = "",
+    rollback_operation: dict[str, Any] | None = None,
+    cloud_provider: str = "",
 ) -> dict[str, Any]:
     if access_level not in {"ask_approval", "auto_approve", "full_access"}:
         raise ValueError("Unsupported access level")
     if access_scope == "write":
-        if not str(rollback or "").strip():
-            raise ValueError("Write actions require a rollback plan")
         if not str(risk or "").strip():
             raise ValueError("Write actions require a risk statement")
         if not str(expected_result or "").strip():
             raise ValueError("Write actions require an expected_result")
-    if connections.get_secret_fields(project_id, provider) is None:
+        rollback_plan = validate_rollback_plan(
+            rollback,
+            provider=provider,
+            args=args,
+            rollback_operation=rollback_operation,
+        )
+    else:
+        rollback_plan = {"mode": "none", "summary": str(rollback or "Not applicable")[:1000]}
+    if provider == "terraform":
+        # Terraform uses the project's cloud credentials (Azure/AWS), not a TF secret store.
+        cloud = cloud_provider or "azure"
+        if cloud not in {"azure", "aws"}:
+            raise ValueError("Terraform actions require cloud_provider azure or aws")
+        if connections.get_secret_fields(project_id, cloud) is None:
+            raise ValueError(
+                f"No {cloud} connection is configured for this project "
+                "(required for Terraform execution)"
+            )
+    elif connections.get_secret_fields(project_id, provider) is None:
         raise ValueError(f"No {provider} connection is configured for this project")
     if provider == "github" and "/" in target:
         with SessionLocal() as session:
@@ -158,13 +179,15 @@ def create_action(
     operation.update({
         "expected_result": expected_result[:1000],
         "risk": risk[:1000],
-        "rollback": rollback[:1000],
+        "rollback": (rollback_plan.get("summary") or rollback or "")[:1000],
+        "rollback_operation": rollback_plan if rollback_plan.get("mode") == "structured" else rollback_operation,
         "why": (why or risk or "")[:1000],
         "blast_radius": (blast_radius or "medium")[:32],
         "degrade_plan": (degrade_plan or "")[:1000],
         "preflight_summary": preflight_summary,
         "access_level": access_level,
         "requires_double_confirmation": access_scope == "write" and access_level == "full_access",
+        "cloud_provider": cloud_provider or "",
     })
     if preflight_expect:
         operation["preflight_expect"] = preflight_expect[:100]
@@ -433,7 +456,12 @@ def claim_for_executor(action_id: str, provider: str) -> dict[str, Any]:
         job.started_at = _now()
         _event(session, action_id, "action_started", {"provider": provider})
         session.commit()
-        fields = connections.get_secret_fields(job.project_id, provider) or {}
+        if provider == "terraform":
+            cloud = str((job.operation or {}).get("cloud_provider") or "azure")
+            fields = connections.get_secret_fields(job.project_id, cloud) or {}
+            fields = {**fields, "cloud_provider": cloud}
+        else:
+            fields = connections.get_secret_fields(job.project_id, provider) or {}
         return {"id": job.id, "project_id": job.project_id, "provider": job.provider, "operation": job.operation, "access_scope": job.access_scope, "credentials": fields}
 
 

@@ -30,7 +30,6 @@ from app.db import (
     Workflow,
     WorkflowRun,
 )
-from app.presentation import display_text
 
 
 def _default_id(session: Any) -> str | None:
@@ -75,7 +74,7 @@ def _try_execute(session: Any, statement: Any) -> bool:
 def _summary(project: Project, default_id: str | None) -> dict[str, Any]:
     return {
         "id": project.id,
-        "name": display_text(project.name),
+        "name": project.name,
         "org_id": getattr(project, "org_id", "") or "",
         "is_default": project.id == default_id,
         "repos": list(project.repos or []),

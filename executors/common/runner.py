@@ -58,7 +58,8 @@ def run_cli(
     cancel_check: Callable[[], bool] | None = None,
 ) -> CliResult:
     """Run one already validated argv array with shell execution disabled."""
-    if not argv or argv[0] not in set(PROVIDERS.values()):
+    allowed = set(PROVIDERS.values()) | {"terraform"}
+    if not argv or argv[0] not in allowed:
         raise ValueError("Only provider CLI executables may be run")
     try:
         resolved_argv = _resolve_argv(argv)

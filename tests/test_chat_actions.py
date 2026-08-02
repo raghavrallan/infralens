@@ -19,7 +19,11 @@ from app.execution.chat_actions import (
     provider_status,
     provider_status_text,
 )
-from app.execution.action_planner import looks_like_action
+from app.execution.action_planner import (
+    looks_like_action,
+    looks_like_diagnostic,
+    looks_like_scope_clarification,
+)
 
 
 class ChatActionParsingTests(unittest.TestCase):
@@ -60,15 +64,101 @@ class ChatActionParsingTests(unittest.TestCase):
     def test_unrelated_questions_do_not_create_actions(self):
         self.assertIsNone(_resource_group_request("Which Azure providers are connected?"))
 
+    def test_drift_posture_review_is_diagnostic_not_action(self):
+        msg = (
+            "Review our current Azure infrastructure posture against what's in our "
+            "GitHub repos. Call out drift, missing IaC, and risky public exposure."
+        )
+        self.assertTrue(looks_like_diagnostic(msg))
+        self.assertFalse(looks_like_action(msg, []))
+        # Follow-ups must not become actions via prior chat history.
+        history = [
+            {"role": "user", "content": msg},
+            {
+                "role": "assistant",
+                "content": "Which GitHub repository should I compare against Azure?",
+            },
+        ]
+        self.assertFalse(looks_like_action("everything broo present in code", history))
+        self.assertTrue(looks_like_diagnostic("every service present in the code"))
+        self.assertTrue(
+            looks_like_diagnostic("evrything bro just check all of it", history)
+        )
+        self.assertTrue(
+            looks_like_diagnostic(
+                "idk which repo just use whatever is mapped", history
+            )
+        )
+        self.assertFalse(
+            looks_like_action("same for the code too not just cloud", history)
+        )
+        self.assertTrue(
+            looks_like_scope_clarification(
+                "Which GitHub repository or repositories should I compare against Azure, "
+                "and which Azure scope should I assess (subscription, resource group, or "
+                "specific resource)?"
+            )
+        )
+
+    @patch("app.execution.chat_actions.action_planner.plan_action")
+    @patch("app.execution.chat_actions.chats.get_chat", return_value={"messages": []})
+    def test_diagnostic_review_skips_action_planner(self, _get_chat, plan_action):
+        result = handle_turn(
+            "chat-1",
+            "project-1",
+            "Review our Azure infrastructure posture against GitHub for drift",
+            "read_only",
+        )
+        self.assertIsNone(result)
+        plan_action.assert_not_called()
+
+    @patch(
+        "app.execution.chat_actions.action_planner.plan_action",
+        return_value={
+            "kind": "clarification",
+            "question": (
+                "Which GitHub repository or repositories should I compare against Azure, "
+                "and which Azure scope should I assess (subscription, resource group, or "
+                "specific resource)?"
+            ),
+            "needs": ["repository", "azure_scope"],
+            "operation": {},
+            "operations": [],
+        },
+    )
+    @patch("app.execution.chat_actions.chats.get_chat", return_value={"messages": []})
+    def test_scope_clarification_falls_through_to_chat(self, _get_chat, _plan):
+        # Message itself is not classified diagnostic ("create" + soft terms),
+        # but the planner's scope interview must still fall through.
+        with patch(
+            "app.execution.chat_actions.action_planner.looks_like_diagnostic",
+            return_value=False,
+        ):
+            with patch(
+                "app.execution.chat_actions.action_planner.looks_like_action",
+                return_value=True,
+            ):
+                result = handle_turn(
+                    "chat-1",
+                    "project-1",
+                    "check my azure infrastructure and github",
+                    "read_only",
+                )
+        self.assertIsNone(result)
+
     @patch("app.execution.chat_actions.action_planner.plan_action", return_value=None)
     @patch("app.execution.chat_actions.chats.get_chat", return_value={"messages": []})
     def test_normal_agent_turn_falls_back_to_chat(self, _get_chat, _plan_action):
         self.assertIsNone(handle_turn("chat-1", "project-1", "hello", "read_only"))
 
+    @patch(
+        "app.execution.chat_actions.connections.get_secret_fields",
+        return_value={"subscription_id": "sub-1"},
+    )
     @patch("app.execution.chat_actions.service.create_action")
     @patch("app.execution.chat_actions.chats.get_chat", return_value={"messages": []})
     def test_complete_resource_group_request_bypasses_generic_subscription_question(
-        self, _get_chat, create_action
+        self, _get_chat, create_action, _secret_fields
     ):
         create_action.return_value = {
             "id": "action-1",

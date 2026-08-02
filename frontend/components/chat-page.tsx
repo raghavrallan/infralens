@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, apiUrl, consumeSse } from "../lib/api";
 import { authHeaders, clearSession } from "../lib/auth";
-import { displayBrandText } from "../lib/branding";
 import { copyText } from "../lib/clipboard";
 import type { Action, ActionEvent, ChatDetail, ChatMessage, ChatSummary, ConnectionStatus, MetricChart, Project, Skill, StreamEvent } from "../lib/types";
 import { MarkdownContent } from "./markdown";
@@ -369,7 +368,7 @@ export function ChatPage() {
       }
       if (event.type === "status") setStatus(String(event.text || "Working…"));
       if (event.type === "delta") {
-        accumulated = displayBrandText(accumulated + String(event.text || ""));
+        accumulated = accumulated + String(event.text || "");
         setMessages((current) => current.map((message) => message.id === messageId ? { ...message, content: accumulated, streaming: true } : message));
       }
       if (event.type === "final") {
@@ -377,7 +376,7 @@ export function ChatPage() {
           setActionScope("write");
           window.localStorage.setItem(`actionScope:${projectId}`, "write");
         }
-        accumulated = displayBrandText(String(event.reply || accumulated));
+        accumulated = String(event.reply || accumulated);
         const responseMode: ChatMode = event.mode === "plan" ? "plan" : "agent";
         const plan = responseMode === "plan" && Array.isArray(event.plan) ? event.plan : undefined;
         const charts = Array.isArray(event.charts) ? event.charts : undefined;
@@ -515,7 +514,7 @@ export function ChatPage() {
       <div className="workspace">
         <aside className="chat-sidebar">
           <div className="project-bar"><span className="project-label">Project</span><div className="project-row">
-            <ThemedSelect className="project-select" value={projectId || ""} ariaLabel="Project" onChange={selectProject} options={projects.map((project) => ({ value: project.id, label: `${displayBrandText(project.name)}${project.is_default ? " (default)" : ""}` }))} />
+            <ThemedSelect className="project-select" value={projectId || ""} ariaLabel="Project" onChange={selectProject} options={projects.map((project) => ({ value: project.id, label: `${project.name}${project.is_default ? " (default)" : ""}` }))} />
             <button className="icon-btn" title="New project" onClick={() => setProjectModalOpen(true)}>+</button>
           </div></div>
           <button className="new-chat" onClick={() => void newChat()}>+ New chat</button>
@@ -546,7 +545,7 @@ export function ChatPage() {
             </div></div>}
             {messages.map((message) => <div className={`message ${message.role}${message.error ? " error" : ""}`} key={message.id}>
               <div className="message-role">{message.role === "user" ? "You" : "Assistant"}</div>
-              <div className="message-content">{message.role === "assistant" ? <MarkdownContent text={message.content || (message.streaming ? "Working…" : "")} /> : <span className="plain-message">{displayBrandText(message.content)}</span>}</div>
+              <div className="message-content">{message.role === "assistant" ? <MarkdownContent text={message.content || (message.streaming ? "Working…" : "")} /> : <span className="plain-message">{message.content}</span>}</div>
               {message.role === "assistant" && <MetricCharts charts={message.charts} />}
               {!message.streaming && <div className="message-actions">
                 <button type="button" className="message-action" onClick={() => void copyMessage(message)}>{copiedMessageId === message.id ? "Copied" : "Copy"}</button>
