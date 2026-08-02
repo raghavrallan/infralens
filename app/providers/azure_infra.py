@@ -681,7 +681,44 @@ _GENERIC_RESOURCE_NAMES = {
     "the connected apps",
     "container app",
     "container apps",
+    "aca",
+    "all",
+    "every",
+    "everyone",
+    "everything",
+    "existing",
+    "all of them",
+    "all apps",
+    "all container apps",
+    "every container app",
+    "everyone which exist",
+    "everyone that exists",
+    "which exist",
+    "that exist",
+    "any",
+    "any of them",
 }
+
+
+_ALL_RESOURCES_TERMS = (
+    r"\ball\b",
+    r"\bevery\b",
+    r"\beveryone\b",
+    r"\beverything\b",
+    r"\bexisting\b",
+    r"\beach\b",
+    r"\bany\b",
+    r"which exist",
+    r"that exist",
+    r"all of them",
+    r"every one",
+)
+
+
+def wants_all_resources(text: str) -> bool:
+    """True when the user asks for every matching resource, not one name."""
+    lowered = (text or "").lower()
+    return any(re.search(pattern, lowered) for pattern in _ALL_RESOURCES_TERMS)
 
 
 def _specific_resource_name(value: Any) -> Optional[str]:
@@ -689,7 +726,10 @@ def _specific_resource_name(value: Any) -> Optional[str]:
     if not isinstance(value, str):
         return None
     name = re.sub(r"\s+", " ", value).strip()
-    return None if name.lower() in _GENERIC_RESOURCE_NAMES else name or None
+    lowered = name.lower()
+    if lowered in _GENERIC_RESOURCE_NAMES or wants_all_resources(lowered):
+        return None
+    return name or None
 
 
 # Names that make a good generic default when the user asks broadly for "metrics".
@@ -735,9 +775,24 @@ def _infer_metric_hints(text: str) -> list[str]:
 
 
 def _select_resources(text: str, resources: list[dict[str, Any]], limit: int = 3):
-    """Prefer resources whose name the user named; otherwise take the first few."""
+    """Prefer resources whose name the user named; otherwise take the first few.
+
+    When the user asks for all/every existing resource, return a larger set so
+    the chat does not pretend it needs a single app name.
+    """
     lowered = (text or "").lower()
-    named = [r for r in resources if (r.get("name") or "").lower() in lowered]
+    if wants_all_resources(lowered):
+        limit = max(limit, 25)
+    named = [
+        r
+        for r in resources
+        if (r.get("name") or "").lower()
+        and (r.get("name") or "").lower() in lowered
+        and not wants_all_resources((r.get("name") or ""))
+    ]
+    # Ignore accidental matches on tiny substrings when the user said "all".
+    if wants_all_resources(lowered):
+        named = []
     return (named or resources)[:limit]
 
 
@@ -944,7 +999,19 @@ def build_metrics_report(
         )
 
     selected = _select_resources(task, resources)
-    hints = metric_hints or _infer_metric_hints(task)
+    hints = list(metric_hints or []) or _infer_metric_hints(task)
+    # Broad health asks ("CPU/memory or request metrics") should cover the common set.
+    lowered_task = (task or "").lower()
+    if any(term in lowered_task for term in ("health", "cpu", "memory")) and (
+        "request" in lowered_task or "or request" in lowered_task or wants_all_resources(lowered_task)
+    ):
+        for hint in ("cpu", "memory", "requests"):
+            if hint not in hints:
+                hints.append(hint)
+    elif any(term in lowered_task for term in ("cpu", "memory")):
+        for hint in ("cpu", "memory"):
+            if hint not in hints:
+                hints.append(hint)
     hints = hints[:_MAX_METRICS]
 
     ca_resources = [
@@ -1565,4 +1632,128 @@ def build_logs_report(
             "window": label,
             "workspace": workspace,
         },
+    }
+
+
+_RELATIONSHIP_QUERY = (
+    "Resources "
+    "| extend parent = tostring(properties.parent) "
+    "| project name, type, resourceGroup, location, "
+    "vnet=tostring(properties.virtualNetwork.id), "
+    "subnet=tostring(properties.subnet.id), "
+    "nsg=tostring(properties.networkSecurityGroup.id), "
+    "identity=tostring(identity.type) "
+    "| order by resourceGroup asc, type asc "
+    "| limit 400"
+)
+
+
+def discover_topology(project_id: str, max_resources: int = 400) -> dict[str, Any]:
+    """Return a structured Azure resource inventory with relationship fields.
+
+    Used by the project context engine and existing-project analyzer. Read-only.
+    """
+    creds = load_credentials(project_id)
+    token = _get_token(creds)
+    if not token:
+        raise AzureApiError("Azure returned an empty access token.")
+    subs = [creds.subscription_id] if creds.subscription_id else []
+    inventory = _run_query(token, subs, _RELATIONSHIP_QUERY)
+    if max_resources:
+        inventory = inventory[:max_resources]
+    by_rg: dict[str, list[dict[str, Any]]] = {}
+    edges: list[dict[str, str]] = []
+    for row in inventory:
+        rg = str(row.get("resourceGroup") or "unknown")
+        by_rg.setdefault(rg, []).append(row)
+        name = str(row.get("name") or "")
+        for field, relation in (
+            ("vnet", "uses_vnet"),
+            ("subnet", "uses_subnet"),
+            ("nsg", "uses_nsg"),
+        ):
+            target = str(row.get(field) or "").strip()
+            if target and target.lower() not in {"", "null", "none"}:
+                edges.append(
+                    {
+                        "from": f"{rg}/{name}",
+                        "to": target.split("/")[-1],
+                        "relation": relation,
+                    }
+                )
+    return {
+        "provider": "azure",
+        "subscription": creds.subscription_id,
+        "resource_count": len(inventory),
+        "resource_groups": sorted(by_rg.keys()),
+        "resources": inventory,
+        "relationships": edges[:500],
+        "text": (
+            f"AZURE TOPOLOGY — subscription {creds.subscription_id or 'unknown'}; "
+            f"{len(inventory)} resources across {len(by_rg)} resource groups; "
+            f"{len(edges)} relationship edges.\n"
+            + _format_rows(inventory, limit=min(max_resources, 120))
+        ),
+    }
+
+
+_RELATIONSHIP_QUERY = (
+    "Resources "
+    "| extend parent = tostring(properties.parent) "
+    "| project name, type, resourceGroup, location, "
+    "vnet=tostring(properties.virtualNetwork.id), "
+    "subnet=tostring(properties.subnet.id), "
+    "nsg=tostring(properties.networkSecurityGroup.id), "
+    "identity=tostring(identity.type) "
+    "| order by resourceGroup asc, type asc "
+    "| limit 400"
+)
+
+
+def discover_topology(project_id: str, max_resources: int = 400) -> dict[str, Any]:
+    """Return a structured Azure resource inventory with relationship fields.
+
+    Used by the project context engine and existing-project analyzer. Read-only.
+    """
+    creds = load_credentials(project_id)
+    token = _get_token(creds)
+    if not token:
+        raise AzureApiError("Azure returned an empty access token.")
+    subs = [creds.subscription_id] if creds.subscription_id else []
+    inventory = _run_query(token, subs, _RELATIONSHIP_QUERY)
+    if max_resources:
+        inventory = inventory[:max_resources]
+    by_rg: dict[str, list[dict[str, Any]]] = {}
+    edges: list[dict[str, str]] = []
+    for row in inventory:
+        rg = str(row.get("resourceGroup") or "unknown")
+        by_rg.setdefault(rg, []).append(row)
+        name = str(row.get("name") or "")
+        for field, relation in (
+            ("vnet", "uses_vnet"),
+            ("subnet", "uses_subnet"),
+            ("nsg", "uses_nsg"),
+        ):
+            target = str(row.get(field) or "").strip()
+            if target and target.lower() not in {"", "null", "none"}:
+                edges.append(
+                    {
+                        "from": f"{rg}/{name}",
+                        "to": target.split("/")[-1],
+                        "relation": relation,
+                    }
+                )
+    return {
+        "provider": "azure",
+        "subscription": creds.subscription_id,
+        "resource_count": len(inventory),
+        "resource_groups": sorted(by_rg.keys()),
+        "resources": inventory,
+        "relationships": edges[:500],
+        "text": (
+            f"AZURE TOPOLOGY — subscription {creds.subscription_id or 'unknown'}; "
+            f"{len(inventory)} resources across {len(by_rg)} resource groups; "
+            f"{len(edges)} relationship edges.\n"
+            + _format_rows(inventory, limit=min(max_resources, 120))
+        ),
     }

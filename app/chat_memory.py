@@ -41,10 +41,17 @@ _SECRET_FLAG = re.compile(
 MEMORY_SYSTEM_PROMPT = """You maintain compact memory for one DevSecOps chat.
 Extract only facts explicitly supported by the transcript. Preserve concrete
 resources, repositories, metrics, chart requests, regions, findings, pending
-questions, decisions, and action IDs. Do not invent values. Never store
-credentials, tokens, keys, passwords, or authorization headers. Return only
-JSON with this shape: {"summary":"", "facts":[], "references":[],
-"unresolved":[]}. Keep each item concise."""
+questions, decisions, action IDs, infrastructure requirements, components
+discussed/planned/deployed, and deployment outcomes. Do not invent values.
+Never store credentials, tokens, keys, passwords, or authorization headers.
+Return only JSON with this shape:
+{"summary":"", "facts":[], "references":[], "unresolved":[],
+ "requirements":[], "infra_state":{"discussed":[], "planned":[], "deployed":[]},
+ "deployment_outcomes":[]}.
+requirements: durable user goals for infra/app delivery.
+infra_state.discussed/planned/deployed: short component labels.
+deployment_outcomes: short outcome lines like "action_id=... succeeded|failed".
+Keep each item concise."""
 
 
 def _memory_system_prompt() -> str:
@@ -105,6 +112,15 @@ def _clean_items(value: Any) -> list[str]:
     return result
 
 
+def _normalise_infra_state(value: Any) -> dict[str, list[str]]:
+    raw = value if isinstance(value, dict) else {}
+    return {
+        "discussed": _clean_items(raw.get("discussed")),
+        "planned": _clean_items(raw.get("planned")),
+        "deployed": _clean_items(raw.get("deployed")),
+    }
+
+
 def _normalise(parsed: Any) -> dict[str, Any]:
     parsed = parsed if isinstance(parsed, dict) else {}
     return {
@@ -112,6 +128,9 @@ def _normalise(parsed: Any) -> dict[str, Any]:
         "facts": _clean_items(parsed.get("facts")),
         "references": _clean_items(parsed.get("references")),
         "unresolved": _clean_items(parsed.get("unresolved")),
+        "requirements": _clean_items(parsed.get("requirements")),
+        "infra_state": _normalise_infra_state(parsed.get("infra_state")),
+        "deployment_outcomes": _clean_items(parsed.get("deployment_outcomes")),
     }
 
 
@@ -134,21 +153,32 @@ def _transcript(chat_id: str) -> tuple[Optional[Chat], list[dict[str, Any]]]:
 
 def get_memory(chat_id: str) -> Optional[dict[str, Any]]:
     """Load memory only when it belongs to the chat's current project."""
-    with SessionLocal() as session:
-        chat = session.get(Chat, chat_id)
-        memory = session.get(ChatMemory, chat_id)
-        if chat is None or memory is None or memory.project_id != chat.project_id:
-            return None
-        return {
-            "chat_id": memory.chat_id,
-            "project_id": memory.project_id,
-            "summary": memory.summary or "",
-            "facts": memory.facts or [],
-            "references": memory.references or [],
-            "unresolved": memory.unresolved or [],
-            "source_message_count": memory.source_message_count,
-            "version": memory.version,
-        }
+    try:
+        with SessionLocal() as session:
+            chat = session.get(Chat, chat_id)
+            memory = session.get(ChatMemory, chat_id)
+            if chat is None or memory is None or memory.project_id != chat.project_id:
+                return None
+            return {
+                "chat_id": memory.chat_id,
+                "project_id": memory.project_id,
+                "summary": memory.summary or "",
+                "facts": memory.facts or [],
+                "references": memory.references or [],
+                "unresolved": memory.unresolved or [],
+                "requirements": getattr(memory, "requirements", None) or [],
+                "infra_state": getattr(memory, "infra_state", None)
+                or {
+                    "discussed": [],
+                    "planned": [],
+                    "deployed": [],
+                },
+                "deployment_outcomes": getattr(memory, "deployment_outcomes", None) or [],
+                "source_message_count": memory.source_message_count,
+                "version": memory.version,
+            }
+    except Exception:  # noqa: BLE001 - schema lag must not break chat routing
+        return None
 
 
 def render_model_context(
@@ -165,8 +195,20 @@ def render_model_context(
             ("Facts", "facts"),
             ("References", "references"),
             ("Unresolved items", "unresolved"),
+            ("Requirements", "requirements"),
+            ("Deployment outcomes", "deployment_outcomes"),
         ):
             items = _clean_items(memory.get(key))
+            if items:
+                lines.append(f"{label}:")
+                lines.extend(f"- {item}" for item in items)
+        infra_state = memory.get("infra_state") if isinstance(memory.get("infra_state"), dict) else {}
+        for label, key in (
+            ("Infra discussed", "discussed"),
+            ("Infra planned", "planned"),
+            ("Infra deployed", "deployed"),
+        ):
+            items = _clean_items(infra_state.get(key))
             if items:
                 lines.append(f"{label}:")
                 lines.extend(f"- {item}" for item in items)
@@ -304,6 +346,9 @@ def refresh_memory(chat_id: str) -> Optional[dict[str, Any]]:
                 facts=data["facts"],
                 references=data["references"],
                 unresolved=data["unresolved"],
+                requirements=data["requirements"],
+                infra_state=data["infra_state"],
+                deployment_outcomes=data["deployment_outcomes"],
                 source_message_count=len(messages),
                 version=1,
             )
@@ -314,6 +359,9 @@ def refresh_memory(chat_id: str) -> Optional[dict[str, Any]]:
             memory.facts = data["facts"]
             memory.references = data["references"]
             memory.unresolved = data["unresolved"]
+            memory.requirements = data["requirements"]
+            memory.infra_state = data["infra_state"]
+            memory.deployment_outcomes = data["deployment_outcomes"]
             memory.source_message_count = len(messages)
             memory.version = (memory.version or 0) + 1
         session.commit()
@@ -324,9 +372,52 @@ def refresh_memory(chat_id: str) -> Optional[dict[str, Any]]:
             "facts": memory.facts or [],
             "references": memory.references or [],
             "unresolved": memory.unresolved or [],
+            "requirements": memory.requirements or [],
+            "infra_state": memory.infra_state or {},
+            "deployment_outcomes": memory.deployment_outcomes or [],
             "source_message_count": memory.source_message_count,
             "version": memory.version,
         }
+
+
+def get_requirements(chat_id: str) -> list[str]:
+    memory = get_memory(chat_id)
+    return _clean_items((memory or {}).get("requirements"))
+
+
+def record_deployment_outcome(
+    chat_id: str,
+    *,
+    action_id: str,
+    status: str,
+    summary: str = "",
+) -> None:
+    """Append a deployment outcome without waiting for full summarisation."""
+    memory = get_memory(chat_id)
+    if memory is None:
+        return
+    outcomes = _clean_items(memory.get("deployment_outcomes"))
+    line = _clip(
+        f"action_id={action_id} status={status}"
+        + (f" summary={summary}" if summary else "")
+    )
+    if line and line not in outcomes:
+        outcomes.append(line)
+    infra_state = _normalise_infra_state(memory.get("infra_state"))
+    if status == "succeeded" and summary:
+        deployed = infra_state.get("deployed") or []
+        label = _clip(summary, 200)
+        if label and label not in deployed:
+            deployed.append(label)
+            infra_state["deployed"] = deployed[:MAX_ITEMS]
+    with SessionLocal() as session:
+        row = session.get(ChatMemory, chat_id)
+        if row is None:
+            return
+        row.deployment_outcomes = outcomes[:MAX_ITEMS]
+        row.infra_state = infra_state
+        row.version = (row.version or 0) + 1
+        session.commit()
 
 
 def rebuild_memory(chat_id: str) -> Optional[dict[str, Any]]:

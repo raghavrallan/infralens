@@ -71,6 +71,21 @@ def _auth_env(provider: str, credentials: dict[str, Any], temp_dir: str) -> dict
         env["GH_TOKEN"] = str(credentials.get("token", ""))
         if credentials.get("repo"):
             env["GH_REPO"] = str(credentials["repo"])
+    elif provider == "terraform":
+        # Terraform inherits cloud credentials from the linked Azure/AWS connection.
+        cloud = str(credentials.get("cloud_provider") or "azure")
+        if cloud == "aws":
+            env.update({
+                "AWS_ACCESS_KEY_ID": str(credentials.get("access_key_id", "")),
+                "AWS_SECRET_ACCESS_KEY": str(credentials.get("secret_access_key", "")),
+                "AWS_DEFAULT_REGION": str(credentials.get("region", "us-east-1")),
+            })
+        else:
+            env["AZURE_CONFIG_DIR"] = temp_dir
+            env["ARM_CLIENT_ID"] = str(credentials.get("client_id", ""))
+            env["ARM_CLIENT_SECRET"] = str(credentials.get("client_secret", ""))
+            env["ARM_TENANT_ID"] = str(credentials.get("tenant_id", ""))
+            env["ARM_SUBSCRIPTION_ID"] = str(credentials.get("subscription_id", ""))
     return env
 
 
@@ -244,7 +259,11 @@ def _run(
             list(step.get("verify", [])),
         )
 
-    if provider == "azure":
+    if provider == "azure" or (
+        provider == "terraform"
+        and str(credentials.get("cloud_provider") or "azure") == "azure"
+        and credentials.get("client_id")
+    ):
         login = run_cli(["az", "login", "--service-principal", "--username", str(credentials.get("client_id", "")), "--password", str(credentials.get("client_secret", "")), "--tenant", str(credentials.get("tenant_id", "")), "--output", "none"], env, cancel_check=cancel_check)
         emit("azure_login", login)
         if login.canceled:
