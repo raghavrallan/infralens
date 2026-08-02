@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../lib/api";
-import { displayBrandText } from "../lib/branding";
 import type {
   Approval,
   Catalog,
@@ -221,7 +220,7 @@ export function DashboardPage() {
     window.localStorage.setItem("projectId", projectId);
     window.localStorage.setItem(
       "pendingPrompt",
-      `Explain this finding and how to fix it safely.\n\nSkill: ${prettyName(finding.skill)}\nSeverity: ${finding.severity}\nTitle: ${displayBrandText(finding.title)}\n${finding.evidence ? `Evidence: ${displayBrandText(finding.evidence)}` : ""}`,
+      `Explain this finding and how to fix it safely.\n\nSkill: ${prettyName(finding.skill)}\nSeverity: ${finding.severity}\nTitle: ${finding.title}\n${finding.evidence ? `Evidence: ${finding.evidence}` : ""}`,
     );
     window.location.href = "/";
   };
@@ -319,7 +318,7 @@ export function DashboardPage() {
                 onChange={selectProject}
                 options={projects.map((project) => ({
                   value: project.id,
-                  label: `${displayBrandText(project.name)}${project.is_default ? " (default)" : ""}`,
+                  label: `${project.name}${project.is_default ? " (default)" : ""}`,
                 }))}
               />
             </label>
@@ -619,11 +618,11 @@ export function DashboardPage() {
                         </span>
                       )}
                     </div>
-                    <div className="finding-title">{displayBrandText(finding.title)}</div>
+                    <div className="finding-title">{finding.title}</div>
                     <div className="finding-meta">
                       <span>{prettyName(finding.skill)}</span>
                       {finding.resource && (
-                        <span title={displayBrandText(finding.resource)}>{displayBrandText(finding.resource)}</span>
+                        <span title={finding.resource}>{finding.resource}</span>
                       )}
                       <span>blast: {finding.blast_radius || "—"}</span>
                       {(finding.occurrence_count || 1) > 1 && (
@@ -636,13 +635,13 @@ export function DashboardPage() {
                       {finding.evidence && (
                         <>
                           <span className="label">Evidence</span>
-                          {displayBrandText(finding.evidence)}
+                          {finding.evidence}
                         </>
                       )}
                       {finding.recommended_action && (
                         <>
                           <span className="label">Recommended action</span>
-                          {displayBrandText(finding.recommended_action)}
+                          {finding.recommended_action}
                         </>
                       )}
                     </div>
@@ -950,8 +949,8 @@ export function DashboardPage() {
               {runModal.findings?.length ? (
                 runModal.findings.map((finding) => (
                   <div className="finding-card" key={finding.id}>
-                    <div className="finding-title">{displayBrandText(finding.title)}</div>
-                    <div className="finding-body">{displayBrandText(finding.evidence)}</div>
+                    <div className="finding-title">{finding.title}</div>
+                    <div className="finding-body">{finding.evidence}</div>
                   </div>
                 ))
               ) : (
