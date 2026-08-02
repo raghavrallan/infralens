@@ -516,13 +516,30 @@ def _migrate() -> None:
                     {"default_id": DEFAULT_PROJECT_ID},
                 ).scalar()
             if default_id is None:
+                # Ensure the seeded org exists before inserting the default project.
                 conn.execute(
                     text(
-                        "INSERT INTO projects (id, name, repos, created_at, updated_at) "
-                        "VALUES (:id, :name, '[]'::jsonb, now(), now()) "
+                        "INSERT INTO organizations (id, name, slug, created_by, created_at, updated_at) "
+                        "VALUES (:id, :name, :slug, '', now(), now()) "
                         "ON CONFLICT (id) DO NOTHING"
                     ),
-                    {"id": DEFAULT_PROJECT_ID, "name": "Default project"},
+                    {
+                        "id": DEFAULT_ORG_ID,
+                        "name": "InfraLens",
+                        "slug": DEFAULT_ORG_SLUG,
+                    },
+                )
+                conn.execute(
+                    text(
+                        "INSERT INTO projects (id, org_id, name, repos, created_at, updated_at) "
+                        "VALUES (:id, :org_id, :name, '[]'::jsonb, now(), now()) "
+                        "ON CONFLICT (id) DO NOTHING"
+                    ),
+                    {
+                        "id": DEFAULT_PROJECT_ID,
+                        "org_id": DEFAULT_ORG_ID,
+                        "name": "Default project",
+                    },
                 )
                 default_id = DEFAULT_PROJECT_ID
 
