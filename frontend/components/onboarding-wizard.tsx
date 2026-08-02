@@ -45,6 +45,66 @@ const STEP_BACK: Partial<Record<Step, Step>> = {
   done: "azure",
 };
 
+const FLOW_STEPS: { id: Step; label: string }[] = [
+  { id: "welcome", label: "Welcome" },
+  { id: "path", label: "Project" },
+  { id: "github", label: "GitHub" },
+  { id: "repos", label: "Repos" },
+  { id: "azure", label: "Azure" },
+  { id: "done", label: "Done" },
+];
+
+function stepIndex(step: Step, path: PathId): number {
+  if (step === "welcome") return 0;
+  if (step === "path") return 1;
+  if (step === "github") return 2;
+  if (step === "repos" || step === "create-repo") return 3;
+  if (step === "azure") return 4;
+  if (step === "done") return 5;
+  return path === "new" ? 3 : 3;
+}
+
+function IconGithub({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2Z" />
+    </svg>
+  );
+}
+
+function IconAzure({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M13.05 4.24 6.02 19.76h4.14l1.65-3.88h5.44l-4.2-11.64Zm1.18 2.9 3.02 8.38h-3.66l-.98-2.72-.93 2.72H8.5l5.73-8.38Z" />
+    </svg>
+  );
+}
+
+function IconFolder({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
+    </svg>
+  );
+}
+
+function IconPlus({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 8v8M8 12h8" />
+    </svg>
+  );
+}
+
+function IconCheck({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true">
+      <path d="M5 12.5 10 17.5 19 7" />
+    </svg>
+  );
+}
+
 export function OnboardingWizard({
   onClose,
   onFinished,
@@ -86,14 +146,12 @@ export function OnboardingWizard({
     void api<AuthOptions>("/api/providers/auth-options")
       .then((opts) => {
         setAuthOptions(opts);
-        // Prefer PAT when OAuth env is missing so the primary path works.
         if (opts.github.oauth) setGhMethod("oauth");
         else setGhMethod("token");
         if (opts.azure.oauth) setAzMethod("oauth");
       })
       .catch(() => undefined);
 
-    // Resume after GitHub OAuth callback → /onboarding?oauth=github&ok=1&project_id=
     const params = new URLSearchParams(window.location.search);
     if (params.get("oauth") === "github") {
       const pid = params.get("project_id") || "";
@@ -111,15 +169,55 @@ export function OnboardingWizard({
     }
   }, []);
 
-  const title = useMemo(() => {
-    if (step === "welcome") return "Welcome to InfraLens";
-    if (step === "path") return "Choose how to start";
-    if (step === "github") return "Connect GitHub";
-    if (step === "repos") return "Select repositories";
-    if (step === "create-repo") return "Create a GitHub repository";
-    if (step === "azure") return "Connect Azure (optional)";
-    return "You're set";
+  const copy = useMemo(() => {
+    if (step === "welcome") {
+      return {
+        title: "Welcome to InfraLens",
+        desc: "Connect GitHub, map repositories, and optionally link Azure — then open gated delivery workflows.",
+      };
+    }
+    if (step === "path") {
+      return {
+        title: "Set up your project",
+        desc: "Name the workspace and choose whether you’ll map existing repos or create a new one.",
+      };
+    }
+    if (step === "github") {
+      return {
+        title: "Connect GitHub",
+        desc: "Authorize with SSO or a personal access token so InfraLens can list and link repositories.",
+      };
+    }
+    if (step === "repos") {
+      return {
+        title: "Select repositories",
+        desc: "Pick one or more repos to attach to this project. You can change this later in Settings.",
+      };
+    }
+    if (step === "create-repo") {
+      return {
+        title: "Create a repository",
+        desc: "InfraLens will create the repo on GitHub, then link it to your project.",
+      };
+    }
+    if (step === "azure") {
+      return {
+        title: "Connect Azure",
+        desc: "Optional — link a subscription for cloud-aware delivery. You can skip and add this later.",
+      };
+    }
+    return {
+      title: "You're set",
+      desc: "Your project is ready. Jump into delivery: docs → architecture → Terraform.",
+    };
   }, [step]);
+
+  const activeStep = stepIndex(step, path);
+  const progressLabels = useMemo(() => {
+    return FLOW_STEPS.map((s) =>
+      s.id === "repos" ? (path === "new" ? "Create" : "Repos") : s.label,
+    );
+  }, [path]);
 
   const goBack = () => {
     setMessage("");
@@ -272,8 +370,8 @@ export function OnboardingWizard({
     setMessage("");
     try {
       const pid = await ensureProject();
-      const repos = selected.length ? selected : [];
-      if (path === "existing" && !repos.length) {
+      const linked = selected.length ? selected : [];
+      if (path === "existing" && !linked.length) {
         setMessage("Select at least one repository.");
         setBusy(false);
         return;
@@ -282,10 +380,10 @@ export function OnboardingWizard({
         method: "PATCH",
         body: JSON.stringify({ name: projectName.trim() || "InfraLens project" }),
       });
-      if (repos.length) {
+      if (linked.length) {
         await api(`/api/projects/${pid}/repos`, {
           method: "PUT",
-          body: JSON.stringify({ repos }),
+          body: JSON.stringify({ repos: linked }),
         });
       }
       await api("/api/onboarding/complete", {
@@ -294,7 +392,7 @@ export function OnboardingWizard({
           path,
           project_id: pid,
           project_name: projectName.trim() || "InfraLens project",
-          repos,
+          repos: linked,
           azure_connected: azureConnected,
           github_connected: true,
         }),
@@ -311,217 +409,302 @@ export function OnboardingWizard({
     if (onClose && !busy && !force) onClose();
   };
 
-  const BackBtn = () =>
-    STEP_BACK[step] || step === "azure" ? (
-      <button type="button" className="modal-btn ghost" disabled={busy} onClick={goBack}>
-        Back
-      </button>
-    ) : null;
+  const canGoBack = Boolean(STEP_BACK[step] || step === "azure");
 
   const body = (
-      <div className={`modal-body onboarding-wizard${asPage ? " onboarding-wizard-page" : ""}`}>
-        {step === "welcome" && (
-          <>
-            <p>
-              InfraLens maps your repos and cloud accounts into gated delivery workflows with
-              role-aware approvals.
-            </p>
-            <div className="modal-actions">
-              <button type="button" className="modal-btn primary" onClick={() => setStep("path")}>
-                Continue
-              </button>
-            </div>
-          </>
-        )}
+    <div className={`ob-body${asPage ? " ob-body-page" : ""}`} key={step}>
+      {step === "welcome" && (
+        <>
+          <ul className="ob-highlights">
+            <li>
+              <span className="ob-highlight-icon">
+                <IconGithub />
+              </span>
+              <div>
+                <strong>Connect GitHub</strong>
+                <span>OAuth SSO or personal access token</span>
+              </div>
+            </li>
+            <li>
+              <span className="ob-highlight-icon">
+                <IconFolder />
+              </span>
+              <div>
+                <strong>Map repositories</strong>
+                <span>Existing repos or create a new one</span>
+              </div>
+            </li>
+            <li>
+              <span className="ob-highlight-icon">
+                <IconAzure />
+              </span>
+              <div>
+                <strong>Optional Azure</strong>
+                <span>Link a subscription when you’re ready</span>
+              </div>
+            </li>
+          </ul>
+          <div className="ob-actions">
+            <button type="button" className="ob-btn primary" onClick={() => setStep("path")}>
+              Get started
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
+                <path d="M5 12h14M12 5l7 7-7 7" />
+              </svg>
+            </button>
+          </div>
+        </>
+      )}
 
-        {step === "path" && (
-          <>
-            <label className="modal-label">
-              <span>Project name</span>
-              <input
-                value={projectName}
-                onChange={(e) => setProjectName(e.target.value)}
-                placeholder="platform-security"
-              />
-            </label>
-            <div className="onboard-paths">
-              <button
-                type="button"
-                className={`onboard-path${path === "existing" ? " active" : ""}`}
-                onClick={() => setPath("existing")}
-              >
+      {step === "path" && (
+        <>
+          <label className="ob-field">
+            <span>Project name</span>
+            <input
+              value={projectName}
+              onChange={(e) => setProjectName(e.target.value)}
+              placeholder="platform-security"
+              autoFocus
+            />
+          </label>
+          <div className="ob-paths" role="radiogroup" aria-label="How to start">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={path === "existing"}
+              className={`ob-path${path === "existing" ? " active" : ""}`}
+              onClick={() => setPath("existing")}
+            >
+              <span className="ob-path-icon">
+                <IconFolder />
+              </span>
+              <span className="ob-path-copy">
                 <strong>Existing GitHub repo</strong>
                 <span>Connect and select repositories you already have.</span>
-              </button>
-              <button
-                type="button"
-                className={`onboard-path${path === "new" ? " active" : ""}`}
-                onClick={() => setPath("new")}
-              >
+              </span>
+              <span className="ob-path-check" aria-hidden="true">
+                <IconCheck />
+              </span>
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={path === "new"}
+              className={`ob-path${path === "new" ? " active" : ""}`}
+              onClick={() => setPath("new")}
+            >
+              <span className="ob-path-icon">
+                <IconPlus />
+              </span>
+              <span className="ob-path-copy">
                 <strong>Create new GitHub repo</strong>
-                <span>InfraLens creates a repo on your account, then links the project.</span>
+                <span>InfraLens creates a repo, then links the project.</span>
+              </span>
+              <span className="ob-path-check" aria-hidden="true">
+                <IconCheck />
+              </span>
+            </button>
+          </div>
+          <div className="ob-actions">
+            {canGoBack ? (
+              <button type="button" className="ob-btn ghost" disabled={busy} onClick={goBack}>
+                Back
               </button>
-            </div>
-            <div className="modal-actions">
-              <BackBtn />
-              <button type="button" className="modal-btn primary" onClick={() => setStep("github")}>
-                Continue
-              </button>
-            </div>
-          </>
-        )}
+            ) : null}
+            <button type="button" className="ob-btn primary" onClick={() => setStep("github")}>
+              Continue
+            </button>
+          </div>
+        </>
+      )}
 
-        {step === "github" && (
-          <>
-            <div className="auth-toggle">
-              <button
-                type="button"
-                className={ghMethod === "token" ? "active" : ""}
-                onClick={() => {
-                  setGhMethod("token");
-                  setMessage("");
-                }}
-              >
-                Personal access token
-              </button>
-              <button
-                type="button"
-                className={ghMethod === "oauth" ? "active" : ""}
-                onClick={() => {
-                  setGhMethod("oauth");
-                  setMessage("");
-                }}
-              >
-                GitHub SSO / OAuth
-              </button>
+      {step === "github" && (
+        <>
+          <div className="ob-toggle" role="tablist" aria-label="GitHub auth method">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={ghMethod === "token"}
+              className={ghMethod === "token" ? "active" : ""}
+              onClick={() => {
+                setGhMethod("token");
+                setMessage("");
+              }}
+            >
+              Personal access token
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={ghMethod === "oauth"}
+              className={ghMethod === "oauth" ? "active" : ""}
+              onClick={() => {
+                setGhMethod("oauth");
+                setMessage("");
+              }}
+            >
+              GitHub SSO
+            </button>
+          </div>
+
+          {ghMethod === "token" ? (
+            <div className="ob-fields">
+              <label className="ob-field">
+                <span>GitHub username</span>
+                <input
+                  value={ghUser}
+                  onChange={(e) => setGhUser(e.target.value)}
+                  autoComplete="username"
+                  autoFocus
+                />
+              </label>
+              <label className="ob-field">
+                <span>Personal access token</span>
+                <input
+                  type="password"
+                  value={ghToken}
+                  onChange={(e) => setGhToken(e.target.value)}
+                  autoComplete="off"
+                  placeholder="ghp_…"
+                />
+              </label>
             </div>
+          ) : (
+            <div className="ob-sso-panel">
+              <IconGithub className="ob-sso-mark" />
+              <p>
+                {authOptions?.github.oauth
+                  ? "You’ll be redirected to GitHub to authorize InfraLens."
+                  : authOptions?.github.oauth_note ||
+                    "OAuth isn’t configured yet. Use a personal access token, or add GitHub OAuth credentials to .env."}
+              </p>
+            </div>
+          )}
+
+          {ghIdentity ? <div className="ob-status ok">Connected as {ghIdentity}</div> : null}
+
+          <div className="ob-actions">
+            {canGoBack ? (
+              <button type="button" className="ob-btn ghost" disabled={busy} onClick={goBack}>
+                Back
+              </button>
+            ) : null}
             {ghMethod === "token" ? (
-              <>
-                <label className="modal-label">
-                  <span>GitHub username</span>
-                  <input value={ghUser} onChange={(e) => setGhUser(e.target.value)} />
-                </label>
-                <label className="modal-label">
-                  <span>Personal access token</span>
-                  <input
-                    type="password"
-                    value={ghToken}
-                    onChange={(e) => setGhToken(e.target.value)}
-                  />
-                </label>
-                <div className="modal-actions">
-                  <BackBtn />
-                  <button
-                    type="button"
-                    className="modal-btn primary"
-                    disabled={busy || !ghToken}
-                    onClick={() => void connectGithubPat()}
-                  >
-                    {busy ? "Validating…" : "Connect & continue"}
-                  </button>
-                </div>
-              </>
+              <button
+                type="button"
+                className="ob-btn primary"
+                disabled={busy || !ghToken}
+                onClick={() => void connectGithubPat()}
+              >
+                {busy ? "Validating…" : "Connect & continue"}
+              </button>
             ) : (
-              <>
-                {!authOptions?.github.oauth && (
-                  <p className="empty-note">
-                    {authOptions?.github.oauth_note ||
-                      "OAuth app credentials are not in .env yet. You can still use a personal access token."}
-                  </p>
-                )}
-                <div className="modal-actions">
-                  <BackBtn />
-                  <button
-                    type="button"
-                    className="modal-btn primary"
-                    disabled={busy}
-                    onClick={() => void startGithubOauth()}
-                  >
-                    {busy ? "Opening GitHub…" : "Continue with GitHub SSO"}
-                  </button>
-                </div>
-              </>
+              <button
+                type="button"
+                className="ob-btn primary"
+                disabled={busy}
+                onClick={() => void startGithubOauth()}
+              >
+                {busy ? "Opening GitHub…" : "Continue with GitHub"}
+              </button>
             )}
-            {ghIdentity && <div className="form-msg">Connected as {ghIdentity}</div>}
-          </>
-        )}
+          </div>
+        </>
+      )}
 
-        {step === "repos" && (
-          <>
-            <label className="modal-label">
-              <span>Search repositories</span>
+      {step === "repos" && (
+        <>
+          <label className="ob-field">
+            <span>Search repositories</span>
+            <input
+              type="search"
+              value={repoSearch}
+              onChange={(e) => setRepoSearch(e.target.value)}
+              placeholder="Filter by name…"
+              autoFocus
+            />
+          </label>
+          <div className="ob-repo-picker">
+            {!repos.length ? (
+              <div className="ob-empty">
+                {busy ? "Loading repositories…" : "No repositories found for this account."}
+              </div>
+            ) : !filteredRepos.length ? (
+              <div className="ob-empty">No repositories match “{repoSearch.trim()}”.</div>
+            ) : (
+              filteredRepos.map((repo) => {
+                const checked = selected.includes(repo.full_name);
+                return (
+                  <label key={repo.full_name} className={`ob-repo-row${checked ? " selected" : ""}`}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() =>
+                        setSelected((cur) =>
+                          checked
+                            ? cur.filter((r) => r !== repo.full_name)
+                            : [...cur, repo.full_name],
+                        )
+                      }
+                    />
+                    <span className="ob-repo-name">{repo.full_name}</span>
+                    <em className={repo.private ? "private" : "public"}>
+                      {repo.private ? "private" : "public"}
+                    </em>
+                  </label>
+                );
+              })
+            )}
+          </div>
+          {selected.length > 0 ? (
+            <div className="ob-status">{selected.length} selected</div>
+          ) : null}
+          <div className="ob-actions">
+            {canGoBack ? (
+              <button type="button" className="ob-btn ghost" disabled={busy} onClick={goBack}>
+                Back
+              </button>
+            ) : null}
+            <button type="button" className="ob-btn ghost" onClick={() => void loadRepos()}>
+              Refresh
+            </button>
+            <button
+              type="button"
+              className="ob-btn primary"
+              disabled={!selected.length}
+              onClick={() => {
+                if (!projectName.trim() && selected[0]) {
+                  setProjectName(selected[0].split("/")[1] || selected[0]);
+                }
+                setStep("azure");
+              }}
+            >
+              Continue
+            </button>
+          </div>
+        </>
+      )}
+
+      {step === "create-repo" && (
+        <>
+          <div className="ob-fields">
+            <label className="ob-field">
+              <span>Repository name</span>
               <input
-                type="search"
-                value={repoSearch}
-                onChange={(e) => setRepoSearch(e.target.value)}
-                placeholder="Filter by name…"
+                value={newRepoName}
+                onChange={(e) => setNewRepoName(e.target.value)}
+                placeholder="my-infra-project"
                 autoFocus
               />
             </label>
-            <div className="repo-picker">
-              {!repos.length ? (
-                <div className="empty-note">No repositories found for this token.</div>
-              ) : !filteredRepos.length ? (
-                <div className="empty-note">No repositories match “{repoSearch.trim()}”.</div>
-              ) : (
-                filteredRepos.map((repo) => {
-                  const checked = selected.includes(repo.full_name);
-                  return (
-                    <label key={repo.full_name} className="repo-row">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() =>
-                          setSelected((cur) =>
-                            checked
-                              ? cur.filter((r) => r !== repo.full_name)
-                              : [...cur, repo.full_name],
-                          )
-                        }
-                      />
-                      <span>{repo.full_name}</span>
-                      {repo.private ? <em>private</em> : <em>public</em>}
-                    </label>
-                  );
-                })
-              )}
-            </div>
-            {selected.length > 0 && (
-              <div className="empty-note">{selected.length} selected</div>
-            )}
-            <div className="modal-actions">
-              <BackBtn />
-              <button type="button" className="modal-btn ghost" onClick={() => void loadRepos()}>
-                Refresh
-              </button>
-              <button
-                type="button"
-                className="modal-btn primary"
-                disabled={!selected.length}
-                onClick={() => {
-                  if (!projectName.trim() && selected[0]) {
-                    setProjectName(selected[0].split("/")[1] || selected[0]);
-                  }
-                  setStep("azure");
-                }}
-              >
-                Continue
-              </button>
-            </div>
-          </>
-        )}
-
-        {step === "create-repo" && (
-          <>
-            <label className="modal-label">
-              <span>Repository name</span>
-              <input value={newRepoName} onChange={(e) => setNewRepoName(e.target.value)} />
-            </label>
-            <label className="modal-label">
+            <label className="ob-field">
               <span>Organisation (optional)</span>
-              <input value={newRepoOrg} onChange={(e) => setNewRepoOrg(e.target.value)} />
+              <input
+                value={newRepoOrg}
+                onChange={(e) => setNewRepoOrg(e.target.value)}
+                placeholder="Leave blank for your user account"
+              />
             </label>
-            <label className="repo-row">
+            <label className="ob-check">
               <input
                 type="checkbox"
                 checked={newRepoPrivate}
@@ -529,118 +712,206 @@ export function OnboardingWizard({
               />
               <span>Private repository</span>
             </label>
-            <div className="modal-actions">
-              <BackBtn />
-              <button
-                type="button"
-                className="modal-btn primary"
-                disabled={busy || !newRepoName.trim()}
-                onClick={() => void createRepo()}
-              >
-                {busy ? "Creating…" : "Create repo"}
+          </div>
+          <div className="ob-actions">
+            {canGoBack ? (
+              <button type="button" className="ob-btn ghost" disabled={busy} onClick={goBack}>
+                Back
               </button>
-            </div>
-          </>
-        )}
+            ) : null}
+            <button
+              type="button"
+              className="ob-btn primary"
+              disabled={busy || !newRepoName.trim()}
+              onClick={() => void createRepo()}
+            >
+              {busy ? "Creating…" : "Create repo"}
+            </button>
+          </div>
+        </>
+      )}
 
-        {step === "azure" && (
-          <>
-            <div className="auth-toggle">
-              <button
-                type="button"
-                className={azMethod === "client_secret" ? "active" : ""}
-                onClick={() => setAzMethod("client_secret")}
-              >
-                Client secret (SP)
-              </button>
-              <button
-                type="button"
-                className={azMethod === "oauth" ? "active" : ""}
-                onClick={() => setAzMethod("oauth")}
-              >
-                Azure OAuth
-              </button>
-            </div>
-            {authOptions?.azure.oauth_note && azMethod === "oauth" && (
-              <div className="form-msg">{authOptions.azure.oauth_note}</div>
-            )}
-            {azMethod === "client_secret" && (
-              <>
-                {(["tenant_id", "client_id", "client_secret", "subscription_id"] as const).map(
-                  (field) => (
-                    <label className="modal-label" key={field}>
-                      <span>{field.replace(/_/g, " ")}</span>
-                      <input
-                        type={field.includes("secret") ? "password" : "text"}
-                        value={azure[field]}
-                        onChange={(e) => setAzure((cur) => ({ ...cur, [field]: e.target.value }))}
-                      />
-                    </label>
-                  ),
-                )}
-              </>
-            )}
-            <div className="modal-actions">
-              <BackBtn />
-              <button type="button" className="modal-btn ghost" onClick={() => setStep("done")}>
-                Skip for now
-              </button>
-              <button
-                type="button"
-                className="modal-btn primary"
-                disabled={busy}
-                onClick={() => void connectAzure().then(() => setStep("done"))}
-              >
-                {busy ? "Saving…" : "Connect Azure"}
-              </button>
-            </div>
-          </>
-        )}
+      {step === "azure" && (
+        <>
+          <div className="ob-toggle" role="tablist" aria-label="Azure auth method">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={azMethod === "client_secret"}
+              className={azMethod === "client_secret" ? "active" : ""}
+              onClick={() => setAzMethod("client_secret")}
+            >
+              Service principal
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={azMethod === "oauth"}
+              className={azMethod === "oauth" ? "active" : ""}
+              onClick={() => setAzMethod("oauth")}
+            >
+              Azure OAuth
+            </button>
+          </div>
 
-        {step === "done" && (
-          <>
-            <p>Project is ready. You can start delivery (docs → architecture → Terraform) next.</p>
-            <div className="modal-actions">
-              <BackBtn />
-              <button
-                type="button"
-                className="modal-btn primary"
-                disabled={busy}
-                onClick={() => void finish()}
-              >
-                {busy ? "Finishing…" : "Open project"}
-              </button>
+          {azMethod === "oauth" ? (
+            <div className="ob-sso-panel">
+              <IconAzure className="ob-sso-mark azure" />
+              <p>
+                {authOptions?.azure.oauth
+                  ? "You’ll be redirected to Microsoft to authorize InfraLens."
+                  : authOptions?.azure.oauth_note ||
+                    "Azure OAuth isn’t configured. Use a service principal, or skip for now."}
+              </p>
             </div>
-          </>
-        )}
+          ) : (
+            <div className="ob-fields ob-fields-grid">
+              {([
+                ["tenant_id", "Tenant ID"],
+                ["client_id", "Client ID"],
+                ["client_secret", "Client secret"],
+                ["subscription_id", "Subscription ID"],
+              ] as const).map(([field, label]) => (
+                <label className="ob-field" key={field}>
+                  <span>{label}</span>
+                  <input
+                    type={field.includes("secret") ? "password" : "text"}
+                    value={azure[field]}
+                    onChange={(e) => setAzure((cur) => ({ ...cur, [field]: e.target.value }))}
+                    autoComplete="off"
+                  />
+                </label>
+              ))}
+            </div>
+          )}
 
-        {message && <div className="form-msg error">{message}</div>}
+          <div className="ob-actions">
+            {canGoBack ? (
+              <button type="button" className="ob-btn ghost" disabled={busy} onClick={goBack}>
+                Back
+              </button>
+            ) : null}
+            <button type="button" className="ob-btn ghost" onClick={() => setStep("done")}>
+              Skip for now
+            </button>
+            <button
+              type="button"
+              className="ob-btn primary"
+              disabled={busy}
+              onClick={() => void connectAzure().then(() => setStep("done"))}
+            >
+              {busy ? "Saving…" : "Connect Azure"}
+            </button>
+          </div>
+        </>
+      )}
+
+      {step === "done" && (
+        <>
+          <div className="ob-done">
+            <span className="ob-done-mark">
+              <IconCheck />
+            </span>
+            <div>
+              <strong>{projectName.trim() || "Your project"}</strong>
+              <span>
+                {selected.length
+                  ? `${selected.length} repo${selected.length === 1 ? "" : "s"} linked`
+                  : path === "new"
+                    ? "New repository linked"
+                    : "Ready to open"}
+                {azureConnected ? " · Azure connected" : ""}
+              </span>
+            </div>
+          </div>
+          <div className="ob-actions">
+            {canGoBack ? (
+              <button type="button" className="ob-btn ghost" disabled={busy} onClick={goBack}>
+                Back
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="ob-btn primary"
+              disabled={busy}
+              onClick={() => void finish()}
+            >
+              {busy ? "Finishing…" : "Open project"}
+              {!busy ? (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
+                  <path d="M5 12h14M12 5l7 7-7 7" />
+                </svg>
+              ) : null}
+            </button>
+          </div>
+        </>
+      )}
+
+      {message ? (
+        <div
+          className={`ob-status ${
+            /fail|could not|at least one|not configured|unavailable|invalid|error/i.test(message)
+              ? "error"
+              : "ok"
+          }`}
+          role="alert"
+        >
+          {message}
+        </div>
+      ) : null}
+    </div>
+  );
+
+  const panel = (
+    <section className="ob-panel" aria-labelledby="onboarding-title">
+      <div className="ob-panel-head">
+        <p className="ob-eyebrow">Onboarding</p>
+        <h1 id="onboarding-title">{copy.title}</h1>
+        <p className="ob-desc">{copy.desc}</p>
       </div>
+      {body}
+    </section>
   );
 
   if (asPage) {
     return (
-      <section className="onboarding-card" aria-labelledby="onboarding-title">
-        <div className="modal-accent" />
-        <div className="modal-head">
-          <span className="modal-eyebrow">Onboarding</span>
-          <h1 id="onboarding-title" className="modal-title">
-            {title}
-          </h1>
-          <p className="modal-desc">
-            Connect GitHub (OAuth or PAT), choose existing or new repo, optionally connect Azure.
-          </p>
+      <div className="login-screen ob-screen">
+        <div className="ob-shell">
+          <header className="ob-top">
+            <div className="login-brand ob-brand">
+              <span className="login-mark">IL</span>
+              <div>
+                <span className="ob-brand-name">InfraLens</span>
+                <span className="ob-brand-sub">Workspace setup</span>
+              </div>
+            </div>
+            <ol className="ob-steps" aria-label="Onboarding progress">
+              {FLOW_STEPS.map((s, i) => {
+                const label = progressLabels[i];
+                const state =
+                  i < activeStep ? "done" : i === activeStep ? "current" : "todo";
+                return (
+                  <li key={s.id} className={`ob-step ${state}`}>
+                    <span className="ob-step-dot" aria-hidden="true">
+                      {state === "done" ? <IconCheck /> : i + 1}
+                    </span>
+                    <span className="ob-step-label">{label}</span>
+                  </li>
+                );
+              })}
+            </ol>
+          </header>
+          <div className="ob-main">{panel}</div>
         </div>
-        {body}
-      </section>
+      </div>
     );
   }
 
   return (
     <Modal
       eyebrow="Onboarding"
-      title={title}
-      description="Connect GitHub (OAuth or PAT), choose existing or new repo, optionally connect Azure."
+      title={copy.title}
+      description={copy.desc}
       onClose={onClose && !force ? close : () => undefined}
     >
       {body}
