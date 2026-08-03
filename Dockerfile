@@ -23,6 +23,7 @@ RUN if [ -n "$PIP_TRUSTED_HOSTS" ]; then \
     fi
 
 COPY app ./app
+COPY scripts ./scripts
 COPY --from=frontend-builder /build/frontend/out ./frontend/out
 
 ENV PYTHONUNBUFFERED=1

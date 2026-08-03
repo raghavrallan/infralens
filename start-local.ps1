@@ -11,6 +11,7 @@
 # Usage:
 #   .\start-local.ps1 setup     # one-time: Python 3.12 venv, pip, frontend deps/build
 #   .\start-local.ps1 start     # Postgres+Redis + live API/worker/frontend (CMD windows)
+#   .\start-local.ps1 seed      # shared admin + InfraLens + EQIP (Azure/GitHub)
 #   .\start-local.ps1 stop      # stop CMD windows + Docker infra
 #   .\start-local.ps1 status    # show what is running
 #   .\start-local.ps1 restart   # stop then start
@@ -20,16 +21,18 @@
 #   .\start-local.ps1 start -WithExecutors
 #   .\start-local.ps1 setup -SkipFrontendBuild
 #   .\start-local.ps1 start -ResetWinNat
+#   .\start-local.ps1 seed -ResetPassword
 
 param(
     [Parameter(Position = 0)]
-    [ValidateSet("setup", "start", "stop", "restart", "status")]
+    [ValidateSet("setup", "start", "stop", "restart", "status", "seed")]
     [string]$Command = "start",
 
     [switch]$SkipDocker,
     [switch]$SkipFrontendBuild,
     [switch]$WithExecutors,
-    [switch]$ResetWinNat
+    [switch]$ResetWinNat,
+    [switch]$ResetPassword
 )
 
 $ErrorActionPreference = "Stop"
@@ -1044,6 +1047,28 @@ function Invoke-Status {
     }
 }
 
+function Invoke-Seed {
+    Load-DotEnv
+    if (-not $env:DATABASE_URL) {
+        $env:DATABASE_URL = $DefaultDatabaseUrl
+    }
+    if (-not (Test-Path $VenvPython)) {
+        throw "Virtualenv missing. Run: .\start-local.ps1 setup"
+    }
+    if (-not $SkipDocker) {
+        Start-Infra
+    }
+    $seedArgs = @("scripts\seed_shared_tenant.py")
+    if ($ResetPassword) {
+        $seedArgs += "--reset-password"
+    }
+    Write-Host "Seeding shared admin + InfraLens org + EQIP project (Azure/GitHub)..."
+    & $VenvPython @seedArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "Seed failed (exit $LASTEXITCODE)"
+    }
+}
+
 switch ($Command) {
     "setup" { Invoke-Setup }
     "start" {
@@ -1058,4 +1083,5 @@ switch ($Command) {
         Start-AppProcesses
     }
     "status" { Invoke-Status }
+    "seed" { Invoke-Seed }
 }
