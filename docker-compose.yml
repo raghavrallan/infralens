@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: devsecops
       POSTGRES_DB: devsecops
     ports:
-      - "5544:5432"
+      - "${POSTGRES_HOST_PORT:-5544}:5432"
     volumes:
       - devsecops_pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -22,7 +22,7 @@ services:
     container_name: devsecops-redis
     restart: unless-stopped
     ports:
-      - "6399:6379"
+      - "${REDIS_HOST_PORT:-6399}:6379"
     volumes:
       - devsecops_redisdata:/data
     healthcheck:
@@ -43,7 +43,7 @@ services:
     restart: unless-stopped
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     ports:
-      - "8000:8000"
+      - "${API_HOST_PORT:-8000}:8000"
     environment:
       DATABASE_URL: postgresql+psycopg2://devsecops:devsecops@postgres:5432/devsecops
       REDIS_URL: redis://redis:6379/0
