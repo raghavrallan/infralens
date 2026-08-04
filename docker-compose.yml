@@ -47,7 +47,12 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg2://devsecops:devsecops@postgres:5432/devsecops
       REDIS_URL: redis://redis:6379/0
-      EXECUTOR_SERVICE_KEY: dev-executor-key
+      EXECUTOR_SERVICE_KEY: ${EXECUTOR_SERVICE_KEY:-dev-executor-key}
+      # Bootstrap-only for empty users table; login always checks hashed password in DB.
+      AUTH_USERNAME: ${AUTH_USERNAME:-admin}
+      AUTH_PASSWORD: ${AUTH_PASSWORD:-infralens}
+      AUTH_DISPLAY_NAME: ${AUTH_DISPLAY_NAME:-Admin}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:?set AUTH_JWT_SECRET in .env}
     depends_on:
       postgres:
         condition: service_healthy
@@ -66,6 +71,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg2://devsecops:devsecops@postgres:5432/devsecops
       REDIS_URL: redis://redis:6379/0
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:?set AUTH_JWT_SECRET in .env}
     depends_on:
       postgres:
         condition: service_healthy
