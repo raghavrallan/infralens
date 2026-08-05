@@ -6,7 +6,7 @@ import loginImage from "../assets/images/login.png";
 import { getStoredUser, getToken, login as doLogin } from "../lib/auth";
 
 export function LoginPage() {
-  const [username, setUsername] = useState("admin");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -94,8 +94,10 @@ export function LoginPage() {
                   </svg>
                   <input
                     id="login-username"
+                    name="username"
                     autoComplete="username"
                     autoFocus
+                    placeholder="Username"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
                     required

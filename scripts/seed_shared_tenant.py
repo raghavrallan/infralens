@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Seed shared admin + InfraLens org + EQIP project (with Azure/GitHub).
 
-Idempotent. Copies the EQIP Azure SP + GitHub token used on the source machine
-so a fresh Docker host can log in and use live connections without Settings setup.
+Idempotent. Optionally seeds Azure SP + GitHub token from SEED_AZURE_* /
+SEED_GITHUB_* environment variables (secrets are never hardcoded).
 
 Examples:
 
@@ -52,16 +52,17 @@ SEED_PROJECT_ID = (
 )
 SEED_PROJECT_NAME = os.environ.get("SEED_PROJECT_NAME", "EQIP").strip() or "EQIP"
 
-# Source EQIP connections (override with SEED_AZURE_* / SEED_GITHUB_* env vars).
+# Optional non-secret connection metadata (override via SEED_* env).
+# Secrets MUST come from env — never commit tokens/passwords.
 DEFAULT_AZURE = {
-    "tenant_id": "2d31dd2c-1d9b-47f2-90d1-48a747ccae92",
-    "client_id": "9adf4760-ea7a-4d58-aa5b-9d348f58f07a",
-    "client_secret": "JwU8Q~idBjkUpD90AecTcZjE_mu9-.EZVkKkwad8",
-    "subscription_id": "652ec4ff-164e-46ad-a0f8-02e458fc6baf",
+    "tenant_id": "",
+    "client_id": "",
+    "client_secret": "",
+    "subscription_id": "",
 }
 DEFAULT_GITHUB = {
-    "token": "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",
-    "username": "raghavrallan",
+    "token": "",
+    "username": "",
 }
 DEFAULT_REPOS = ["acme/admin-repo"]
 
@@ -83,22 +84,32 @@ def _env_display_name(cli: str | None) -> str:
 
 def _azure_fields() -> dict[str, str]:
     return {
-        "tenant_id": os.environ.get("SEED_AZURE_TENANT_ID", DEFAULT_AZURE["tenant_id"]),
-        "client_id": os.environ.get("SEED_AZURE_CLIENT_ID", DEFAULT_AZURE["client_id"]),
+        "tenant_id": os.environ.get("SEED_AZURE_TENANT_ID", DEFAULT_AZURE["tenant_id"]).strip(),
+        "client_id": os.environ.get("SEED_AZURE_CLIENT_ID", DEFAULT_AZURE["client_id"]).strip(),
         "client_secret": os.environ.get(
             "SEED_AZURE_CLIENT_SECRET", DEFAULT_AZURE["client_secret"]
-        ),
+        ).strip(),
         "subscription_id": os.environ.get(
             "SEED_AZURE_SUBSCRIPTION_ID", DEFAULT_AZURE["subscription_id"]
-        ),
+        ).strip(),
     }
 
 
 def _github_fields() -> dict[str, str]:
     return {
-        "token": os.environ.get("SEED_GITHUB_TOKEN", DEFAULT_GITHUB["token"]),
-        "username": os.environ.get("SEED_GITHUB_USERNAME", DEFAULT_GITHUB["username"]),
+        "token": os.environ.get("SEED_GITHUB_TOKEN", DEFAULT_GITHUB["token"]).strip(),
+        "username": os.environ.get(
+            "SEED_GITHUB_USERNAME", DEFAULT_GITHUB["username"]
+        ).strip(),
     }
+
+
+def _has_azure_secret(fields: dict[str, str]) -> bool:
+    return bool(fields.get("client_secret") and fields.get("tenant_id") and fields.get("client_id"))
+
+
+def _has_github_secret(fields: dict[str, str]) -> bool:
+    return bool(fields.get("token"))
 
 
 def _seed_repos() -> list[str]:
@@ -264,11 +275,22 @@ def ensure_eqip_project(*, org_id: str, admin_user_id: str) -> dict[str, Any]:
 
 
 def ensure_connections(*, project_id: str) -> dict[str, Any]:
-    azure = connections.set_connection(
-        project_id, "azure", "client_secret", _azure_fields()
-    )
-    github = connections.set_connection(project_id, "github", "token", _github_fields())
-    return {"azure": azure, "github": github}
+    out: dict[str, Any] = {}
+    azure_fields = _azure_fields()
+    github_fields = _github_fields()
+    if _has_azure_secret(azure_fields):
+        out["azure"] = connections.set_connection(
+            project_id, "azure", "client_secret", azure_fields
+        )
+    else:
+        out["azure"] = {"skipped": True, "reason": "set SEED_AZURE_* env vars"}
+    if _has_github_secret(github_fields):
+        out["github"] = connections.set_connection(
+            project_id, "github", "token", github_fields
+        )
+    else:
+        out["github"] = {"skipped": True, "reason": "set SEED_GITHUB_TOKEN env var"}
+    return out
 
 
 def main(argv: list[str] | None = None) -> int:
