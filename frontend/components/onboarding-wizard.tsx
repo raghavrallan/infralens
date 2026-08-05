@@ -116,7 +116,7 @@ export function OnboardingWizard({
   force?: boolean;
   asPage?: boolean;
 }) {
-  const [step, setStep] = useState<Step>("azure");
+  const [step, setStep] = useState<Step>("welcome");
   const [path, setPath] = useState<PathId>("existing");
   const [projectId, setProjectId] = useState("");
   const [projectName, setProjectName] = useState("");
