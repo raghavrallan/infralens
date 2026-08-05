@@ -5707,6 +5707,7 @@ select option:hover {
   width: 100%;
   text-align: left;
   cursor: pointer;
+      height: fit-content;
   margin-bottom: 8px;
   position: relative;
 }
