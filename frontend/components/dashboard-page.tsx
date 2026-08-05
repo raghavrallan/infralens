@@ -277,6 +277,27 @@ export function DashboardPage() {
     activeModule?.description ||
     "View findings, approvals, workflows, and runs across every intelligence module.";
 
+function getModuleIcon(key: string) {
+  switch (key) {
+    case "":
+      return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>;
+    case "pipeline_intelligence":
+      return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>;
+    case "release_confidence":
+      return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>;
+    case "infrastructure_as_code":
+      return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>;
+    case "incident_response":
+      return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>;
+    case "security_patch":
+      return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>;
+    case "finops":
+      return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>;
+    default:
+      return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>;
+  }
+}
+
   return (
     <Shell subtitle="Intelligence Layer" scroll loading={loading}>
       <div className="dash-layout">
@@ -297,7 +318,10 @@ export function DashboardPage() {
                 title={item.description || "All intelligence modules"}
                 onClick={() => selectModule(item.key)}
               >
-                {item.label}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  {getModuleIcon(item.key)}
+                  <span>{item.label}</span>
+                </div>
               </button>
             ))}
           </nav>
@@ -586,11 +610,20 @@ export function DashboardPage() {
                   ))}
                 </div>
             </div>
-            <div className="findings-feed">
+            <div className="findings-feed" style={{ maxHeight: 'calc(3 * 220px)', overflowY: 'auto', paddingRight: '8px' }}>
               {!findings.length ? (
-                <div className="empty-note">
-                  No findings match this filter. Run a workflow to populate the
-                  dashboard.
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '64px 24px', textAlign: 'center', background: 'var(--panel)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', width: '100%' }}>
+                  <div style={{ width: '80px', height: '80px', borderRadius: '50%', border: '1px dashed var(--border-strong)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px' }}>
+                    <div style={{ width: '56px', height: '56px', borderRadius: '12px', background: 'var(--primary-subtle)', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                        <circle cx="14" cy="13" r="3"></circle>
+                        <line x1="16.5" y1="15.5" x2="19" y2="18"></line>
+                      </svg>
+                    </div>
+                  </div>
+                  <h3 style={{ margin: '0 0 8px 0', fontSize: '16px', fontWeight: '600' }}>No findings match this filter.</h3>
+                  <p style={{ margin: 0, color: 'var(--muted)', fontSize: '14px', maxWidth: '320px' }}>Try adjusting the severity filter or run a workflow to populate the dashboard.</p>
                 </div>
               ) : (
                 findings.map((finding) => (
@@ -684,11 +717,16 @@ export function DashboardPage() {
                 ))
               )}
             </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '24px' }}>
+              {projectId && <DeliveryChecklist projectId={projectId} />}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                {projectId && <BreakGlassPanel projectId={projectId} />}
+                {projectId && <MemoryStrip projectId={projectId} />}
+              </div>
+            </div>
           </section>
           <aside className="dash-col dash-side">
-            {projectId && <DeliveryChecklist projectId={projectId} />}
-            {projectId && <BreakGlassPanel projectId={projectId} />}
-            {projectId && <MemoryStrip projectId={projectId} />}
             <div className="dash-section-head">
               <h3>Approvals</h3>
               <span className={`pill ${pendingLive ? "warn" : "off"}`}>

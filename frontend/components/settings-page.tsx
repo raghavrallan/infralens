@@ -486,11 +486,11 @@ export function SettingsPage() {
             </button>
           </div>
           <div className="form-msg">
-            {projectMessage}
-            {current?.is_default
-              ? " This is the default project — make another project default before deleting it."
-              : ""}
-          </div>
+              {projectMessage}
+              {current?.is_default
+                ? " This is the default project — make another project default before deleting it."
+                : ""}
+            </div>
         </section>
         <section className="card">
           <div className="card-head">
@@ -667,7 +667,6 @@ export function SettingsPage() {
             </section>
           </>
         )}{" "}
-        {projectId && <UsersRolesPanel />}
       </main>
       {projectModalOpen && (
         <ProjectModal

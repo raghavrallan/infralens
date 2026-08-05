@@ -9,9 +9,12 @@
     "lint": "node node_modules/eslint/bin/eslint.js ."
   },
   "dependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
     "next": "16.2.10",
+    "postcss": "^8.5.25",
     "react": "19.2.7",
-    "react-dom": "19.2.7"
+    "react-dom": "19.2.7",
+    "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
     "@types/node": "22.15.21",
