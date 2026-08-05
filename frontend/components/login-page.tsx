@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import Image from "next/image";
-import loginImage from "../assets/images/login.png";
+import loginImage from "../public/assets/images/login.png";
 import { getStoredUser, getToken, login as doLogin } from "../lib/auth";
 
 export function LoginPage() {

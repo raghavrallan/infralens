@@ -414,45 +414,53 @@ export function OnboardingWizard({
   const body = (
     <div className={`ob-body${asPage ? " ob-body-page" : ""}`} key={step}>
       {step === "welcome" && (
-        <>
-          <ul className="ob-highlights">
-            <li>
-              <span className="ob-highlight-icon">
-                <IconGithub />
-              </span>
-              <div>
-                <strong>Connect GitHub</strong>
-                <span>OAuth SSO or personal access token</span>
+        <div className="ob-welcome-list">
+            <div className="ob-welcome-card">
+              <div className="ob-welcome-icon github">
+                <IconGithub className="ob-icon-github" />
               </div>
-            </li>
-            <li>
-              <span className="ob-highlight-icon">
-                <IconFolder />
-              </span>
-              <div>
-                <strong>Map repositories</strong>
-                <span>Existing repos or create a new one</span>
+              <div className="ob-welcome-num active">1</div>
+              <div className="ob-welcome-text">
+                <div className="ob-welcome-title">Connect GitHub</div>
+                <div className="ob-welcome-desc">Authorize with OAuth or use a Personal Access Token.</div>
               </div>
-            </li>
-            <li>
-              <span className="ob-highlight-icon">
-                <IconAzure />
-              </span>
-              <div>
-                <strong>Optional Azure</strong>
-                <span>Link a subscription when you’re ready</span>
+              <div className="ob-welcome-badge required">Required</div>
+              <svg className="ob-welcome-chevron" viewBox="0 0 24 24" fill="none" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+            </div>
+            
+            <div className="ob-welcome-card">
+              <div className="ob-welcome-icon folder">
+                <IconFolder className="ob-icon-folder" />
               </div>
-            </li>
-          </ul>
-          <div className="ob-actions">
-            <button type="button" className="ob-btn primary" onClick={() => setStep("path")}>
-              Get started
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
-                <path d="M5 12h14M12 5l7 7-7 7" />
-              </svg>
-            </button>
-          </div>
-        </>
+              <div className="ob-welcome-num inactive">2</div>
+              <div className="ob-welcome-text">
+                <div className="ob-welcome-title">Select Repository</div>
+                <div className="ob-welcome-desc">Choose one or more repositories to monitor.</div>
+              </div>
+              <div className="ob-welcome-badge required">Required</div>
+              <svg className="ob-welcome-chevron" viewBox="0 0 24 24" fill="none" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+            </div>
+            
+            <div className="ob-welcome-card">
+              <div className="ob-welcome-icon azure">
+                <IconAzure className="ob-icon-azure" />
+              </div>
+              <div className="ob-welcome-num inactive">3</div>
+              <div className="ob-welcome-text">
+                <div className="ob-welcome-title">Connect Azure (Optional)</div>
+                <div className="ob-welcome-desc">Link your Azure subscription (optional).</div>
+              </div>
+              <div className="ob-welcome-badge optional">Optional</div>
+              <svg className="ob-welcome-chevron" viewBox="0 0 24 24" fill="none" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+            </div>
+
+            <div className="ob-welcome-actions">
+              <button type="button" className="ob-welcome-btn" onClick={() => setStep("path")}>
+                Get started
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+              </button>
+            </div>
+        </div>
       )}
 
       {step === "path" && (
@@ -863,45 +871,84 @@ export function OnboardingWizard({
   );
 
   const panel = (
-    <section className="ob-panel" aria-labelledby="onboarding-title">
-      <div className="ob-panel-head">
-        <p className="ob-eyebrow">Onboarding</p>
-        <h1 id="onboarding-title">{copy.title}</h1>
-        <p className="ob-desc">{copy.desc}</p>
-      </div>
+    <section className={step === 'welcome' && asPage ? "ob-panel ob-panel-welcome" : "ob-panel"} aria-labelledby="onboarding-title">
+      {step === "welcome" ? (
+        <div className="ob-welcome-header">
+          <div className="ob-welcome-emoji">
+            👋
+          </div>
+          <div>
+            <h1 className="ob-welcome-heading">Welcome to InfraLens!</h1>
+            <p className="ob-welcome-subtitle">Let’s set up your workspace. Connect your tools and<br/>start running secure delivery workflows.</p>
+          </div>
+        </div>
+      ) : (
+        <div className="ob-panel-head">
+          <p className="ob-eyebrow">Onboarding</p>
+          <h1 id="onboarding-title">{copy.title}</h1>
+          <p className="ob-desc">{copy.desc}</p>
+        </div>
+      )}
       {body}
     </section>
   );
 
   if (asPage) {
     return (
-      <div className="login-screen ob-screen">
-        <div className="ob-shell">
-          <header className="ob-top">
-            <div className="login-brand ob-brand">
-              <span className="login-mark">IL</span>
-              <div>
-                <span className="ob-brand-name">InfraLens</span>
-                <span className="ob-brand-sub">Workspace setup</span>
+      <div className="login-screen ob-screen ob-page-container">
+        <div className="ob-shell ob-page-shell">
+          <header className="ob-top ob-page-top">
+            <div className="login-brand ob-brand ob-page-brand">
+              <div className="ob-page-logo-icon">IL</div>
+              <div className="ob-page-brand-text">
+                <span className="ob-page-brand-name">InfraLens</span>
+                <span className="ob-page-brand-sub">Workspace setup</span>
               </div>
             </div>
-            <ol className="ob-steps" aria-label="Onboarding progress">
-              {FLOW_STEPS.map((s, i) => {
-                const label = progressLabels[i];
-                const state =
-                  i < activeStep ? "done" : i === activeStep ? "current" : "todo";
-                return (
-                  <li key={s.id} className={`ob-step ${state}`}>
-                    <span className="ob-step-dot" aria-hidden="true">
-                      {state === "done" ? <IconCheck /> : i + 1}
-                    </span>
-                    <span className="ob-step-label">{label}</span>
-                  </li>
-                );
-              })}
-            </ol>
+            
+            {/* <div className="ob-page-header-right">
+              <span className="ob-page-local-admin">Local Admin</span>
+              <span className="ob-page-super-admin">Super Admin</span>
+              <button type="button" className="ob-page-signout-btn">Sign out</button>
+            </div> */}
           </header>
-          <div className="ob-main">{panel}</div>
+          
+          <div className="ob-page-main-wrapper">
+            <div className="ob-page-stepper-wrapper">
+               <div className="ob-page-stepper">
+                 <div className="ob-page-stepper-bg-line"></div>
+                 <div className="ob-page-stepper-active-line" style={{ width: `calc((100% - 34px) * ${Math.min(activeStep, 4)} / 4)` }}></div>
+                 {[
+                   { id: 'welcome', label: 'Welcome', num: 1 },
+                   { id: 'github', label: 'GitHub', num: 2 },
+                   { id: 'repos', label: 'Repositories', num: 3 },
+                   { id: 'azure', label: 'Azure', num: 4 },
+                   { id: 'done', label: 'Finish', num: 5 }
+                 ].map((s, idx) => {
+                    let state = 'todo';
+                    if (idx < activeStep) state = 'done';
+                    else if (idx === activeStep) state = 'current';
+                    
+                    const isActive = state === 'done' || state === 'current';
+                    
+                    return (
+                      <div key={s.id} className="ob-page-step">
+                        <div className={`ob-page-step-circle ${isActive ? 'ob-page-step-circle-active' : 'ob-page-step-circle-inactive'}`}>
+                          {s.num}
+                        </div>
+                        <div className={`ob-page-step-label ${isActive ? 'ob-page-step-label-active' : 'ob-page-step-label-inactive'}`}>
+                          {s.label}
+                        </div>
+                      </div>
+                    );
+                 })}
+               </div>
+            </div>
+            
+            <div className="ob-main ob-page-main">
+              {panel}
+            </div>
+          </div>
         </div>
       </div>
     );

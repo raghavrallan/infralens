@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import Image from "next/image";
-import loginImage from "../assets/images/login.png";
+import loginImage from "../public/assets/images/login.png";
 import { api } from "../lib/api";
 import { saveSession, type AuthSession } from "../lib/auth";
 

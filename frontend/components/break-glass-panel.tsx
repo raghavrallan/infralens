@@ -110,18 +110,22 @@ export function BreakGlassPanel({ projectId }: { projectId: string }) {
           </button>
         </>
       ) : (
-        <div className="users-create">
-          <input
-            placeholder="Reason (required for audit)"
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <label style={{ fontSize: '13px', color: 'var(--muted)' }}>Reason (required for audit)</label>
+          <textarea
+            placeholder="Enter reason..."
             value={reason}
             onChange={(e) => setReason(e.target.value)}
+            style={{ width: '100%', minHeight: '80px', padding: '10px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text)', fontSize: '14px', fontFamily: 'var(--font-sans)', resize: 'vertical' }}
           />
           <button
             type="button"
-            className="tiny-btn solid"
+            className="modal-btn primary"
             disabled={busy || !reason.trim()}
             onClick={() => void open()}
+            style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '12px', marginTop: '8px' }}
           >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
             Open session
           </button>
         </div>
