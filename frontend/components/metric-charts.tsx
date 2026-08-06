@@ -6,9 +6,8 @@ import type { MetricChart, MetricPoint } from "../lib/types";
 const WIDTH = 760;
 const HEIGHT = 250;
 const PLOT = { left: 48, right: 14, top: 16, bottom: 36 };
-// Keep every series visible against the light chart surface. The first series
-// is intentionally near-black because it is the primary metric in most charts.
-const COLORS = ["#17171a", "#4b4b55", "#72727b", "#8b5e3c", "#35637d"];
+// Themed colors using variants of the primary color (#2563eb) for a cohesive look
+const COLORS = ["#2563eb", "#60a5fa", "#1e40af", "#93c5fd", "#172554", "#3b82f6"];
 
 function formatValue(value: number) {
   if (Math.abs(value) >= 1000) return value.toLocaleString(undefined, { maximumFractionDigits: 1 });
@@ -105,16 +104,22 @@ function ChartCard({ chart }: { chart: MetricChart }) {
             return <g key={tick.ratio}><line className="chart-grid" x1={PLOT.left} x2={WIDTH - PLOT.right} y1={y} y2={y} /><text className="chart-ylabel" x={PLOT.left - 8} y={y + 3}>{formatValue(tick.value)}</text></g>;
           })}
           {kind === "line" ? series.map((item, seriesIndex) => <path key={item.name} d={pathFor(item.points, max, start, end)} fill="none" stroke={COLORS[seriesIndex % COLORS.length]} strokeWidth="2" vectorEffect="non-scaling-stroke" />) : series.map((item, seriesIndex) => item.points.map((point, index) => {
-            const width = Math.max(2, innerWidth / Math.max(pointCount, 1) / series.length - 3);
+            // Cap maximum width at 20px, and subtract 12 to ensure they look thinner
+            const width = Math.max(2, Math.min(28, innerWidth / Math.max(pointCount, 1) / series.length - 12));
+            const barSpacing = 4;
+            const totalBarsWidth = series.length * width + (series.length - 1) * barSpacing;
+            const rawX = xFor(item.points, index, start, end);
             const groupWidth = innerWidth / Math.max(pointCount, 1);
-            const x = xFor(item.points, index, start, end) - groupWidth / 2 + seriesIndex * (width + 2) + 2;
+            const center = PLOT.left + groupWidth / 2 + (rawX - PLOT.left) * (1 - 1 / Math.max(pointCount, 1));
+            const x = center - totalBarsWidth / 2 + seriesIndex * (width + barSpacing);
             const y = PLOT.top + innerHeight - (point.v / max) * innerHeight;
-            return <rect key={`${item.name}-${index}`} x={x} y={y} width={width} height={PLOT.top + innerHeight - y} fill={COLORS[seriesIndex % COLORS.length]} />;
+            return <rect key={`${item.name}-${index}`} x={x} y={y} width={width} height={PLOT.top + innerHeight - y} fill={COLORS[seriesIndex % COLORS.length]} rx="2" />;
           }))}
           {hoverRatio !== null && <line className="chart-cursor" x1={PLOT.left + hoverRatio * innerWidth} x2={PLOT.left + hoverRatio * innerWidth} y1={PLOT.top} y2={PLOT.top + innerHeight} />}
           {Array.from({ length: Math.min(pointCount, 5) }).map((_, index, labels) => {
-            const ratio = labels.length === 1 ? 0.5 : index / (labels.length - 1);
-            const timestamp = start !== null && end !== null ? new Date(start + ratio * (end - start)).toISOString() : series[0]?.points[Math.round(ratio * (pointCount - 1))]?.t;
+            const rawRatio = labels.length === 1 ? 0.5 : index / (labels.length - 1);
+            const ratio = kind === "bar" && pointCount > 0 ? (0.5 / pointCount) + rawRatio * (1 - 1 / pointCount) : rawRatio;
+            const timestamp = start !== null && end !== null ? new Date(start + rawRatio * (end - start)).toISOString() : series[0]?.points[Math.round(rawRatio * (pointCount - 1))]?.t;
             return <text className="chart-xlabel" key={timestamp || index} x={PLOT.left + ratio * innerWidth} y={HEIGHT - 12}>{formatTime(timestamp)}</text>;
           })}
         </svg>
