@@ -86,6 +86,10 @@ export function DashboardPage() {
     Workflow | null | undefined
   >(undefined);
   const [runModal, setRunModal] = useState<Run | null>(null);
+  const [approvalModal, setApprovalModal] = useState<{
+    approval: Approval;
+    decision: "approved" | "rejected";
+  } | null>(null);
   const { showToast, Toast } = useToast();
   const [statusDropdownOpen, setStatusDropdownOpen] = useState(false);
 
@@ -194,12 +198,16 @@ export function DashboardPage() {
       );
     }
   };
-  const decideApproval = async (
+  const decideApproval = (
     approval: Approval,
     decision: "approved" | "rejected",
   ) => {
-    const label = decision === "approved" ? "Approve" : "Reject";
-    if (!window.confirm(`${label} this gated finding?`)) return;
+    setApprovalModal({ approval, decision });
+  };
+  const executeApproval = async () => {
+    if (!approvalModal) return;
+    const { approval, decision } = approvalModal;
+    setApprovalModal(null);
     try {
       await api(`/api/approvals/${approval.id}/decide`, {
         method: "POST",
@@ -1004,6 +1012,30 @@ function getModuleIcon(key: string) {
                 onClick={() => setRunModal(null)}
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+      {approvalModal && (
+        <Modal
+          title={`${approvalModal.decision === "approved" ? "Approve" : "Reject"} this gated finding?`}
+          description={`Are you sure you want to ${approvalModal.decision} this finding?`}
+          onClose={() => setApprovalModal(null)}
+        >
+          <div className="modal-body">
+            <div className="modal-actions">
+              <button
+                className="modal-btn ghost"
+                onClick={() => setApprovalModal(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className={`modal-btn ${approvalModal.decision === "approved" ? "primary" : "danger"}`}
+                onClick={executeApproval}
+              >
+                {approvalModal.decision === "approved" ? "Approve" : "Reject"}
               </button>
             </div>
           </div>

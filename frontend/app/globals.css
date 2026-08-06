@@ -2877,6 +2877,7 @@ select option:hover {
 .chart-legend {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 14px;
   padding: 6px 12px 12px;
 }
@@ -5742,6 +5743,7 @@ select option:hover {
 .org-info strong {
   font-size: 14px;
   font-weight: 500;
+  word-break: break-word;
 }
 .org-info span {
   font-size: 11px;
