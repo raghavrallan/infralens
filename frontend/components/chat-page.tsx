@@ -87,7 +87,11 @@ export function ChatPage() {
     const element = inputRef.current;
     if (!element) return;
     element.style.height = "auto";
-    element.style.height = `${Math.min(element.scrollHeight, 240)}px`;
+    if (element.value.startsWith("Explain this finding")) {
+      element.style.height = `${Math.max(160, Math.min(element.scrollHeight, 240))}px`;
+    } else {
+      element.style.height = `${Math.min(element.scrollHeight, 200)}px`;
+    }
   }, []);
 
   const loadProjects = useCallback(async () => {
@@ -571,7 +575,7 @@ export function ChatPage() {
             {slashOpen && slashMatches.length > 0 && <div className="slash-menu scroll">{slashMatches.map((item, index) => <button type="button" className={`slash-item${index === slashIndex ? " active" : ""}`} key={item.name} onClick={() => chooseSkill(item.name)}><strong>/{item.name}</strong><span>{item.description}</span></button>)}</div>}
             {suggestedSkill && <div className="suggest-bar"><span className="suggest-label">Suggested skill</span><button type="button" className="suggest-pill" onClick={acceptSuggestion}>{prettyName(suggestedSkill.name)}</button><span className="suggest-hint">Press Tab</span></div>}
             {editingMessageId && <div className="edit-context"><span>Editing your question</span><button type="button" onClick={() => { setEditingMessageId(null); setInput(""); inputRef.current?.focus(); }}>Cancel</button></div>}
-            <div className="composer-row"><textarea id="input" ref={inputRef} value={input} rows={1} onChange={(event) => onInput(event.target.value)} onKeyDown={onKeyDown} placeholder="Describe your task, paste a pipeline / IaC / scan output, or type / to pick a skill…" /><button id="send-btn" type="submit" disabled={sending}>{sending ? "…" : "Send"}</button></div>
+            <div className="composer-row"><textarea id="input" ref={inputRef} value={input} rows={1} style={{ minHeight: input.startsWith("Explain this finding") ? "156px" : undefined }} onChange={(event) => onInput(event.target.value)} onKeyDown={onKeyDown} placeholder="Describe your task, paste a pipeline / IaC / scan output, or type / to pick a skill…" /><button id="send-btn" type="submit" disabled={sending}>{sending ? "…" : "Send"}</button></div>
             <div className="composer-controls"><label className="control"><span>Actions</span><ThemedSelect className="control-select" value={actionScope} ariaLabel="Actions" onChange={selectActionScope} options={[{ value: "read_only", label: "Read-only actions" }, { value: "write", label: "Write actions" }]} /></label><label className="control"><span>Access</span><ThemedSelect className="control-select" value={accessLevel} ariaLabel="Access" onChange={(value) => setAccessLevel(value as typeof accessLevel)} options={[{ value: "ask_approval", label: "Ask for approval" }, { value: "auto_approve", label: "Approve for me" }, { value: "full_access", label: "Full access" }]} /></label><span className={`action-scope-note${actionScope === "write" ? " write" : ""}`}>{actionScope === "write" ? "Write actions enabled for this request" : "Read-only actions"}</span><span className="composer-hint">{mode === "plan" ? "Plans are read-only until approved." : "Shift+Enter for a new line."}</span></div>
           </form>
         </main>
