@@ -4424,6 +4424,11 @@ select option:hover {
   box-shadow: var(--shadow-md);
 }
 
+.approval-card .approval-top{
+  gap:6px;
+  display:flex;
+}
+
 /* Onboarding + RBAC + delivery */
 .nav-role-badge {
   display: inline-flex;
@@ -4455,7 +4460,11 @@ select option:hover {
 .delivery-step { display: flex; justify-content: space-between; padding: 0.45rem 0.6rem; border-radius: var(--radius); background: var(--elev-2); }
 .delivery-step.done { background: var(--success-subtle); }
 .delivery-step.current { background: var(--primary-subtle); }
-.delivery-docs textarea { width: 100%; margin-bottom: 0.5rem; }
+.delivery-docs{
+  margin-bottom: 10px;
+}
+.delivery-docs textarea { width: 100%; margin-bottom: 0.5rem; border: 1px solid var(--border, #e2e8f0); border-radius: 4px; padding: 0.5rem; }
+.delivery-docs textarea:focus-visible { outline: none; border-color: var(--primary); box-shadow: var(--focus-ring); }
 .action-informed { width: 100%; margin-bottom: 0.5rem; font-size: 0.85rem; color: var(--muted); }
 .action-informed p { margin: 0.2rem 0; }
 

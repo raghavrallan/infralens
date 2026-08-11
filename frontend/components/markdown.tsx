@@ -77,7 +77,8 @@ export function MarkdownContent({ text }: { text: string }) {
       const rawRows: string[][] = [];
       while (index < lines.length && lines[index].includes("|")) { rawRows.push(tableCells(lines[index])); rows.push(tableRow(lines[index], `row-${index}`)); index += 1; }
       const tableText = [headerCells, ...rawRows].map((row) => row.join("\t")).join("\n");
-      blocks.push(<div className="markdown-table-wrap" key={`table-${index}`}><CopyButton value={tableText} label="Copy table" /><table><thead><tr>{headerCells.map((cell, cellIndex) => <th key={`${cell}-${cellIndex}`}>{inline(cell)}</th>)}</tr></thead><tbody>{rows}</tbody></table></div>);
+      const isWide = headerCells.length > 5;
+      blocks.push(<div className="markdown-table-wrap" key={`table-${index}`}><CopyButton value={tableText} label="Copy table" /><table style={isWide ? { whiteSpace: "nowrap" } : undefined}><thead><tr>{headerCells.map((cell, cellIndex) => <th key={`${cell}-${cellIndex}`}>{inline(cell)}</th>)}</tr></thead><tbody>{rows}</tbody></table></div>);
       continue;
     }
 
