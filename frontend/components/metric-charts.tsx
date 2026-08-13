@@ -34,24 +34,24 @@ function timestampOf(point?: MetricPoint) {
   return Number.isFinite(value) ? value : null;
 }
 
-function xFor(points: MetricPoint[], index: number, start: number | null, end: number | null) {
-  const innerWidth = WIDTH - PLOT.left - PLOT.right;
+function xFor(points: MetricPoint[], index: number, start: number | null, end: number | null, width: number = WIDTH) {
+  const innerWidth = width - PLOT.left - PLOT.right;
   const timestamp = timestampOf(points[index]);
   const duration = start !== null && end !== null ? end - start : 0;
   const ratio = timestamp !== null && duration > 0 ? (timestamp - start!) / duration : points.length <= 1 ? 0.5 : index / (points.length - 1);
   return PLOT.left + Math.max(0, Math.min(1, ratio)) * innerWidth;
 }
 
-function pointFor(points: MetricPoint[], index: number, max: number, start: number | null, end: number | null) {
+function pointFor(points: MetricPoint[], index: number, max: number, start: number | null, end: number | null, width: number = WIDTH) {
   const innerHeight = HEIGHT - PLOT.top - PLOT.bottom;
-  const x = xFor(points, index, start, end);
+  const x = xFor(points, index, start, end, width);
   const y = PLOT.top + innerHeight - (points[index].v / max) * innerHeight;
   return { x, y };
 }
 
-function pathFor(points: MetricPoint[], max: number, start: number | null, end: number | null) {
+function pathFor(points: MetricPoint[], max: number, start: number | null, end: number | null, width: number = WIDTH) {
   return points.map((_, index) => {
-    const point = pointFor(points, index, max, start, end);
+    const point = pointFor(points, index, max, start, end, width);
     return `${index === 0 ? "M" : "L"}${point.x.toFixed(2)} ${point.y.toFixed(2)}`;
   }).join(" ");
 }
@@ -72,7 +72,8 @@ function ChartCard({ chart }: { chart: MetricChart }) {
   const series = chart.series.filter((item) => item.points.length > 0);
   const pointCount = Math.max(...series.map((item) => item.points.length), 0);
   const max = Math.max(...series.flatMap((item) => item.points.map((point) => point.v)), 0, 1);
-  const innerWidth = WIDTH - PLOT.left - PLOT.right;
+  const calculatedWidth = Math.max(WIDTH, pointCount * (kind === "bar" ? series.length * 6 + 12 : 8) + PLOT.left + PLOT.right);
+  const innerWidth = calculatedWidth - PLOT.left - PLOT.right;
   const innerHeight = HEIGHT - PLOT.top - PLOT.bottom;
   const timestamps = series.flatMap((item) => item.points.map(timestampOf)).filter((value): value is number => value !== null);
   const start = timestamps.length ? Math.min(...timestamps) : null;
@@ -93,22 +94,22 @@ function ChartCard({ chart }: { chart: MetricChart }) {
         </div>
       </div>
       <div className="chart-plot" onMouseLeave={() => setHoverRatio(null)}>
-        <svg className="chart-svg" viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="img" aria-label={`${chart.title} chart`} onMouseMove={(event) => {
+        <svg className="chart-svg" viewBox={`0 0 ${calculatedWidth} ${HEIGHT}`} style={{ minWidth: calculatedWidth > WIDTH ? `${calculatedWidth}px` : "100%" }} role="img" aria-label={`${chart.title} chart`} onMouseMove={(event) => {
           if (pointCount <= 1) return;
           const rect = event.currentTarget.getBoundingClientRect();
-          const x = ((event.clientX - rect.left) / rect.width) * WIDTH;
+          const x = ((event.clientX - rect.left) / rect.width) * calculatedWidth;
           setHoverRatio(Math.max(0, Math.min(1, (x - PLOT.left) / innerWidth)));
         }}>
           {yTicks.map((tick) => {
             const y = PLOT.top + innerHeight - tick.ratio * innerHeight;
-            return <g key={tick.ratio}><line className="chart-grid" x1={PLOT.left} x2={WIDTH - PLOT.right} y1={y} y2={y} /><text className="chart-ylabel" x={PLOT.left - 8} y={y + 3}>{formatValue(tick.value)}</text></g>;
+            return <g key={tick.ratio}><line className="chart-grid" x1={PLOT.left} x2={calculatedWidth - PLOT.right} y1={y} y2={y} /><text className="chart-ylabel" x={PLOT.left - 8} y={y + 3}>{formatValue(tick.value)}</text></g>;
           })}
-          {kind === "line" ? series.map((item, seriesIndex) => <path key={item.name} d={pathFor(item.points, max, start, end)} fill="none" stroke={COLORS[seriesIndex % COLORS.length]} strokeWidth="2" vectorEffect="non-scaling-stroke" />) : series.map((item, seriesIndex) => item.points.map((point, index) => {
+          {kind === "line" ? series.map((item, seriesIndex) => <path key={item.name} d={pathFor(item.points, max, start, end, calculatedWidth)} fill="none" stroke={COLORS[seriesIndex % COLORS.length]} strokeWidth="2" vectorEffect="non-scaling-stroke" />) : series.map((item, seriesIndex) => item.points.map((point, index) => {
             // Cap maximum width at 20px, and subtract 12 to ensure they look thinner
             const width = Math.max(2, Math.min(28, innerWidth / Math.max(pointCount, 1) / series.length - 12));
             const barSpacing = 4;
             const totalBarsWidth = series.length * width + (series.length - 1) * barSpacing;
-            const rawX = xFor(item.points, index, start, end);
+            const rawX = xFor(item.points, index, start, end, calculatedWidth);
             const groupWidth = innerWidth / Math.max(pointCount, 1);
             const center = PLOT.left + groupWidth / 2 + (rawX - PLOT.left) * (1 - 1 / Math.max(pointCount, 1));
             const x = center - totalBarsWidth / 2 + seriesIndex * (width + barSpacing);
@@ -123,7 +124,7 @@ function ChartCard({ chart }: { chart: MetricChart }) {
             return <text className="chart-xlabel" key={timestamp || index} x={PLOT.left + ratio * innerWidth} y={HEIGHT - 12}>{formatTime(timestamp)}</text>;
           })}
         </svg>
-        {hoverRatio !== null && <div className={`chart-tooltip ${tooltipPosition}`} style={{ left: `${(PLOT.left + hoverRatio * innerWidth) / WIDTH * 100}%` }}><div className="tt-time">{hoverTimestamp !== null ? formatDetailedTime(new Date(hoverTimestamp).toISOString()) : "Timestamp unavailable"}</div>{series.map((item, index) => <div className="tt-row" key={item.name}><i style={{ background: COLORS[index % COLORS.length] }} /><span className="tt-name">{item.name}</span><span className="tt-val">{formatValue(nearestPoint(item.points, hoverTimestamp)?.v ?? 0)}{chart.unit || ""}</span></div>)}</div>}
+        {hoverRatio !== null && <div className={`chart-tooltip ${tooltipPosition}`} style={{ left: `${(PLOT.left + hoverRatio * innerWidth) / calculatedWidth * 100}%` }}><div className="tt-time">{hoverTimestamp !== null ? formatDetailedTime(new Date(hoverTimestamp).toISOString()) : "Timestamp unavailable"}</div>{series.map((item, index) => <div className="tt-row" key={item.name}><i style={{ background: COLORS[index % COLORS.length] }} /><span className="tt-name">{item.name}</span><span className="tt-val">{formatValue(nearestPoint(item.points, hoverTimestamp)?.v ?? 0)}{chart.unit || ""}</span></div>)}</div>}
       </div>
       <div className="chart-legend">{series.map((item, index) => <span className="chart-key" key={item.name}><i style={{ background: COLORS[index % COLORS.length] }} />{item.name}</span>)}</div>
     </section>

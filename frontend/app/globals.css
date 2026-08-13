@@ -2779,6 +2779,8 @@ select option:hover {
 .chart-plot {
   position: relative;
   padding: 10px 12px 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .chart-svg {
