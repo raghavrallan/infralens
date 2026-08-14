@@ -34,15 +34,6 @@ class SolutionArchitectSkill(AgenticSkill):
         },
         "required": ["objective"],
     }
-    wiki = (
-        "## Solution Architect\n\n"
-        "An agentic architect that sizes the ticket (T1–T3), explores connected "
-        "providers, designs against the same six concern areas as Intelligence "
-        "modules, critiques with the Risk Engine, and records ADRs as gated "
-        "findings in the existing Approvals inbox.\n\n"
-        "Force it with `/solution_architect` in Agent or Plan mode. It is not "
-        "auto-routed and cannot be attached to a scheduled workflow."
-    )
 
     def stream_events(self, args: dict[str, Any], *, chat_id: str = "") -> Iterator[dict[str, Any]]:
         yield from stream_architect(args, chat_id=chat_id)

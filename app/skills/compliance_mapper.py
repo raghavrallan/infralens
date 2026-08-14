@@ -29,25 +29,6 @@ class ComplianceMapperSkill(Skill):
         },
         "required": ["controls", "framework"],
     }
-    wiki = (
-        "## Compliance Mapper\n\n"
-        "Maps your current controls and evidence to a compliance framework and "
-        "shows exactly where the gaps are.\n\n"
-        "### When to use it\n"
-        "- Preparing for a SOC 2 / ISO 27001 / PCI-DSS audit.\n"
-        "- Giving a client visibility of compliance posture during *Improve* "
-        "reviews.\n\n"
-        "### What to give it\n"
-        "- A description of your current controls and evidence, and the target "
-        "framework.\n\n"
-        "### What you get back\n"
-        "A coverage summary and a mapping table (control, status of Met / "
-        "Partial / Gap, supporting evidence, next step) plus a prioritised "
-        "remediation list. It is advisory guidance, not a formal audit "
-        "opinion.\n\n"
-        "### Maps to\n"
-        "Operating model control point: *Risk & compliance visibility*."
-    )
     system_prompt = (
         "You are a senior GRC analyst who maps engineering reality to "
         "compliance frameworks and produces audit-ready gap analyses. You are "

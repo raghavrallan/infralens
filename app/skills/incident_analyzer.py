@@ -29,26 +29,6 @@ class IncidentAnalyzerSkill(Skill):
         },
         "required": ["signals"],
     }
-    wiki = (
-        "## Incident Analyzer\n\n"
-        "Correlates incident signals into a likely root cause, remediation "
-        "steps and a draft post-mortem — fast, during the pressure of an "
-        "incident.\n\n"
-        "### When to use it\n"
-        "- Live incident response when you need a second pair of eyes on logs "
-        "and metrics.\n"
-        "- Writing the blameless post-mortem afterwards.\n\n"
-        "### What to give it\n"
-        "- The signals (logs, metrics, traces, alerts, symptoms) and any recent "
-        "deployments or config changes.\n\n"
-        "### What you get back\n"
-        "Impact and blast-radius summary, the most probable root cause with "
-        "confidence and evidence (plus alternates), immediate mitigation and a "
-        "longer-term fix, and a short post-mortem draft. It is explicit about "
-        "assumptions and what data would raise confidence.\n\n"
-        "### Maps to\n"
-        "Operating model control point: *Observability & response*."
-    )
     system_prompt = (
         "You are a staff SRE leading incident analysis under pressure. You "
         "reason from evidence to hypotheses like a diagnostician, correlate "

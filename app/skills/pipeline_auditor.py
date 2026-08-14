@@ -37,27 +37,6 @@ class PipelineAuditorSkill(Skill):
         },
         "required": ["pipeline_config"],
     }
-    wiki = (
-        "## Pipeline Auditor\n\n"
-        "Reviews an existing CI/CD pipeline and tells you where it falls short "
-        "of DevSecOps best practice, ranked by severity, with copy-paste fixes.\n\n"
-        "### When to use it\n"
-        "- Onboarding a new client repo and you need a fast security read of "
-        "their delivery pipeline.\n"
-        "- Before promoting a pipeline to production.\n"
-        "- Periodic hygiene checks during the *Operate* phase.\n\n"
-        "### What to give it\n"
-        "- The raw pipeline file (GitHub Actions, GitLab CI, Jenkinsfile, Azure "
-        "DevOps YAML).\n"
-        "- Optionally, the platform name for more precise advice.\n\n"
-        "### What you get back\n"
-        "A posture summary, a findings table (control, status, severity, "
-        "recommendation) covering SAST, SCA, secret scanning, image scanning, "
-        "SBOM, signing, approval gates and least-privilege tokens, plus a quick "
-        "wins list with fix snippets.\n\n"
-        "### Maps to\n"
-        "Operating model control point: *Source, quality & dependency security*."
-    )
     system_prompt = (
         "You are a principal DevSecOps engineer performing a rigorous security "
         "audit of a CI/CD pipeline. You reason like an attacker mapping the "

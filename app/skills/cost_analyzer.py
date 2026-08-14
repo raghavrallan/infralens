@@ -29,28 +29,6 @@ class CostAnalyzerSkill(Skill):
         },
         "required": ["objective"],
     }
-    wiki = (
-        "## Cost & Billing Analyst\n\n"
-        "Answers billing and spend questions from your *connected* cloud account "
-        "using live figures pulled read-only from Azure Cost Management — no "
-        "invoice pasting required.\n\n"
-        "### When to use it\n"
-        "- 'What's the billing for my subscription for June?'\n"
-        "- 'How much am I spending this month, and on what?'\n"
-        "- 'Which service is my biggest cost driver?'\n"
-        "- 'Compare this month's spend to last month.'\n\n"
-        "### What it uses\n"
-        "The Azure connection saved in Settings for the active project. The suite "
-        "authenticates read-only and queries actual cost for the requested period, "
-        "grouped by service. A subscription id must be set and the app "
-        "registration needs the *Cost Management Reader* (or Reader) role.\n\n"
-        "### What you get back\n"
-        "The total for the period, a by-service breakdown ordered by cost, the "
-        "top cost drivers, and pragmatic, read-only optimisation suggestions. It "
-        "never changes anything.\n\n"
-        "### Maps to\n"
-        "Operating model control point: *FinOps & cost management*."
-    )
     system_prompt = (
         "You are a senior FinOps analyst answering billing and cost questions "
         "about a customer's LIVE Azure subscription. You are given the REAL spend "

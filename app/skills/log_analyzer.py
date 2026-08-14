@@ -28,28 +28,6 @@ class LogAnalyzerSkill(Skill):
         },
         "required": ["objective"],
     }
-    wiki = (
-        "## Log & Error Analyst\n\n"
-        "Answers error and HTTP status questions for your *connected* container "
-        "apps using live request telemetry pulled read-only from Azure Monitor — "
-        "no log pasting required. The chat renders 4xx / 5xx counts over time as a "
-        "graph.\n\n"
-        "### When to use it\n"
-        "- 'How many 400 errors do we have in the last hour?'\n"
-        "- 'Any 500s in the last 2 hours?'\n"
-        "- 'What's the 4xx / 5xx breakdown today?'\n\n"
-        "### What it uses\n"
-        "The Azure connection saved in Settings for the active project. It reads "
-        "the Container Apps `Requests` metric split by HTTP status code over the "
-        "requested window. A subscription id must be set and the app registration "
-        "needs at least the *Monitoring Reader* (or Reader) role.\n\n"
-        "### What you get back\n"
-        "Total requests, a by-category (2xx/3xx/4xx/5xx) and by-code breakdown, the "
-        "specific codes you asked about, and a plotted error graph. It never "
-        "changes anything.\n\n"
-        "### Maps to\n"
-        "Operating model control point: *Observability & performance*."
-    )
     system_prompt = (
         "You are a senior SRE answering error / HTTP status questions about a "
         "customer's LIVE Azure container apps. You are given REAL request counts "

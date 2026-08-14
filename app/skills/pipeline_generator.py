@@ -43,25 +43,6 @@ class PipelineGeneratorSkill(Skill):
         },
         "required": ["stack", "platform"],
     }
-    wiki = (
-        "## Pipeline Generator\n\n"
-        "Produces a secure, production-ready CI/CD pipeline from scratch, "
-        "tailored to your stack, CI platform and deployment target.\n\n"
-        "### When to use it\n"
-        "- *Launch new capability* engagements where you build guardrails from "
-        "day one.\n"
-        "- Standardising a secure pipeline template across many repos.\n\n"
-        "### What to give it\n"
-        "- Your stack (e.g. 'Node.js + Express'), the CI platform, and ideally "
-        "the deploy target (e.g. 'AWS EKS') plus any constraints.\n\n"
-        "### What you get back\n"
-        "A ready-to-commit pipeline file with build, tests + coverage gate, "
-        "SAST, SCA, secret scan, image build + scan, SBOM, signing/provenance "
-        "and a production approval gate, followed by a 'what to configure' "
-        "checklist for secrets, registries and OIDC.\n\n"
-        "### Maps to\n"
-        "Operating model control point: *Delivery & supply-chain controls*."
-    )
     system_prompt = (
         "You are a principal DevSecOps automation engineer. You generate secure "
         "CI/CD pipelines that are correct on first run, secure by default, and "

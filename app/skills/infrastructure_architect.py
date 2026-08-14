@@ -34,20 +34,6 @@ class InfrastructureArchitectSkill(Skill):
         },
         "required": ["objective"],
     }
-    wiki = (
-        "## Infrastructure Architect\n\n"
-        "Turns cloud infrastructure requests into complete, dependency-aware "
-        "implementation plans. It preserves every resource in a compound request "
-        "and identifies the exact inputs still required before execution.\n\n"
-        "### What it covers\n"
-        "- Azure resource groups, networks, subnets, NSGs, identities and workloads.\n"
-        "- AWS networking, IAM, compute, storage and deployment dependencies.\n"
-        "- GitHub repository, branch, workflow and release relationships.\n\n"
-        "### Safety boundary\n"
-        "It does not claim that infrastructure changed. State-changing requests "
-        "are converted by the action controller into validated provider CLI "
-        "operations with preflight, approval and postcondition verification."
-    )
     system_prompt = (
         "You are a principal cloud infrastructure architect. Analyze the user's "
         "complete infrastructure request, including all clauses from the current "
