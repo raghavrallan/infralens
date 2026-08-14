@@ -4,9 +4,17 @@ Reads Azure OpenAI settings from the Postgres-backed config so credentials can
 be updated at runtime from the Settings page. The underlying client is rebuilt
 whenever the stored endpoint / key / API version changes.
 
-When Langfuse credentials are configured, the Langfuse drop-in AzureOpenAI
-client is used so every completion is traced (model, tokens, latency) with
-session_id / user_id from the current observability context.
+There are two Azure OpenAI consumers:
+  1. This module — used by one-shot skills and the orchestrator. When Langfuse
+     credentials are configured, the ``langfuse.openai`` drop-in AzureOpenAI
+     client traces completions (model, tokens, latency) with session_id /
+     user_id from the current observability context.
+  2. ``app.agents.solution_architect.llm`` — LangChain ``AzureChatOpenAI`` so
+     the architect graph can ``bind_tools()``. Tracing there uses
+     ``langfuse.langchain.CallbackHandler`` plus the same metadata helper.
+
+The raw client here cannot bind tools; do not merge the two without losing
+agentic tool calling.
 """
 from typing import Any, Iterator, Optional
 

@@ -75,6 +75,16 @@ export function DashboardPage() {
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [runs, setRuns] = useState<Run[]>([]);
+  const [architectRuns, setArchitectRuns] = useState<Array<{
+    id: string;
+    objective?: string;
+    tier?: string;
+    mode?: string;
+    status?: string;
+    source?: string;
+    updated_at?: string;
+    decisions?: Array<{ id: string; title?: string; gate_decision?: string }>;
+  }>>([]);
   const [severity, setSeverity] = useState("");
   const [status, setStatus] = useState("open");
   const [module, setModule] = useState("");
@@ -126,6 +136,7 @@ export function DashboardPage() {
           nextApprovals,
           nextWorkflows,
           nextRuns,
+          nextArchitect,
         ] = await Promise.all([
           api<Summary>(
             `/api/dashboard/summary?project_id=${encodeURIComponent(projectId)}&${timeParams}`,
@@ -140,6 +151,9 @@ export function DashboardPage() {
           api<Run[]>(
             `/api/runs?project_id=${encodeURIComponent(projectId)}&limit=12&${timeParams}`,
           ),
+          api<typeof architectRuns>(
+            `/api/architecture/runs?project_id=${encodeURIComponent(projectId)}&limit=8`,
+          ).catch(() => []),
         ]);
         if (requestId !== requestRef.current) return;
         setSummary(nextSummary);
@@ -147,6 +161,7 @@ export function DashboardPage() {
         setApprovals(nextApprovals);
         setWorkflows(nextWorkflows);
         setRuns(nextRuns);
+        setArchitectRuns(nextArchitect);
         setUpdated(new Date());
       } finally {
         if (requestId === requestRef.current) setLoading(false);
@@ -547,6 +562,27 @@ function getModuleIcon(key: string) {
           </div>
         </section>
         <div className="dash-grid">
+          {architectRuns.length > 0 && (
+            <section className="dash-col" style={{ gridColumn: "1 / -1" }}>
+              <div className="dash-section-head"><h3>Architecture</h3></div>
+              <div className="finding-list">
+                {architectRuns.map((item) => (
+                  <article className="finding-card" key={item.id}>
+                    <div className="finding-card-top">
+                      <span className="gate-chip">{item.tier} · {item.mode}</span>
+                      <span className="finding-meta">{item.status} · {item.source}</span>
+                    </div>
+                    <h4>{item.objective || "Architecture run"}</h4>
+                    {(item.decisions || []).map((decision) => (
+                      <p key={decision.id} className="finding-evidence">
+                        {decision.title} {decision.gate_decision ? `· ${decision.gate_decision}` : ""}
+                      </p>
+                    ))}
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
           <section className="dash-col">
             <div className="dash-section-head">
               <h3>Findings</h3>

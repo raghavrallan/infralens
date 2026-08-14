@@ -1626,6 +1626,8 @@ def _contextual_task(messages: list[dict[str, Any]]) -> str:
 def _skill_catalog_text() -> str:
     lines = []
     for skill in registry.all():
+        if not getattr(skill, "auto_routable", True):
+            continue
         triggers = "; ".join(skill.triggers[:3]) if skill.triggers else ""
         line = f"- {skill.name} ({skill.category}): {skill.description}"
         if triggers:
@@ -2201,6 +2203,7 @@ def run_chat(
     skill: Optional[str] = None,
     action_scope: ActionScope = "read_only",
     access_level: AccessLevel = "ask_approval",
+    chat_id: str = "",
 ) -> ChatTurn:
     """Run one orchestrated turn.
 
@@ -2216,31 +2219,102 @@ def run_chat(
     task = _last_user_message(messages)
     contextual_task = _contextual_task(messages)
     topology = _gather_project_topology(project_id, messages)
-    live_context, charts = _gather_live_context(
-        contextual_task,
-        project_id,
-        force=(
-            skill in {"cloud_posture", "drift_auditor"}
-            or _looks_like_diagnostic_intent(contextual_task)
-        ),
-        force_cost=(skill == "cost_analyzer"),
-        force_metrics=(skill == "metrics_analyzer"),
-        force_logs=(skill == "log_analyzer"),
-        force_security=(skill in _SECURITY_SKILLS or _is_security_task(task)),
-    )
-    status_context = provider_status_text(project_id, action_scope)
-    live_context = _merge_context(topology, live_context, status_context)
+    forced = registry.get(skill) if skill else None
+    agentic = _is_agentic(forced)
+    if agentic:
+        live_context, charts = provider_status_text(project_id, action_scope), []
+        live_context = _merge_context(topology, live_context)
+    else:
+        live_context, charts = _gather_live_context(
+            contextual_task,
+            project_id,
+            force=(
+                skill in {"cloud_posture", "drift_auditor"}
+                or _looks_like_diagnostic_intent(contextual_task)
+            ),
+            force_cost=(skill == "cost_analyzer"),
+            force_metrics=(skill == "metrics_analyzer"),
+            force_logs=(skill == "log_analyzer"),
+            force_security=(skill in _SECURITY_SKILLS or _is_security_task(task)),
+        )
+        status_context = provider_status_text(project_id, action_scope)
+        live_context = _merge_context(topology, live_context, status_context)
+    if mode == "plan" and agentic:
+        args = _skill_args(skill, task, task, policy, live_context, _memory_context_text(messages))
+        args.update({"project_id": project_id, "chat_id": chat_id, "plan_only": True})
+        final: dict[str, Any] = {}
+        for event in _stream_agentic(forced, args, chat_id=chat_id, plan_only=True):
+            if event.get("type") == "final":
+                final = event
+        return ChatTurn(
+            mode="plan",
+            reply=str(final.get("reply") or ""),
+            plan=[PlanStep(**step) for step in (final.get("plan") or []) if isinstance(step, dict) and step.get("skill")],
+            skills_used=list(final.get("skills_used") or [skill]),
+        )
     if mode == "plan":
         turn = _run_plan_mode(messages, live_context)
         turn.charts = charts
     elif skill:
-        turn = _run_single_skill(
-            skill, task, policy, live_context, _memory_context_text(messages)
-        )
+        if agentic:
+            args = _skill_args(skill, task, task, policy, live_context, _memory_context_text(messages))
+            args.update({"project_id": project_id, "chat_id": chat_id})
+            result = forced.run(args)
+            turn = ChatTurn(
+                mode="agent",
+                reply=result.content,
+                agents=[AgentRun(skill=skill, objective=task, output=result.content)],
+                skills_used=[skill],
+            )
+        else:
+            turn = _run_single_skill(
+                skill, task, policy, live_context, _memory_context_text(messages)
+            )
         turn.charts = charts
     else:
         turn = _run_multi_agent(messages, policy, live_context, project_id, charts)
     return turn
+
+
+def _is_agentic(skill: Any) -> bool:
+    return bool(skill is not None and getattr(skill, "is_agentic", False))
+
+
+def _stream_agentic(
+    skill: Any,
+    args: dict[str, Any],
+    *,
+    chat_id: str,
+    plan_only: bool = False,
+) -> Iterator[dict[str, Any]]:
+    payload = {**args, "plan_only": plan_only, "chat_id": chat_id, "thread_id": chat_id}
+    collected: list[str] = []
+    final: dict[str, Any] = {}
+    for event in skill.stream_events(payload, chat_id=chat_id):
+        if event.get("type") == "final":
+            final = event
+            continue
+        if event.get("type") == "delta":
+            collected.append(str(event.get("text") or ""))
+        yield event
+    reply = str(final.get("reply") or "".join(collected))
+    mode = final.get("mode") or ("plan" if plan_only else "agent")
+    turn = ChatTurn(
+        mode=mode,
+        reply=reply,
+        plan=[
+            PlanStep(skill=str(step.get("skill")), objective=str(step.get("objective")))
+            for step in (final.get("plan") or [])
+            if isinstance(step, dict) and step.get("skill")
+        ],
+        agents=[AgentRun(skill=skill.name, objective=str(args.get("objective") or ""), output=reply)],
+        skills_used=list(final.get("skills_used") or [skill.name]),
+    )
+    result = turn.to_dict()
+    if final.get("tier"):
+        result["tier"] = final.get("tier")
+        result["architect_mode"] = final.get("architect_mode")
+    yield {"type": "final", **result}
 
 
 def _pretty(name: str) -> str:
@@ -2258,6 +2332,11 @@ def _skill_deltas(skill: Any, args: dict[str, Any]) -> Iterator[str]:
         generation_name=f"skill-{skill.name}",
     )
     try:
+        if getattr(skill, "is_agentic", False):
+            for event in skill.stream_events(args, chat_id=str(args.get("chat_id") or "")):
+                if event.get("type") == "delta" and event.get("text"):
+                    yield str(event["text"])
+            return
         if skill.json_output:
             yield skill.run(args).content
             return
@@ -2286,6 +2365,8 @@ def _stream_steps(
     policy: str,
     live_context: Optional[str],
     charts: Optional[list[dict[str, Any]]] = None,
+    chat_id: str = "",
+    project_id: str = "",
 ) -> Iterator[dict[str, Any]]:
     """Execute an ordered set of skill steps, streaming events and a final turn.
 
@@ -2319,6 +2400,11 @@ def _stream_steps(
             live_context,
             _memory_context_text(messages),
         )
+        args["chat_id"] = chat_id
+        args["project_id"] = project_id
+        if _is_agentic(sk):
+            yield from _stream_agentic(sk, args, chat_id=chat_id)
+            return
         content = yield from _stream_and_collect(_skill_deltas(sk, args))
         turn = ChatTurn(
             mode="agent",
@@ -2344,6 +2430,20 @@ def _stream_steps(
             live_context,
             _memory_context_text(messages),
         )
+        args["chat_id"] = chat_id
+        args["project_id"] = project_id
+        if _is_agentic(sk):
+            collected = []
+            for event in sk.stream_events(args, chat_id=chat_id):
+                if event.get("type") in {"status", "delta"}:
+                    yield event
+                if event.get("type") == "delta":
+                    collected.append(str(event.get("text") or ""))
+                if event.get("type") == "final":
+                    collected = [str(event.get("reply") or "".join(collected))]
+            result_content = "".join(collected)
+            runs.append(AgentRun(skill=step.skill, objective=step.objective, output=result_content))
+            continue
         result = sk.run(args)
         runs.append(
             AgentRun(skill=step.skill, objective=step.objective, output=result.content)
@@ -2387,6 +2487,7 @@ def run_chat_stream(
     skill: Optional[str] = None,
     action_scope: ActionScope = "read_only",
     access_level: AccessLevel = "ask_approval",
+    chat_id: str = "",
 ) -> Iterator[dict[str, Any]]:
     """Streaming variant of run_chat.
 
@@ -2397,20 +2498,32 @@ def run_chat_stream(
     task = _last_user_message(messages)
     contextual_task = _contextual_task(messages)
     topology = _gather_project_topology(project_id, messages)
-    live_context, charts = _gather_live_context(
-        contextual_task,
-        project_id,
-        force=(
-            skill in {"cloud_posture", "drift_auditor"}
-            or _looks_like_diagnostic_intent(contextual_task)
-        ),
-        force_cost=(skill == "cost_analyzer"),
-        force_metrics=(skill == "metrics_analyzer"),
-        force_logs=(skill == "log_analyzer"),
-        force_security=(skill in _SECURITY_SKILLS or _is_security_task(task)),
-    )
-    status_context = provider_status_text(project_id, action_scope)
-    live_context = _merge_context(topology, live_context, status_context)
+    forced = registry.get(skill) if skill else None
+    agentic = _is_agentic(forced)
+    if agentic:
+        live_context, charts = provider_status_text(project_id, action_scope), []
+        live_context = _merge_context(topology, live_context)
+    else:
+        live_context, charts = _gather_live_context(
+            contextual_task,
+            project_id,
+            force=(
+                skill in {"cloud_posture", "drift_auditor"}
+                or _looks_like_diagnostic_intent(contextual_task)
+            ),
+            force_cost=(skill == "cost_analyzer"),
+            force_metrics=(skill == "metrics_analyzer"),
+            force_logs=(skill == "log_analyzer"),
+            force_security=(skill in _SECURITY_SKILLS or _is_security_task(task)),
+        )
+        status_context = provider_status_text(project_id, action_scope)
+        live_context = _merge_context(topology, live_context, status_context)
+
+    if mode == "plan" and agentic:
+        args = _skill_args(skill, task, task, policy, live_context, _memory_context_text(messages))
+        args.update({"project_id": project_id, "chat_id": chat_id})
+        yield from _stream_agentic(forced, args, chat_id=chat_id, plan_only=True)
+        return
 
     if mode == "plan":
         yield {"type": "status", "text": "Planning"}
@@ -2421,7 +2534,7 @@ def run_chat_stream(
         return
 
     if skill:
-        sk = registry.get(skill)
+        sk = forced
         if sk is None:
             turn = ChatTurn(mode="agent", reply=f"Skill '{skill}' was not found.")
             yield {"type": "delta", "text": turn.reply}
@@ -2431,6 +2544,10 @@ def run_chat_stream(
         args = _skill_args(
             skill, task, task, policy, live_context, _memory_context_text(messages)
         )
+        args.update({"project_id": project_id, "chat_id": chat_id})
+        if agentic:
+            yield from _stream_agentic(sk, args, chat_id=chat_id)
+            return
         content = yield from _stream_and_collect(_skill_deltas(sk, args))
         turn = ChatTurn(
             mode="agent",
@@ -2459,7 +2576,9 @@ def run_chat_stream(
     live_context, charts = _ensure_planned_context(
         contextual_task, project_id, steps, live_context, charts
     )
-    yield from _stream_steps(task, messages, steps, policy, live_context, charts)
+    yield from _stream_steps(
+        task, messages, steps, policy, live_context, charts, chat_id=chat_id, project_id=project_id
+    )
 
 
 def execute_plan_stream(
@@ -2468,6 +2587,7 @@ def execute_plan_stream(
     steps: list[PlanStep],
     action_scope: ActionScope = "read_only",
     access_level: AccessLevel = "ask_approval",
+    chat_id: str = "",
 ) -> Iterator[dict[str, Any]]:
     """Execute a plan the user already approved, streaming each step.
 
@@ -2493,4 +2613,6 @@ def execute_plan_stream(
         contextual_task, project_id, valid, live_context, charts
     )
     yield {"type": "status", "text": "Executing plan"}
-    yield from _stream_steps(task, messages, valid, policy, live_context, charts)
+    yield from _stream_steps(
+        task, messages, valid, policy, live_context, charts, chat_id=chat_id, project_id=project_id
+    )

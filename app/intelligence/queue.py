@@ -31,3 +31,12 @@ def get_queue() -> Queue:
 def enqueue_run(run_id: str) -> None:
     """Enqueue a workflow run for the worker to pick up."""
     get_queue().enqueue(_JOB_PATH, run_id, job_timeout=900)
+
+
+def enqueue_architecture(delivery_run_id: str) -> None:
+    """Generate a delivery architecture proposal on the intelligence queue."""
+    get_queue().enqueue(
+        "app.agents.solution_architect.jobs.generate_architecture",
+        delivery_run_id,
+        job_timeout=900,
+    )

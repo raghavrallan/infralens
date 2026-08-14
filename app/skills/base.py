@@ -10,7 +10,7 @@ The orchestrator exposes every registered skill to the model as a callable
 tool, so the model can pick the right skill for a user's request.
 """
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 
 from app import azure_client
 
@@ -52,6 +52,10 @@ class Skill:
     # Ask the model for JSON output when a skill emits structured findings.
     json_output: bool = False
     temperature: float = 0.2
+    # Agentic skills run a graph instead of one completion. Keep them out of
+    # Auto-mode planning unless auto_routable is explicitly True.
+    is_agentic: bool = False
+    auto_routable: bool = True
 
     def build_user_prompt(self, args: dict[str, Any]) -> str:
         """Render tool-call arguments into a single user prompt.
@@ -101,6 +105,22 @@ class Skill:
             metadata={"category": self.category},
         )
 
+    def stream_events(self, args: dict[str, Any], *, chat_id: str = "") -> Any:
+        """Yield orchestrator events: {type: status|delta|final, ...}.
+
+        Default implementation runs once and yields the full reply as a delta.
+        Agentic skills override this to stream graph progress.
+        """
+        result = self.run(args)
+        if result.content:
+            yield {"type": "delta", "text": result.content}
+        yield {
+            "type": "final",
+            "mode": "agent",
+            "reply": result.content,
+            "skills_used": [self.name],
+        }
+
     def as_tool(self) -> dict[str, Any]:
         """Return the OpenAI tool definition for this skill."""
         return {
@@ -111,6 +131,28 @@ class Skill:
                 "parameters": self.parameters,
             },
         }
+
+
+class AgenticSkill(Skill):
+    """Skill backed by an interruptible multi-node graph rather than one LLM call."""
+
+    is_agentic = True
+    auto_routable = False
+
+    def run(self, args: dict[str, Any]) -> SkillResult:
+        chunks: list[str] = []
+        final: dict[str, Any] = {}
+        thread_id = str(args.get("chat_id") or args.get("thread_id") or "")
+        for event in self.stream_events(args, chat_id=thread_id):
+            if event.get("type") == "delta":
+                chunks.append(str(event.get("text") or ""))
+            if event.get("type") == "final":
+                final = event
+        content = str(final.get("reply") or "".join(chunks))
+        return SkillResult(skill=self.name, content=content, metadata=final)
+
+    def stream_events(self, args: dict[str, Any], *, chat_id: str = "") -> Any:
+        raise NotImplementedError(f"{self.name} must implement stream_events")
 
 
 class SkillRegistry:

@@ -57,6 +57,17 @@ export function DeliveryChecklist({ projectId }: { projectId: string }) {
     void load();
   }, [load]);
 
+  const architectureStatus = String((run?.artifacts?.architecture_status as string) || "");
+  const architectureProposal = run?.artifacts?.architecture_proposal as
+    | { summary?: string; hld?: string; components?: string[]; notes?: string; tier?: string; mode?: string }
+    | undefined;
+
+  useEffect(() => {
+    if (run?.stage !== "architecture" || architectureStatus !== "generating") return;
+    const timer = window.setInterval(() => void load(), 2500);
+    return () => window.clearInterval(timer);
+  }, [run?.stage, architectureStatus, load]);
+
   const start = async () => {
     setBusy(true);
     setMessage("");
@@ -120,7 +131,8 @@ export function DeliveryChecklist({ projectId }: { projectId: string }) {
     return run.checklist[idx + 1]?.stage || "done";
   };
 
-  const canAdvance = hasMinRole(me?.role, currentItem?.min_role);
+  const canAdvance = hasMinRole(me?.role, currentItem?.min_role)
+    && !(run?.stage === "architecture" && architectureStatus === "generating");
 
   return (
     <section className="card delivery-checklist" style={{ padding: '24px' }}>
@@ -196,6 +208,17 @@ export function DeliveryChecklist({ projectId }: { projectId: string }) {
               <button type="button" className="tiny-btn" disabled={busy} onClick={() => void saveDocs()}>
                 Save docs
               </button>
+            </div>
+          )}
+          {run.stage === "architecture" && (
+            <div className="delivery-docs" style={{ marginBottom: "16px" }}>
+              {architectureStatus === "generating" && <p className="empty-note">Generating architecture from ingested requirements…</p>}
+              {architectureProposal?.summary && architectureStatus !== "generating" && (
+                <>
+                  <p style={{ fontSize: "13px", margin: "0 0 8px" }}><strong>{architectureProposal.tier || ""} {architectureProposal.mode || ""}</strong> {architectureProposal.summary}</p>
+                  {architectureProposal.hld ? <pre style={{ whiteSpace: "pre-wrap", fontSize: "12px", maxHeight: "240px", overflow: "auto" }}>{architectureProposal.hld}</pre> : null}
+                </>
+              )}
             </div>
           )}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '16px', borderTop: '1px solid var(--border)' }}>

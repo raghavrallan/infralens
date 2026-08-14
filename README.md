@@ -115,7 +115,12 @@ Browser chat UI  ──▶  FastAPI (/api/chat)  ──▶  Orchestrator
 - `app/db.py` — SQLAlchemy engine, models, init (chat + intelligence tables).
 - `app/config.py` — Postgres-backed Azure OpenAI configuration.
 - `app/connections.py` — Postgres-backed Azure/AWS/GitHub credential store.
-- `app/azure_client.py` — the single Azure OpenAI integration point.
+- `app/azure_client.py` — Azure OpenAI for one-shot skills (Langfuse OpenAI drop-in).
+- `app/agents/solution_architect/` — agentic architect graph (clarify → explore →
+  design → critique → senior verify → finalize). Forced via `/solution_architect`
+  in Chat Agent or Plan; also powers the delivery `architecture` stage. Not
+  auto-routed and not workflow-safe. ADRs land in the existing Findings /
+  Approvals inbox, classified per decision.
 - `app/main.py` — FastAPI app (chat, skills, workflows, runs, findings, config).
 - `frontend/` — Next.js TypeScript app exported as static files for FastAPI.
 

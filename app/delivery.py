@@ -164,15 +164,22 @@ def transition(
         artifacts = dict(row.artifacts or {})
         if artifact_key:
             artifacts[artifact_key] = artifact_value
-        # Auto-generate stage artifacts for MVP.
         if to_stage == "architecture" and "architecture_proposal" not in artifacts:
-            docs = artifacts.get("docs") or artifacts.get("requirements") or ""
+            artifacts["architecture_status"] = "generating"
             artifacts["architecture_proposal"] = {
-                "summary": "Proposed 3-tier Azure architecture for the ingested requirements.",
-                "components": ["App Service / Container Apps", "Postgres", "Key Vault", "ACR"],
-                "notes": str(docs)[:2000],
+                "summary": "Generating architecture from ingested requirements…",
+                "components": [],
+                "notes": str(artifacts.get("docs") or artifacts.get("requirements") or "")[:2000],
                 "accepted": False,
             }
+            row.artifacts = artifacts
+            row.stage = to_stage
+            row.updated_at = _now()
+            session.commit()
+            session.refresh(row)
+            payload = _dict(row)
+            _enqueue_architecture_job(run_id)
+            return payload
         if to_stage == "terraform" and "terraform_pr" not in artifacts:
             artifacts["terraform_pr"] = {
                 "status": "proposed",
@@ -212,6 +219,17 @@ def transition(
         session.commit()
         session.refresh(row)
         return _dict(row)
+
+
+def _enqueue_architecture_job(run_id: str) -> None:
+    try:
+        from app.intelligence.queue import enqueue_architecture
+
+        enqueue_architecture(run_id)
+    except Exception:
+        from app.agents.solution_architect.jobs import generate_architecture
+
+        generate_architecture(run_id)
 
 
 def ingest_docs(run_id: str, *, docs: str, user_role: str) -> dict[str, Any]:

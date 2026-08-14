@@ -36,6 +36,7 @@ CAPABILITY_MIN_ROLE: dict[str, str] = {
     "create_github_repo": "developer",
     "approve_human": "devops_engineer",
     "run_workflow": "devops_engineer",
+    "run_architecture": "devops_lead",
     "approve_two_person": "devops_lead",
     "prod_apply": "devops_lead",
     "break_glass": "devops_lead",

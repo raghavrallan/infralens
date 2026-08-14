@@ -103,6 +103,12 @@ deployment. After read parity and postcondition tests pass in a development
 project, enable `CLI_EXECUTORS_ENABLED=true`; enable writes only after an
 explicit development canary and approval review.
 
+The Solution Architect graph runs **in-process** with the API (LangGraph
+checkpointed against the same `DATABASE_URL`). Do not expose a public MCP
+ingress for it; keep `minReplicas=1` on the API if you rely on in-memory
+resume fallbacks. A remote `SOLUTION_ARCHITECT_MODE` service is a later
+extraction, not required for chat, Plan mode, or the delivery architecture stage.
+
 The API's public ingress can remain enabled for the browser. The executor
 control-plane routes are protected by `X-Executor-Key`,
 `X-Executor-Provider`, and `X-Executor-Org-Id`, and should be reachable only
