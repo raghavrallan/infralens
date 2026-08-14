@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import Image from "next/image";
 import loginImage from "../public/assets/images/login.png";
 import { getStoredUser, getToken, login as doLogin } from "../lib/auth";
+import { ThemeToggle } from "./theme-toggle";
 
 export function LoginPage() {
   const [username, setUsername] = useState("");
@@ -38,6 +39,7 @@ export function LoginPage() {
   if (checking) {
     return (
       <div className="login-screen" aria-busy="true">
+        <ThemeToggle variant="floating" />
         <div className="login-check">
           <span className="login-mark">IL</span>
           <span>Loading InfraLens…</span>
@@ -50,6 +52,7 @@ export function LoginPage() {
     <div>
 
     <div className="login-screen">
+      <ThemeToggle variant="floating" />
 
       <div className="login-layout">
 

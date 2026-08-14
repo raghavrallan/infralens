@@ -7,6 +7,7 @@ import { usePathname } from "next/navigation";
 import { fetchCurrentUser, getStoredUser, logout, type AuthUser } from "../lib/auth";
 import { AuthGate } from "./auth-gate";
 import { GlobalLoader } from "./global-loader";
+import { ThemeToggle } from "./theme-toggle";
 
 export function Shell({ children, subtitle = "Skills Suite", scroll = false, loading = false }: {
   children: React.ReactNode;
@@ -38,6 +39,7 @@ export function Shell({ children, subtitle = "Skills Suite", scroll = false, loa
             <a href="/organizations" className={`nav-item${pathname.startsWith("/organizations") ? " active" : ""}`}>Organizations</a>
             <a href="/wiki" className={`nav-item${pathname.startsWith("/wiki") ? " active" : ""}`}>Wiki</a>
             <a href="/settings" className={`nav-item${pathname.startsWith("/settings") ? " active" : ""}`}>Settings</a>
+            <ThemeToggle />
             <div className="nav-user">
               <span className="nav-user-name">{user?.name || user?.username || "Admin"}</span>
               {user?.role_label || user?.display_role || user?.role ? (
