@@ -1313,8 +1313,10 @@ body.scroll-page .page {
 .markdown-content li { margin: 5px 0; }
 .markdown-content a { color: var(--white); text-decoration: underline; text-underline-offset: 3px; }
 .markdown-content code { background: var(--elev-2); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; font-family: var(--font-mono); font-size: 0.9em; }
-.markdown-code-wrap,
-.markdown-table-wrap { position: relative; margin: 14px 0; }
+.markdown-code-wrap { position: relative; margin: 14px 0; }
+.markdown-table-container { position: relative; margin: 14px 0; padding-top: 32px; }
+.markdown-table-container .markdown-copy { top: 0; right: 0; }
+.markdown-table-wrap { position: relative; }
 .markdown-content pre { margin: 0; padding: 14px; overflow-x: auto; background: var(--elev-2); border: 1px solid var(--border); border-radius: var(--radius); }
 .markdown-content pre code { padding: 0; border: 0; background: transparent; white-space: pre; }
 .markdown-content .markdown-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
