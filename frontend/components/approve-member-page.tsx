@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { getToken } from "../lib/auth";
+import { ThemeToggle } from "./theme-toggle";
 
 export function ApproveMemberPage() {
   const [message, setMessage] = useState("Processing…");
@@ -41,6 +42,7 @@ export function ApproveMemberPage() {
 
   return (
     <div className="page login-page">
+      <ThemeToggle variant="floating" />
       <main className="login-card">
         <h1>Membership approval</h1>
         <p>{message}</p>

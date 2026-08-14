@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
 import { Modal } from "./modal";
+import { ThemeToggle } from "./theme-toggle";
 
 type PathId = "existing" | "new";
 type Step =
@@ -905,12 +906,7 @@ export function OnboardingWizard({
                 <span className="ob-page-brand-sub">Workspace setup</span>
               </div>
             </div>
-            
-            {/* <div className="ob-page-header-right">
-              <span className="ob-page-local-admin">Local Admin</span>
-              <span className="ob-page-super-admin">Super Admin</span>
-              <button type="button" className="ob-page-signout-btn">Sign out</button>
-            </div> */}
+            <ThemeToggle variant="header" />
           </header>
           
           <div className="ob-page-main-wrapper">

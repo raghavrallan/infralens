@@ -6,8 +6,8 @@ import type { MetricChart, MetricPoint } from "../lib/types";
 const WIDTH = 760;
 const HEIGHT = 250;
 const PLOT = { left: 48, right: 14, top: 16, bottom: 36 };
-// Themed colors using variants of the primary color (#2563eb) for a cohesive look
-const COLORS = ["#2563eb", "#60a5fa", "#1e40af", "#93c5fd", "#172554", "#3b82f6"];
+// Theme tokens keep series readable on both the light and dark chart surfaces.
+const COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)", "var(--chart-6)"];
 
 function formatValue(value: number) {
   if (Math.abs(value) >= 1000) return value.toLocaleString(undefined, { maximumFractionDigits: 1 });

@@ -5,6 +5,7 @@ import Image from "next/image";
 import loginImage from "../public/assets/images/login.png";
 import { api } from "../lib/api";
 import { saveSession, type AuthSession } from "../lib/auth";
+import { ThemeToggle } from "./theme-toggle";
 
 type Peek = {
   email: string;
@@ -91,6 +92,7 @@ export function AcceptInvitePage() {
   if (loading) {
     return (
       <div className="login-screen" aria-busy="true">
+        <ThemeToggle variant="floating" />
         <div className="login-check">
           <span className="login-mark">IL</span>
           <span>Loading invite…</span>
@@ -101,6 +103,7 @@ export function AcceptInvitePage() {
 
   return (
     <div className="login-screen">
+      <ThemeToggle variant="floating" />
       <div className="login-layout invite-layout">
         <div className="login-left" aria-hidden="true">
           <div className="login-brand">
