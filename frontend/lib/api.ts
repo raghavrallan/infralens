@@ -37,7 +37,13 @@ export async function api<T>(url: string, options?: RequestInit): Promise<T> {
         ...options?.headers,
       },
     });
-  } catch {
+  } catch (error) {
+    if (
+      (error instanceof DOMException || error instanceof Error) &&
+      error.name === "AbortError"
+    ) {
+      throw error;
+    }
     throw new Error(
       "Cannot reach the API. Is the backend running on NEXT_PUBLIC_API_BASE?",
     );

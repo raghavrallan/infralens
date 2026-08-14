@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, apiUrl, consumeSse } from "../lib/api";
 import { authHeaders, clearSession } from "../lib/auth";
+import { chatHref, readChatIdFromUrl, syncChatUrl } from "../lib/chat-route";
 import { copyText } from "../lib/clipboard";
 import type { Action, ActionEvent, ChatDetail, ChatMessage, ChatSummary, ConnectionStatus, MetricChart, Project, Skill, StreamEvent } from "../lib/types";
 import { MarkdownContent } from "./markdown";
@@ -31,6 +32,26 @@ function scoreSkill(item: Skill, text: string) {
 
 function messageMeta(message: ChatMessage) {
   return message.metadata || message.meta || {};
+}
+
+function toUiMessages(messages: ChatMessage[] | undefined): UiMessage[] {
+  return (messages || []).map((message) => ({
+    ...message,
+    displayMode: messageMeta(message).mode === "plan" ? "plan" : "agent",
+    charts: Array.isArray(messageMeta(message).charts) ? messageMeta(message).charts as MetricChart[] : undefined,
+  }));
+}
+
+function fetchTimeout(ms: number): AbortSignal | undefined {
+  try {
+    return AbortSignal.timeout(ms);
+  } catch {
+    return undefined;
+  }
+}
+
+function isAbortError(error: unknown) {
+  return (error instanceof DOMException || error instanceof Error) && error.name === "AbortError";
 }
 
 function actionEventText(event: ActionEvent) {
@@ -80,8 +101,12 @@ export function ChatPage() {
   const [fullAccessModalOpen, setFullAccessModalOpen] = useState(false);
   const [fullAccessStep, setFullAccessStep] = useState<1 | 2>(1);
   const [fullAccessBusy, setFullAccessBusy] = useState(false);
+  const [chatLoading, setChatLoading] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
+  const streamAbortRef = useRef<AbortController | null>(null);
+  const selectGenerationRef = useRef(0);
+  const chatIdRef = useRef<string | null>(null);
 
   const resizeInput = useCallback(() => {
     const element = inputRef.current;
@@ -124,32 +149,56 @@ export function ChatPage() {
     }
   }, []);
 
-  const selectChat = useCallback(async (id: string) => {
-    const chat = await api<ChatDetail>(`/api/chats/${id}`);
+  const selectChat = useCallback(async (id: string, options?: { push?: boolean }) => {
+    const push = options?.push !== false;
+    if (push) syncChatUrl(id);
+    streamAbortRef.current?.abort();
+    streamAbortRef.current = null;
+    setSending(false);
     setChatId(id);
-    setMessages((chat.messages || []).map((message) => ({
-      ...message,
-      displayMode: messageMeta(message).mode === "plan" ? "plan" : "agent",
-      charts: Array.isArray(messageMeta(message).charts) ? messageMeta(message).charts as MetricChart[] : undefined,
-    })));
+    chatIdRef.current = id;
+    setChatLoading(true);
     setPendingPlan(null);
-    const actionId = [...(chat.messages || [])].reverse().map((message) => String(messageMeta(message).action_id || "")).find(Boolean);
-    if (actionId) {
-      try {
-        const action = await api<Action>(`/api/actions/${actionId}`);
-        if (["queued", "running"].includes(action.status)) {
-          await api(`/api/actions/${actionId}/diagnostics`);
+    const generation = selectGenerationRef.current + 1;
+    selectGenerationRef.current = generation;
+    try {
+      const chat = await api<ChatDetail>(`/api/chats/${id}`, { signal: fetchTimeout(15000) });
+      if (selectGenerationRef.current !== generation) return;
+      if (chat.project_id && chat.project_id !== projectId) {
+        window.localStorage.setItem("projectId", chat.project_id);
+        setProjectId(chat.project_id);
+      }
+      setMessages(toUiMessages(chat.messages));
+      setChatLoading(false);
+      const actionId = [...(chat.messages || [])].reverse().map((message) => String(messageMeta(message).action_id || "")).find(Boolean);
+      if (!actionId) {
+        setActiveAction(null);
+        setActionEvents([]);
+        return;
+      }
+      void (async () => {
+        try {
+          const action = await api<Action>(`/api/actions/${actionId}`);
+          if (selectGenerationRef.current !== generation) return;
+          setActiveAction(action);
+          const events = await api<ActionEvent[]>(`/api/actions/${actionId}/events`);
+          if (selectGenerationRef.current !== generation) return;
+          setActionEvents(events);
+        } catch {
+          if (selectGenerationRef.current !== generation) return;
+          setActiveAction(null);
+          setActionEvents([]);
         }
-        const events = await api<ActionEvent[]>(`/api/actions/${actionId}/events`);
-        setActiveAction(action);
-        setActionEvents(events);
-      } catch { setActiveAction(null); setActionEvents([]); }
-    } else {
-      setActiveAction(null);
-      setActionEvents([]);
+      })();
+    } catch (error) {
+      if (selectGenerationRef.current !== generation) return;
+      if (isAbortError(error)) setStatus("Timed out opening that chat");
+      else setStatus("Could not open that chat");
+    } finally {
+      if (selectGenerationRef.current === generation) setChatLoading(false);
     }
     setEditingMessageId(null);
-  }, []);
+  }, [projectId]);
 
   useEffect(() => {
     let active = true;
@@ -171,13 +220,85 @@ export function ChatPage() {
   }, [loadProjects]);
 
   useEffect(() => {
-    void loadChats(projectId || undefined);
-    setChatId(null);
-    setMessages([]);
-    setActiveAction(null);
-    setActionEvents([]);
-    setFullAccessModalOpen(false);
-  }, [projectId, loadChats]);
+    chatIdRef.current = chatId;
+  }, [chatId]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+    void (async () => {
+      await loadChats(projectId);
+      if (cancelled) return;
+      const urlId = readChatIdFromUrl();
+      if (urlId) {
+        if (urlId !== chatIdRef.current) await selectChat(urlId, { push: false });
+        return;
+      }
+      if (chatIdRef.current) return;
+      setChatId(null);
+      setMessages([]);
+      setActiveAction(null);
+      setActionEvents([]);
+      setFullAccessModalOpen(false);
+    })();
+    return () => { cancelled = true; };
+  }, [projectId, loadChats, selectChat]);
+
+  useEffect(() => {
+    const onPop = () => {
+      const urlId = readChatIdFromUrl();
+      if (urlId) void selectChat(urlId, { push: false });
+      else {
+        streamAbortRef.current?.abort();
+        setChatId(null);
+        setMessages([]);
+        setActiveAction(null);
+        setActionEvents([]);
+      }
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [selectChat]);
+
+  useEffect(() => {
+    return () => {
+      streamAbortRef.current?.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!chatId || sending || chatLoading) return;
+    const last = messages[messages.length - 1];
+    if (!last || last.role !== "user" || last.streaming) return;
+    let cancelled = false;
+    let timer = 0;
+    const started = Date.now();
+    const poll = async () => {
+      try {
+        const chat = await api<ChatDetail>(`/api/chats/${chatId}`, { signal: fetchTimeout(8000) });
+        if (cancelled || chatIdRef.current !== chatId) return;
+        const next = toUiMessages(chat.messages);
+        const latest = next[next.length - 1];
+        if (latest?.role === "assistant") {
+          setMessages(next);
+          setStatus("Connected");
+          void loadChats(projectId || undefined);
+          return;
+        }
+      } catch {
+        // Keep polling while the original stream is still writing.
+      }
+      if (!cancelled && Date.now() - started < 5 * 60 * 1000) {
+        timer = window.setTimeout(() => void poll(), 1200);
+      }
+    };
+    setStatus("Working…");
+    timer = window.setTimeout(() => void poll(), 800);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [chatId, chatLoading, sending, messages, loadChats, projectId]);
 
   useEffect(() => {
     if (projectId) void loadProviderStatus(projectId, actionScope);
@@ -258,14 +379,25 @@ export function ChatPage() {
   };
 
   const createProject = async (projectIdOrName: string) => {
-    // Onboarding wizard already created the project; refresh and select it.
     const list = await api<Project[]>("/api/projects");
     setProjects(list);
     const match =
       list.find((p) => p.id === projectIdOrName) ||
       list.find((p) => p.name === projectIdOrName) ||
       list[list.length - 1];
-    if (match) {
+    if (match && match.id !== projectId) {
+      streamAbortRef.current?.abort();
+      streamAbortRef.current = null;
+      setSending(false);
+      setProjectId(match.id);
+      window.localStorage.setItem("projectId", match.id);
+      setChatId(null);
+      chatIdRef.current = null;
+      setMessages([]);
+      setActiveAction(null);
+      setActionEvents([]);
+      syncChatUrl(null, "replace");
+    } else if (match) {
       setProjectId(match.id);
       window.localStorage.setItem("projectId", match.id);
     }
@@ -274,10 +406,20 @@ export function ChatPage() {
   };
 
   const selectProject = (value: string) => {
+    if (value === projectId) return;
+    streamAbortRef.current?.abort();
+    streamAbortRef.current = null;
+    setSending(false);
     setProjectId(value);
     window.localStorage.setItem("projectId", value);
     const savedScope = window.localStorage.getItem(`actionScope:${value}`);
     setActionScope(savedScope === "write" ? "write" : "read_only");
+    setChatId(null);
+    chatIdRef.current = null;
+    setMessages([]);
+    setActiveAction(null);
+    setActionEvents([]);
+    syncChatUrl(null, "replace");
   };
 
   const selectActionScope = (value: string) => {
@@ -288,10 +430,17 @@ export function ChatPage() {
 
   const newChat = async () => {
     if (!projectId) return;
+    streamAbortRef.current?.abort();
+    streamAbortRef.current = null;
+    setSending(false);
     const chat = await api<ChatSummary>(`/api/chats?project_id=${encodeURIComponent(projectId)}`, { method: "POST" });
     setChatId(chat.id);
+    chatIdRef.current = chat.id;
+    syncChatUrl(chat.id);
     setMessages([]);
     setEditingMessageId(null);
+    setActiveAction(null);
+    setActionEvents([]);
     setChats((current) => [chat, ...current]);
     inputRef.current?.focus();
   };
@@ -336,7 +485,9 @@ export function ChatPage() {
       setChats((current) => current.filter((chat) => chat.id !== id));
       if (chatId === id) {
         setChatId(null);
+        chatIdRef.current = null;
         setMessages([]);
+        syncChatUrl(null, "replace");
       }
       setDeleteTarget(null);
     } finally {
@@ -354,10 +505,14 @@ export function ChatPage() {
   );
 
   const runStream = async (url: string, body: Record<string, unknown>, messageId: string) => {
+    streamAbortRef.current?.abort();
+    const controller = new AbortController();
+    streamAbortRef.current = controller;
     const response = await fetch(apiUrl(url), {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(body),
+      signal: controller.signal,
     });
     if (response.status === 401) {
       clearSession();
@@ -367,7 +522,12 @@ export function ChatPage() {
     if (!response.ok) throw new Error("The stream failed to start.");
     let accumulated = "";
     await consumeSse(response, (event: StreamEvent) => {
-      if (event.chat_id) setChatId(String(event.chat_id));
+      if (event.chat_id) {
+        const nextId = String(event.chat_id);
+        setChatId(nextId);
+        chatIdRef.current = nextId;
+        syncChatUrl(nextId, "replace");
+      }
       if (event.action_id || event.action) {
         const action = event.action || ({ id: String(event.action_id), provider: String(event.provider || "azure"), status: String(event.type || "planned") } as Action);
         setActiveAction((current) => ({ ...current, ...action, id: action.id || String(event.action_id) }));
@@ -409,6 +569,22 @@ export function ChatPage() {
     setActiveAction(null);
     setActionEvents([]);
     setSending(true);
+    let activeChatId = chatId;
+    if (!activeChatId) {
+      try {
+        const chat = await api<ChatSummary>(`/api/chats?project_id=${encodeURIComponent(projectId)}`, { method: "POST" });
+        activeChatId = chat.id;
+        setChatId(chat.id);
+        chatIdRef.current = chat.id;
+        syncChatUrl(chat.id, "replace");
+        setChats((current) => [chat, ...current.filter((item) => item.id !== chat.id)]);
+      } catch (error) {
+        setSending(false);
+        setStatus(error instanceof Error ? error.message : "Could not start chat");
+        setInput(text);
+        return;
+      }
+    }
     const userMessage: UiMessage = { id: `user-${Date.now()}`, role: "user", content: text };
     const assistantId = `assistant-${Date.now()}`;
     setMessages((current) => {
@@ -418,8 +594,9 @@ export function ChatPage() {
       return [...current.slice(0, index), { ...current[index], content: text }, { id: assistantId, role: "assistant", content: "", streaming: true }];
     });
     try {
-      await runStream("/api/chat/stream", { chat_id: chatId, project_id: projectId, message: text, edit_message_id: editId, mode, skill: skill || null, action_scope: actionScope, access_level: accessLevel }, assistantId);
+      await runStream("/api/chat/stream", { chat_id: activeChatId, project_id: projectId, message: text, edit_message_id: editId, mode, skill: skill || null, action_scope: actionScope, access_level: accessLevel }, assistantId);
     } catch (error) {
+      if (isAbortError(error)) return;
       setMessages((current) => current.map((message) => message.id === assistantId ? { ...message, content: error instanceof Error ? error.message : "Something went wrong reaching the server.", streaming: false, error: true } : message));
     } finally {
       setSending(false);
@@ -436,6 +613,7 @@ export function ChatPage() {
     try {
       await runStream("/api/chat/execute-plan", { chat_id: chatId, project_id: projectId, steps: pendingPlan.steps, action_scope: actionScope, access_level: accessLevel }, assistantId);
     } catch (error) {
+      if (isAbortError(error)) return;
       setMessages((current) => current.map((message) => message.id === assistantId ? { ...message, content: error instanceof Error ? error.message : "The plan failed.", streaming: false, error: true } : message));
     } finally {
       setSending(false);
@@ -529,7 +707,7 @@ export function ChatPage() {
           <button className="new-chat" onClick={() => void newChat()}>+ New chat</button>
           <div className="chat-list scroll">
             {chats.map((chat) => <div className={`chat-item${chat.id === chatId ? " active" : ""}`} key={chat.id}>
-              <button className="chat-item-title" onClick={() => void selectChat(chat.id)}>{chat.title || "New chat"}</button>
+              <a className="chat-item-title" href={chatHref(chat.id)} onClick={(event) => { event.preventDefault(); void selectChat(chat.id); }}>{chat.title || "New chat"}</a>
               <button className="chat-item-del" title="Delete chat" onClick={() => setDeleteTarget(chat)}>×</button>
             </div>)}
           </div>
@@ -549,7 +727,8 @@ export function ChatPage() {
             </div>
           </div>
           <div className="messages scroll" ref={messagesRef}>
-            {!messages.length && <div className="empty-state"><div className="empty-eyebrow">Secure-by-design delivery</div><h3>What can I help you secure today?</h3><p>Let the agent plan a multi-skill task, or type <code>/</code> to pick a skill inline.</p><div className="suggestions">
+            {chatLoading && !messages.length && <p className="muted" style={{ padding: "24px" }}>Loading conversation…</p>}
+            {!chatLoading && !messages.length && <div className="empty-state"><div className="empty-eyebrow">Secure-by-design delivery</div><h3>What can I help you secure today?</h3><p>Let the agent plan a multi-skill task, or type <code>/</code> to pick a skill inline.</p><div className="suggestions">
               {emptyStateSuggestions.map((suggestion) => <button className="suggestion" key={suggestion} onClick={() => { onInput(suggestion); inputRef.current?.focus(); }}>{suggestion}</button>)}
             </div></div>}
             {messages.map((message) => <div className={`message ${message.role}${message.error ? " error" : ""}`} key={message.id}>
@@ -562,6 +741,7 @@ export function ChatPage() {
               </div>}
               {showPlanApproval(message) && <div className="plan-actions"><div className="plan-list">{message.plan?.map((step) => <div className="plan-step" key={`${step.skill}-${step.objective}`}><strong>{prettyName(step.skill)}</strong><span>{step.objective}</span></div>)}</div><button className="primary" onClick={() => void executePlan()} disabled={sending}>Approve and execute</button></div>}
             </div>)}
+            {!sending && !chatLoading && messages.length > 0 && messages[messages.length - 1]?.role === "user" && <div className="message assistant"><div className="message-role">Assistant</div><div className="message-content"><MarkdownContent text="Working…" /></div></div>}
             {activeAction && <section className="action-activity" aria-live="polite">
               <div className="action-activity-head"><div className="action-activity-title"><span className="activity-icon">›_</span><div><span className="message-role">Provider activity</span><strong>{activeAction.target || "Provider operation"}</strong></div></div><div className="action-activity-meta"><span className={`activity-status ${activeAction.status}`}>{activeAction.status.replaceAll("_", " ")}</span><span className="action-provider">{activeAction.provider}</span></div></div>
               {activeAction.command_preview && <code className="action-command">{activeAction.command_preview}</code>}

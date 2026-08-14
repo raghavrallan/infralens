@@ -16,8 +16,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from app import (
@@ -94,14 +92,25 @@ _VIEWER_WRITE_ALLOW = frozenset(
 )
 
 
-class JwtAuthMiddleware(BaseHTTPMiddleware):
-    """Require a Bearer JWT for all /api routes except login and health."""
+class JwtAuthMiddleware:
+    """Require a Bearer JWT for /api routes without buffering SSE streams.
 
-    async def dispatch(self, request: Request, call_next):
+    Pure ASGI (not BaseHTTPMiddleware): Starlette's BaseHTTPMiddleware can stall
+    other requests while a long-lived chat stream is still generating.
+    """
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        request = Request(scope, receive)
         if request.method == "OPTIONS":
-            return await call_next(request)
+            await self.app(scope, receive, send)
+            return
         path = request.url.path.rstrip("/") or "/"
-        # Keep /api/health exact; login is public; everything else under /api needs JWT.
         if path.startswith("/api") and path not in _PUBLIC_API_PATHS:
             try:
                 user = auth.verify_token(
@@ -110,9 +119,10 @@ class JwtAuthMiddleware(BaseHTTPMiddleware):
             except Exception:
                 user = None
             if user is None:
-                return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+                response = JSONResponse({"detail": "Not authenticated"}, status_code=401)
+                await response(scope, receive, send)
+                return
             request.state.user = user
-            # Viewer (and missing role) cannot mutate except allowlisted read-style posts.
             if (
                 request.method in _WRITE_METHODS
                 and path not in _VIEWER_WRITE_ALLOW
@@ -121,11 +131,13 @@ class JwtAuthMiddleware(BaseHTTPMiddleware):
                 from app.rbac import has_min_role
 
                 if not has_min_role(user.get("role"), "developer"):
-                    return JSONResponse(
+                    response = JSONResponse(
                         {"detail": "Viewer role is read-only"},
                         status_code=403,
                     )
-        return await call_next(request)
+                    await response(scope, receive, send)
+                    return
+        await self.app(scope, receive, send)
 
 
 # Last-added middleware is outermost. CORS must wrap JWT auth so browser
@@ -1515,6 +1527,13 @@ def dashboard_page() -> FileResponse:
 
 @app.get("/")
 def index() -> FileResponse:
+    return FileResponse(_FRONTEND_DIR / "index.html")
+
+
+@app.get("/c/{chat_id}")
+@app.get("/c/{chat_id}/")
+def chat_session_page(chat_id: str) -> FileResponse:
+    """Serve the chat SPA for a specific conversation id."""
     return FileResponse(_FRONTEND_DIR / "index.html")
 
 

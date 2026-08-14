@@ -849,7 +849,9 @@ body.scroll-page .page {
 
 .chat-item-title {
   flex: 1;
+  display: block;
   text-align: left;
+  text-decoration: none;
   background: transparent;
   border: none;
   color: var(--text);
