@@ -2503,7 +2503,67 @@ select option:hover {
   letter-spacing: 0.2em;
   text-transform: uppercase;
   color: var(--faint);
-  margin: 4px 0 14px;
+  margin: 4px 0 8px;
+}
+
+.wiki-index-meta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--faint);
+  margin: 0 0 12px;
+}
+
+.wiki-search {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--elev-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+
+.wiki-search:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.wiki-az {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0 0 12px;
+}
+
+.wiki-az button {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  min-width: 22px;
+  padding: 3px 5px;
+}
+
+.wiki-az button:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.wiki-letter {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: var(--faint);
+  margin: 14px 0 8px;
+  padding-top: 4px;
+  scroll-margin-top: 12px;
 }
 
 .wiki-index-item {
@@ -2572,6 +2632,23 @@ select option:hover {
   color: var(--white);
 }
 
+.wiki-article h4 {
+  font-family: var(--font-display);
+  font-size: 15px;
+  margin-top: 20px;
+  color: var(--text);
+}
+
+.wiki-article ol {
+  padding-left: 1.3em;
+}
+
+.wiki-article hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 24px 0;
+}
+
 .wiki-article p {
   color: var(--muted);
 }
@@ -2601,7 +2678,17 @@ select option:hover {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
   margin-bottom: 14px;
+}
+
+.wiki-head-tags,
+.wiki-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .wiki-cat {
@@ -2614,6 +2701,42 @@ select option:hover {
   background: var(--primary-subtle);
   border-radius: 3px;
   padding: 4px 10px;
+}
+
+.wiki-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  background: var(--elev-2);
+  border-radius: 3px;
+  padding: 4px 10px;
+}
+
+.wiki-badge-muted {
+  color: var(--muted);
+}
+
+.wiki-slug {
+  font-size: 12px;
+}
+
+.wiki-back {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 0;
+}
+
+.wiki-back:hover {
+  color: var(--text);
+  text-decoration: underline;
 }
 
 .wiki-try {
@@ -2634,6 +2757,51 @@ select option:hover {
   grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
   gap: 14px;
   margin-top: 24px;
+}
+
+.wiki-letter-section {
+  margin-top: 8px;
+}
+
+.wiki-letter-heading {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--faint);
+  margin: 28px 0 0;
+}
+
+.wiki-letter-section .wiki-grid {
+  margin-top: 12px;
+}
+
+.wiki-table-wrap {
+  overflow-x: auto;
+  margin-top: 12px;
+}
+
+.wiki-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.wiki-table th,
+.wiki-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+  color: var(--muted);
+}
+
+.wiki-table th {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
 }
 
 .wiki-card {

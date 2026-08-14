@@ -36,24 +36,6 @@ class IaCReviewerSkill(Skill):
         },
         "required": ["iac_config"],
     }
-    wiki = (
-        "## IaC Reviewer\n\n"
-        "Reads Infrastructure-as-Code and flags security misconfigurations "
-        "before they reach the cloud.\n\n"
-        "### When to use it\n"
-        "- Reviewing Terraform/Helm/K8s changes in a pull request.\n"
-        "- Baselining an inherited estate during transition.\n\n"
-        "### What to give it\n"
-        "- The IaC source (Terraform, CloudFormation, Helm, or Kubernetes "
-        "manifests) and optionally its type.\n\n"
-        "### What you get back\n"
-        "A risk summary and a findings table (resource, issue, severity, fix) "
-        "covering encryption, network exposure, IAM least-privilege, logging, "
-        "secrets handling and pod/container security, with corrected snippets "
-        "for the top issues. It never invents resources not in your input.\n\n"
-        "### Maps to\n"
-        "Operating model control point: *Infrastructure & cloud security*."
-    )
     system_prompt = (
         "You are a principal cloud security architect reviewing "
         "Infrastructure-as-Code. You think in terms of attacker reachability, "

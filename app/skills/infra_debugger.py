@@ -33,11 +33,6 @@ class InfraDebuggerSkill(Skill):
         },
         "required": ["objective"],
     }
-    wiki = (
-        "## Infra Debugger\n\n"
-        "Uses failure evidence to propose a fix, then routes retries through the "
-        "same approval and rollback controls as the original change."
-    )
     system_prompt = (
         "You are a senior infrastructure debugger. Use the failure evidence, project "
         "topology, recent deployment outcomes, and attempted change to find the root "

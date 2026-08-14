@@ -33,11 +33,6 @@ class DeploymentManagerSkill(Skill):
         },
         "required": ["objective"],
     }
-    wiki = (
-        "## Deployment Manager\n\n"
-        "Plans governed rollouts that include verification and rollback triggers. "
-        "Actual changes still go through the execution control plane."
-    )
     system_prompt = (
         "You are a release and deployment orchestrator. Build a concrete, ordered "
         "deployment plan grounded in project topology and existing pipelines.\n\n"

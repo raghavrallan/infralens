@@ -29,24 +29,6 @@ class PolicyGeneratorSkill(Skill):
         },
         "required": ["requirement"],
     }
-    wiki = (
-        "## Policy Generator\n\n"
-        "Turns a plain-English guardrail into working policy-as-code with tests, "
-        "so you can enforce standards in the pipeline or admission controller.\n\n"
-        "### When to use it\n"
-        "- Codifying a new security standard (e.g. 'no root containers').\n"
-        "- Building a policy library during the *Transform* phase.\n\n"
-        "### What to give it\n"
-        "- The rule in natural language and, optionally, the target engine "
-        "(OPA/Rego, Kyverno, or Conftest).\n\n"
-        "### What you get back\n"
-        "A commented policy file, an explanation of how it evaluates, and both "
-        "a passing and a failing example input so you can wire it into tests "
-        "immediately. Rules default to deny where appropriate.\n\n"
-        "### Maps to\n"
-        "Operating model control point: *Infrastructure & cloud security* "
-        "(policy-as-code / quality gates)."
-    )
     system_prompt = (
         "You are a policy-as-code specialist who writes production-grade, "
         "test-backed guardrails. You translate intent into precise, "

@@ -29,11 +29,6 @@ class ProjectAnalyzerSkill(Skill):
         },
         "required": ["objective"],
     }
-    wiki = (
-        "## Project Analyzer\n\n"
-        "Builds a grounded map of an existing project before create/update/delete "
-        "operations so the assistant does not act as if the estate is empty."
-    )
     system_prompt = (
         "You are a principal engineer performing project discovery. Use PROJECT "
         "TOPOLOGY, live inventory, and repository evidence already provided. Do not "

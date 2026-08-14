@@ -30,29 +30,6 @@ class CodeReviewerSkill(Skill):
         },
         "required": ["objective"],
     }
-    wiki = (
-        "## Code Reviewer & Optimizer\n\n"
-        "Reviews, optimizes and compares your *real* application source, fetched "
-        "read-only from your connected GitHub repositories on the correct "
-        "environment branch (dev → develop/development, uat → uat, prod → main). "
-        "No pasting required.\n\n"
-        "### When to use it\n"
-        "- 'Review my backend code and tell me what to improve.'\n"
-        "- 'Optimize / refactor this module.'\n"
-        "- 'Find bugs, security issues or code smells.'\n"
-        "- 'Compare how this behaves on dev vs uat.'\n\n"
-        "### What it uses\n"
-        "The GitHub connection saved in Settings for the active project, scoped to "
-        "the repositories mapped to the project. It resolves the environment "
-        "branch from your request and reads the relevant source files.\n\n"
-        "### What you get back\n"
-        "A prioritized review: correctness/bugs, performance, readability, "
-        "security, and concrete before/after suggestions that reference the exact "
-        "repo, path and branch. It never changes anything.\n\n"
-        "### Maps to\n"
-        "Operating model control point: *Engineering quality & continuous "
-        "improvement*."
-    )
     system_prompt = (
         "You are a staff engineer doing a rigorous, read-only code review of a "
         "customer's REAL source code, provided to you below (fetched from their "

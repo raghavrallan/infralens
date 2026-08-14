@@ -38,16 +38,6 @@ class TerraformGeneratorSkill(Skill):
         },
         "required": ["objective"],
     }
-    wiki = (
-        "## Terraform Generator\n\n"
-        "Produces production-ready Terraform for fresh or existing projects.\n\n"
-        "### Output\n"
-        "- `providers.tf`, `backend.tf`, `variables.tf`, `main.tf`, `outputs.tf`\n"
-        "- Optional modules for networking, identity, compute, data stores\n"
-        "- Explicit rollback notes for destructive changes\n\n"
-        "### Safety\n"
-        "Does not apply changes. Use `terraform_executor` after review/approval."
-    )
     system_prompt = (
         "You are a principal Terraform engineer. Generate accurate, production-grade "
         "Terraform HCL for the user's request. Use PROJECT TOPOLOGY, live inventory, "

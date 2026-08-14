@@ -35,24 +35,6 @@ class VulnTriageSkill(Skill):
         },
         "required": ["findings"],
     }
-    wiki = (
-        "## Vuln Triage\n\n"
-        "Takes noisy scanner output from multiple tools and turns it into a "
-        "short, prioritised, de-duplicated action list.\n\n"
-        "### When to use it\n"
-        "- After running Snyk / Trivy / Checkmarx / Prisma and facing hundreds "
-        "of findings.\n"
-        "- Daily vulnerability triage during the *Operate* phase.\n\n"
-        "### What to give it\n"
-        "- The raw findings (ideally from more than one tool) and optional "
-        "context about which components are internet-facing or actually used.\n\n"
-        "### What you get back\n"
-        "Structured JSON: a summary plus per-finding CVE id, affected "
-        "component, reachability, exploitability, priority, fix action and "
-        "reasoning. It will not fabricate CVEs that are not in your input.\n\n"
-        "### Maps to\n"
-        "Operating model control point: *Observability & response*."
-    )
     json_output = True
     system_prompt = (
         "You are a vulnerability triage specialist who cuts scanner noise down "

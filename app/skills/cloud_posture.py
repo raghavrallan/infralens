@@ -30,31 +30,6 @@ class CloudPostureSkill(Skill):
         },
         "required": ["objective"],
     }
-    wiki = (
-        "## Environment Posture Reviewer\n\n"
-        "Reviews your *connected* environment — Azure, AWS and/or GitHub — using "
-        "a live, read-only inventory instead of pasted files.\n\n"
-        "### When to use it\n"
-        "- 'Go through my Azure infrastructure and tell me what to improve.'\n"
-        "- 'Review my AWS account for security issues.'\n"
-        "- 'Check my GitHub org for repos missing branch protection.'\n"
-        "- Baselining an inherited account/subscription during transition.\n\n"
-        "### What it uses\n"
-        "The connections saved in Settings. The suite authenticates read-only "
-        "and queries:\n"
-        "- **Azure** — Resource Graph inventory plus checks on storage, NSGs, "
-        "public IPs, key vaults, SQL and VMs.\n"
-        "- **AWS** — caller identity, EC2 and internet-open security groups, S3 "
-        "public-access/encryption, RDS exposure and IAM hygiene.\n"
-        "- **GitHub** — repository inventory, public/private split, default-branch "
-        "protection and Dependabot alert status.\n\n"
-        "### What you get back\n"
-        "A posture summary, a prioritized findings table (resource, issue, "
-        "severity, recommended change) and concrete, read-only improvement "
-        "recommendations. It never modifies anything.\n\n"
-        "### Maps to\n"
-        "Operating model control point: *Infrastructure & cloud security*."
-    )
     system_prompt = (
         "You are a principal cloud & platform security architect performing a "
         "read-only posture review of a customer's LIVE environment. You may be "

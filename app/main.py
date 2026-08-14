@@ -268,6 +268,8 @@ class SkillInfo(BaseModel):
     category: str
     description: str
     triggers: list[str]
+    is_agentic: bool = False
+    auto_routable: bool = True
 
 
 class SkillDetail(SkillInfo):
@@ -357,17 +359,23 @@ def auth_me(user: dict[str, Any] = Depends(auth.require_user)) -> dict[str, Any]
     return {"user": memberships.enrich_user_public(user)}
 
 
+def _skill_sort_key(skill: Any) -> str:
+    return skill.name.replace("_", " ").lower()
+
+
 @app.get("/api/skills", response_model=list[SkillInfo])
 def list_skills() -> list[SkillInfo]:
-    """Return the catalog of available skills for the UI."""
+    """Return the catalog of available skills for the UI, sorted A–Z."""
     return [
         SkillInfo(
             name=s.name,
             category=s.category,
             description=s.description,
             triggers=s.triggers,
+            is_agentic=bool(getattr(s, "is_agentic", False)),
+            auto_routable=bool(getattr(s, "auto_routable", True)),
         )
-        for s in registry.all()
+        for s in sorted(registry.all(), key=_skill_sort_key)
     ]
 
 
@@ -384,6 +392,8 @@ def get_skill(name: str) -> SkillDetail:
         triggers=skill.triggers,
         wiki=skill.wiki,
         parameters=skill.parameters,
+        is_agentic=bool(getattr(skill, "is_agentic", False)),
+        auto_routable=bool(getattr(skill, "auto_routable", True)),
     )
 
 

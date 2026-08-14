@@ -9,6 +9,8 @@ export type Skill = {
   triggers?: string[];
   wiki?: string;
   parameters?: JsonObject;
+  is_agentic?: boolean;
+  auto_routable?: boolean;
 };
 
 export type ChatSummary = {

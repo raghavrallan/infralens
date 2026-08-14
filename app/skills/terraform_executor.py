@@ -34,11 +34,6 @@ class TerraformExecutorSkill(Skill):
         },
         "required": ["objective"],
     }
-    wiki = (
-        "## Terraform Executor\n\n"
-        "Guides Terraform through init → validate → plan → (approval) → apply "
-        "using the project's execution engine. Write phases require rollback plans."
-    )
     system_prompt = (
         "You are the Terraform execution controller for a governed DevSecOps platform. "
         "Translate the user's request into a clear execution plan for the "

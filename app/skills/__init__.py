@@ -5,6 +5,7 @@ Adding a new skill is a two-step process:
   2. Import it here and register it.
 """
 from app.skills.base import SkillResult, registry
+from app.skills.docs import apply_wiki
 from app.skills.classification import (
     WORKFLOW_SAFE,
     action_class_for,
@@ -58,6 +59,8 @@ for _skill in (
     solution_architect,
 ):
     registry.register(_skill)
+
+apply_wiki(registry.all())
 
 __all__ = [
     "registry",

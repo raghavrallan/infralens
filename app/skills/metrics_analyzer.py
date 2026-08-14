@@ -29,28 +29,6 @@ class MetricsAnalyzerSkill(Skill):
         },
         "required": ["objective"],
     }
-    wiki = (
-        "## Metrics & Performance Analyst\n\n"
-        "Answers performance questions from your *connected* cloud resources using "
-        "live time series pulled read-only from Azure Monitor — no telemetry "
-        "pasting required. The chat renders the series as a graph you can switch "
-        "between line and bar.\n\n"
-        "### When to use it\n"
-        "- 'Give me the last 24 hours of CPU for my container app.'\n"
-        "- 'What's the CPU utilization of my VM this week?'\n"
-        "- 'Show me a graph of my app's CPU usage.'\n\n"
-        "### What it uses\n"
-        "The Azure connection saved in Settings for the active project. It "
-        "discovers the resource (Container Apps by default, or VMs when asked), "
-        "reads its CPU time series over the requested window, and reasons over "
-        "the real samples. A subscription id must be set and the app registration "
-        "needs at least the *Monitoring Reader* (or Reader) role.\n\n"
-        "### What you get back\n"
-        "A concise read of average, peak and minimum CPU, notable spikes, and a "
-        "plotted graph. It never changes anything.\n\n"
-        "### Maps to\n"
-        "Operating model control point: *Observability & performance*."
-    )
     system_prompt = (
         "You are a senior SRE answering performance/telemetry questions about a "
         "customer's LIVE Azure resources. You are given the REAL metric summary "

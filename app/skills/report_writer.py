@@ -33,25 +33,6 @@ class ReportWriterSkill(Skill):
         },
         "required": ["metrics"],
     }
-    wiki = (
-        "## Report Writer\n\n"
-        "Turns raw service metrics into a board-readable report with narrative "
-        "and next-period priorities.\n\n"
-        "### When to use it\n"
-        "- Monthly service reviews and quarterly business reviews.\n"
-        "- Any time you need to translate DORA/SLA/cost numbers into an "
-        "executive story.\n\n"
-        "### What to give it\n"
-        "- The raw metrics/KPIs and notable events, the reporting period, and "
-        "the intended audience.\n\n"
-        "### What you get back\n"
-        "A structured report: executive summary, release confidence, service "
-        "resilience, risk & compliance, cost/FinOps highlights and next-period "
-        "priorities. It leads with outcomes and flags missing metrics rather "
-        "than inventing them.\n\n"
-        "### Maps to\n"
-        "Operating model control point: *Executive transparency*."
-    )
     system_prompt = (
         "You are a service delivery lead writing the executive report for a "
         "managed DevSecOps service. You translate operational metrics into a "

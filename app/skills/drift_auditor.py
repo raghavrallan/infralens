@@ -30,29 +30,6 @@ class DriftAuditorSkill(Skill):
         },
         "required": ["objective"],
     }
-    wiki = (
-        "## Infra ↔ Code Drift Auditor\n\n"
-        "Compares what's *actually running* in your cloud against what your "
-        "infrastructure code and deployment pipelines say should exist — both "
-        "pulled live and read-only. Highlights drift, gaps and missing "
-        "best-practice configuration.\n\n"
-        "### When to use it\n"
-        "- 'Understand my infra, then compare it to my Terraform/pipelines and "
-        "tell me what's missing.'\n"
-        "- 'What's running in Azure that isn't captured in code?'\n"
-        "- 'Is my IaC in sync with the deployed environment?'\n\n"
-        "### What it uses\n"
-        "The Azure connection (for the live inventory) and the GitHub connection "
-        "(for the IaC / pipeline code on the resolved environment branch), both "
-        "for the active project.\n\n"
-        "### What you get back\n"
-        "A drift matrix — in cloud only, in code only, in both — plus missing "
-        "guardrails and a prioritized reconciliation list. It never changes "
-        "anything.\n\n"
-        "### Maps to\n"
-        "Operating model control point: *Infrastructure as code & configuration "
-        "management*."
-    )
     system_prompt = (
         "You are a senior platform engineer performing a read-only drift and gap "
         "analysis between a customer's LIVE cloud inventory and their "
