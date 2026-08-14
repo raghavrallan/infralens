@@ -45,6 +45,7 @@
   --elev-1: #ffffff;
   --line: #e5e7eb;
   --fg: #111827;
+  --hover: rgba(15, 23, 42, 0.06);
   --chart-1: #2563eb;
   --chart-2: #60a5fa;
   --chart-3: #1e40af;
@@ -6724,6 +6725,7 @@ html[data-theme="dark"] {
   --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
   --focus-ring: 0 0 0 2px #151c2c, 0 0 0 4px #60a5fa;
   --fg: #e8eef8;
+  --hover: rgba(255, 255, 255, 0.06);
   --chart-1: #60a5fa;
   --chart-2: #93c5fd;
   --chart-3: #3b82f6;
@@ -7241,4 +7243,262 @@ html[data-theme="dark"] .bg-orange {
 html[data-theme="dark"] .bg-purple {
   background: rgba(147, 51, 234, 0.16);
   color: #c4b5fd;
+}
+
+/* Organizations console — keep light and dark on the same tokens */
+.org-sidebar.card {
+  background: var(--bg-2);
+  color: var(--text);
+  border-right-color: var(--border);
+}
+
+.org-main.card {
+  background: var(--panel);
+  color: var(--text);
+}
+
+.org-title-row h2,
+.org-info strong,
+.org-sidebar-header h3,
+.org-table-header h4,
+.user-details strong,
+.stat-content strong,
+.role-item strong,
+.invite-form-row h4,
+.org-main.card h2,
+.org-main.card h3,
+.org-main.card h4 {
+  color: var(--text);
+}
+
+.org-sidebar-header .pill {
+  background: var(--elev-2);
+  color: var(--muted);
+  border: 0;
+}
+
+.search-bar,
+.search-bar.sidebar-search,
+.search-bar.table-search {
+  background: var(--panel);
+  border-color: var(--border);
+}
+
+.search-bar input,
+.search-bar.sidebar-search input {
+  color: var(--text);
+  background: transparent;
+}
+
+.search-bar svg,
+.search-bar.sidebar-search svg {
+  color: var(--muted);
+}
+
+.org-list-item {
+  background: transparent;
+  color: var(--text);
+}
+
+.org-list-item:hover:not(.active) {
+  background: var(--hover);
+}
+
+.org-list-item.active {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--primary);
+}
+
+.org-info span,
+.org-roles-row .role-item,
+.modal-eyebrow,
+.stat-content span,
+.user-details span,
+.filter-dropdown {
+  color: var(--muted);
+}
+
+.role-item strong {
+  color: var(--text);
+}
+
+.role-divider {
+  background: var(--border);
+}
+
+.org-icon {
+  background: var(--elev-2);
+  color: var(--muted);
+}
+
+.org-icon.blue,
+.user-avatar,
+.user-avatar.blue {
+  background: var(--primary-subtle);
+  color: var(--primary);
+}
+
+.org-icon.green,
+.user-avatar.green {
+  background: var(--success-subtle);
+  color: var(--success);
+}
+
+.help-box {
+  background: var(--elev);
+  border: 1px solid var(--border);
+}
+
+.help-content strong {
+  color: var(--text);
+}
+
+.help-content p {
+  color: var(--muted);
+}
+
+.primary-btn-full,
+.create-org-btn {
+  background: var(--primary);
+  color: var(--solid-text);
+}
+
+.primary-btn-full:hover,
+.create-org-btn:hover {
+  background: var(--primary-hover);
+}
+
+.org-tabs,
+.org-tabs-container {
+  border-bottom-color: var(--border);
+}
+
+.org-tab {
+  color: var(--muted);
+  background: transparent;
+}
+
+.org-tab:hover {
+  color: var(--text);
+}
+
+.org-tab.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+  background: transparent;
+}
+
+.org-stat-card,
+.org-table-container {
+  background: var(--elev);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+
+.org-table {
+  background: transparent;
+}
+
+.org-row {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.stat-link {
+  color: var(--primary);
+}
+
+.filter-dropdown {
+  background: var(--panel);
+  border-color: var(--border);
+}
+
+.org-table-pagination {
+  border-top-color: var(--border);
+}
+
+.page-btn {
+  color: var(--text);
+  background: transparent;
+}
+
+.page-btn.active {
+  background: var(--primary);
+  color: var(--solid-text);
+}
+
+.icon-btn-nav {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.icon-btn-nav:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.icon-btn-dots {
+  color: var(--muted);
+}
+
+.icon-btn-dots:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.org-role-badge.org-admin {
+  background: var(--success-subtle);
+  color: var(--success);
+}
+
+.org-role-badge.org-member {
+  background: var(--elev-2);
+  color: var(--muted);
+}
+
+.platform-role-badge.super-admin {
+  background: var(--primary-subtle);
+  color: var(--primary);
+}
+
+.platform-role-badge.platform-dev {
+  background: rgba(147, 51, 234, 0.12);
+  color: #7c3aed;
+}
+
+html[data-theme="dark"] .platform-role-badge.platform-dev {
+  background: rgba(147, 51, 234, 0.18);
+  color: #c4b5fd;
+}
+
+.active-pill {
+  background: var(--success-subtle);
+  color: var(--success);
+  border-color: rgba(22, 163, 74, 0.28);
+}
+
+.invite-inputs input,
+.invite-inputs select {
+  background: var(--panel);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.invite-inputs input:focus,
+.invite-inputs select:focus {
+  border-color: var(--primary);
+  box-shadow: var(--focus-ring);
+}
+
+.empty-note {
+  color: var(--muted);
 }
