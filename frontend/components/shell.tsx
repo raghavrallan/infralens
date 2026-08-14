@@ -35,7 +35,7 @@ export function Shell({ children, subtitle = "Skills Suite", scroll = false, loa
           </div>
           <nav className="nav">
             <a href="/dashboard" className={`nav-item${pathname.startsWith("/dashboard") ? " active" : ""}`}>Dashboard</a>
-            <a href="/" className={`nav-item${pathname === "/" ? " active" : ""}`}>Chat</a>
+            <a href="/" className={`nav-item${pathname === "/" || pathname.startsWith("/c/") ? " active" : ""}`}>Chat</a>
             <a href="/organizations" className={`nav-item${pathname.startsWith("/organizations") ? " active" : ""}`}>Organizations</a>
             <a href="/wiki" className={`nav-item${pathname.startsWith("/wiki") ? " active" : ""}`}>Wiki</a>
             <a href="/settings" className={`nav-item${pathname.startsWith("/settings") ? " active" : ""}`}>Settings</a>

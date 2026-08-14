@@ -17,6 +17,8 @@ const nextConfig: NextConfig = {
   async rewrites() {
     if (!isDev) return [];
     return [
+      { source: "/c/:chatId", destination: "/?chat=:chatId" },
+      { source: "/c/:chatId/", destination: "/?chat=:chatId" },
       { source: "/api/:path*/", destination: `${apiOrigin}/api/:path*` },
       { source: "/api/:path*", destination: `${apiOrigin}/api/:path*` },
     ];
