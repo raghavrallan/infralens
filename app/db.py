@@ -423,6 +423,47 @@ class EngineeringMemory(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class ArchitectureRun(Base):
+    """Catalog row for a Solution Architect graph run (chat or delivery)."""
+
+    __tablename__ = "architecture_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    thread_id: Mapped[str] = mapped_column(String(64), index=True, default="")
+    project_id: Mapped[str] = mapped_column(String(36), index=True, default=DEFAULT_PROJECT_ID)
+    user_id: Mapped[str] = mapped_column(String(120), default="")
+    objective: Mapped[str] = mapped_column(String, default="")
+    tier: Mapped[str] = mapped_column(String(8), default="T1")
+    mode: Mapped[str] = mapped_column(String(16), default="greenfield")
+    source: Mapped[str] = mapped_column(String(16), default="chat")
+    status: Mapped[str] = mapped_column(String(24), default="running")
+    pending_question: Mapped[str] = mapped_column(String, default="")
+    checkpoint: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+
+class ArchitectureDecision(Base):
+    """One ADR produced by a Solution Architect run."""
+
+    __tablename__ = "architecture_decisions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    run_id: Mapped[str] = mapped_column(String(36), index=True)
+    title: Mapped[str] = mapped_column(String(400), default="")
+    context: Mapped[str] = mapped_column(String, default="")
+    options_considered: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    decision: Mapped[str] = mapped_column(String, default="")
+    consequences: Mapped[str] = mapped_column(String, default="")
+    risk_summary: Mapped[str] = mapped_column(String, default="")
+    risk_class: Mapped[str] = mapped_column(String(32), default="config_code_change")
+    blast_radius: Mapped[str] = mapped_column(String(16), default="medium")
+    gate_decision: Mapped[str] = mapped_column(String(32), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class ExecutionJob(Base):
     """A provider CLI operation tracked independently from chat output."""
 

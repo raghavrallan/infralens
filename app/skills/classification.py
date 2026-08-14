@@ -20,6 +20,8 @@ BlastRadius = Literal["low", "medium", "high"]
 
 # What a skill DOES when it runs. Only "read_diagnose" skills may run unattended
 # inside a scheduled/queued workflow.
+# solution_architect is intentionally omitted: it is interruptible and must never
+# run headlessly in a scheduled Workflow (mirrors keeping it off WORKFLOW_SAFE).
 SKILL_ACTION_CLASS: dict[str, ActionClass] = {
     "cloud_posture": "read_diagnose",
     "drift_auditor": "read_diagnose",

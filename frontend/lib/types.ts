@@ -126,8 +126,10 @@ export type StreamEvent = JsonObject & {
   text?: string;
   reply?: string;
   mode?: string;
-  plan?: { skill: string; objective: string }[];
+    plan?: { skill: string; objective: string }[];
   charts?: MetricChart[];
+  tier?: string;
+  architect_mode?: string;
   action_id?: string;
   action?: Action;
   required_action_scope?: "read_only" | "write";

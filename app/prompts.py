@@ -101,3 +101,9 @@ def seed_core_prompts() -> None:
     for skill in registry.all():
         if skill.system_prompt:
             ensure_text_prompt(f"skill-{skill.name}", skill.system_prompt)
+    try:
+        from app.agents.solution_architect.prompts import seed_architect_prompts
+
+        seed_architect_prompts()
+    except Exception:
+        pass

@@ -14,7 +14,7 @@ import { Shell } from "./shell";
 import { ThemedSelect } from "./themed-select";
 
 type ChatMode = "agent" | "plan";
-type UiMessage = ChatMessage & { plan?: { skill: string; objective: string }[]; charts?: MetricChart[]; displayMode?: ChatMode; streaming?: boolean; error?: boolean };
+type UiMessage = ChatMessage & { plan?: { skill: string; objective: string }[]; charts?: MetricChart[]; displayMode?: ChatMode; streaming?: boolean; error?: boolean; architectTier?: string; architectMode?: string };
 
 function prettyName(value: string) {
   return value.split("_").map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
@@ -549,7 +549,7 @@ export function ChatPage() {
         const responseMode: ChatMode = event.mode === "plan" ? "plan" : "agent";
         const plan = responseMode === "plan" && Array.isArray(event.plan) ? event.plan : undefined;
         const charts = Array.isArray(event.charts) ? event.charts : undefined;
-        setMessages((current) => current.map((message) => message.id === messageId ? { ...message, content: accumulated, streaming: false, displayMode: responseMode, plan, charts } : message));
+        setMessages((current) => current.map((message) => message.id === messageId ? { ...message, content: accumulated, streaming: false, displayMode: responseMode, plan, charts, architectTier: typeof event.tier === "string" ? event.tier : undefined, architectMode: typeof event.architect_mode === "string" ? event.architect_mode : undefined } : message));
         if (responseMode === "plan" && plan?.length) setPendingPlan({ messageId, steps: plan });
         else setPendingPlan(null);
         setStatus(configured ? "Connected" : "Not configured");
@@ -732,7 +732,7 @@ export function ChatPage() {
               {emptyStateSuggestions.map((suggestion) => <button className="suggestion" key={suggestion} onClick={() => { onInput(suggestion); inputRef.current?.focus(); }}>{suggestion}</button>)}
             </div></div>}
             {messages.map((message) => <div className={`message ${message.role}${message.error ? " error" : ""}`} key={message.id}>
-              <div className="message-role">{message.role === "user" ? "You" : "Assistant"}</div>
+              <div className="message-role">{message.role === "user" ? "You" : "Assistant"}{message.architectTier ? ` · ${message.architectTier} ${message.architectMode || ""}` : ""}</div>
               <div className="message-content">{message.role === "assistant" ? <MarkdownContent text={message.content || (message.streaming ? "Working…" : "")} /> : <span className="plain-message">{message.content}</span>}</div>
               {message.role === "assistant" && <MetricCharts charts={message.charts} />}
               {!message.streaming && <div className="message-actions">

@@ -23,7 +23,7 @@ from app.db import (
 )
 from app.intelligence.findings import compute_fingerprint
 from app.intelligence.risk_engine import GATE_LABELS as _GATE_LABELS
-from app.skills import is_workflow_safe
+from app.skills.classification import is_workflow_safe
 
 # Change-producing findings wait this long for a decision; nothing auto-executes.
 _APPROVAL_TTL_HOURS = 72

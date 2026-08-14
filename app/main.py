@@ -57,6 +57,12 @@ async def lifespan(_: FastAPI):
     except Exception:
         pass
     intel.seed_default_workflows(DEFAULT_PROJECT_ID)
+    try:
+        from app.agents.solution_architect.graph import setup_checkpointer
+
+        setup_checkpointer()
+    except Exception:
+        pass
     intel_scheduler.start_scheduler()
     from app.org_executors.controller import start_controller, stop_controller
 
@@ -866,6 +872,10 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
 
     if request.skill and registry.get(request.skill) is None:
         raise HTTPException(status_code=400, detail=f"Unknown skill: {request.skill}")
+    if request.skill == "solution_architect":
+        from app.rbac import assert_capability
+
+        assert_capability(getattr(http_request.state, "user", None) or {}, "run_architecture")
 
     chat_id = request.chat_id
     user_id = _request_user_id(http_request)
@@ -968,6 +978,7 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                     skill=request.skill,
                     action_scope=request.action_scope,
                     access_level=request.access_level,
+                    chat_id=chat_id,
                 ):
                     if event.get("type") == "final":
                         final = event
@@ -1016,6 +1027,10 @@ def execute_plan(request: ExecutePlanRequest, http_request: Request) -> Streamin
         for s in request.steps
         if registry.get(s.skill) is not None
     ]
+    if any(step.skill == "solution_architect" for step in steps):
+        from app.rbac import assert_capability
+
+        assert_capability(getattr(http_request.state, "user", None) or {}, "run_architecture")
     action_jobs: list[dict[str, Any]] = []
     for action in request.actions:
         if action.project_id != request.project_id:
@@ -1074,6 +1089,7 @@ def execute_plan(request: ExecutePlanRequest, http_request: Request) -> Streamin
                     steps,
                     action_scope=request.action_scope,
                     access_level=request.access_level,
+                    chat_id=chat_id,
                 ):
                     if event.get("type") == "final":
                         final = event
@@ -1115,6 +1131,10 @@ def chat(request: ChatRequest, http_request: Request) -> dict[str, Any]:
 
     if request.skill and registry.get(request.skill) is None:
         raise HTTPException(status_code=400, detail=f"Unknown skill: {request.skill}")
+    if request.skill == "solution_architect":
+        from app.rbac import assert_capability
+
+        assert_capability(getattr(http_request.state, "user", None) or {}, "run_architecture")
 
     chat_id = request.chat_id
     user_id = _request_user_id(http_request)
@@ -1209,6 +1229,7 @@ def chat(request: ChatRequest, http_request: Request) -> dict[str, Any]:
                     skill=request.skill,
                     action_scope=request.action_scope,
                     access_level=request.access_level,
+                    chat_id=chat_id,
                 )
             except azure_client.AzureOpenAINotConfiguredError as exc:
                 turn = orchestrator.ChatTurn(mode=request.mode, reply=str(exc))
@@ -1440,6 +1461,18 @@ def list_findings(
         start_date=start_date,
         end_date=end_date,
     )
+
+
+@app.get("/api/architecture/runs")
+def list_architecture_runs(
+    project_id: str = DEFAULT_PROJECT_ID,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """List Solution Architect runs and ADRs for a project."""
+    _require_project(project_id)
+    from app.agents.solution_architect.governance import list_runs
+
+    return list_runs(project_id, limit=limit)
 
 
 @app.patch("/api/findings/{finding_id}")

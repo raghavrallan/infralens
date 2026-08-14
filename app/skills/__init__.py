@@ -29,6 +29,7 @@ from app.skills.pipeline_generator import skill as pipeline_generator
 from app.skills.policy_generator import skill as policy_generator
 from app.skills.project_analyzer import skill as project_analyzer
 from app.skills.report_writer import skill as report_writer
+from app.skills.solution_architect import skill as solution_architect
 from app.skills.terraform_executor import skill as terraform_executor
 from app.skills.terraform_generator import skill as terraform_generator
 from app.skills.vuln_triage import skill as vuln_triage
@@ -54,6 +55,7 @@ for _skill in (
     deployment_manager,
     project_analyzer,
     report_writer,
+    solution_architect,
 ):
     registry.register(_skill)
 
