@@ -108,9 +108,9 @@ def test_graph_critique_revise_verify_paused_and_checkpointer():
     assert paused_out.get("awaiting_input") is True
     with patch("app.agents.solution_architect.graph.run_pipeline", return_value=awaiting):
         events = list(graph.stream_architect({"objective": "Need env"}, chat_id="t2"))
+        invoked = graph.invoke_architect({"objective": "Need env", "plan_only": True}, chat_id="t3")
     assert any(event.get("type") == "final" for event in events)
-    invoked = graph.invoke_architect({"objective": "Need env", "plan_only": True}, chat_id="t3")
-    assert invoked.get("type") == "final" or invoked == {} or "reply" in invoked or True
+    assert invoked.get("type") == "final" or invoked == {} or "reply" in invoked
     graph.setup_checkpointer()
 
 
