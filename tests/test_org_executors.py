@@ -20,6 +20,8 @@ from app.org_executors import settings as org_settings
 from app.org_executors.controller import request_wake, tick_once
 from app.org_executors.schedule import in_schedule_window, in_warm_window
 
+pytestmark = pytest.mark.infra
+
 
 def _mk_user(*, username: str, role: str = "developer") -> dict:
     with SessionLocal() as session:

@@ -34,6 +34,12 @@ _INFRA_FIXTURES = frozenset(
         "auth_header",
     }
 )
+_INFRA_ROOT_FILES = frozenset(
+    {
+        "test_tenancy.py",
+        "test_org_executors.py",
+    }
+)
 _INFRA_MARKERS = frozenset({"integration", "e2e", "infra", "redis"})
 
 
@@ -164,6 +170,9 @@ def _needs_infra(item: pytest.Item) -> bool:
     if fixtures.intersection(_INFRA_FIXTURES):
         return True
     path = str(getattr(item, "path", "") or item.fspath).replace("\\", "/")
+    name = path.rsplit("/", 1)[-1]
+    if name in _INFRA_ROOT_FILES:
+        return True
     return "/tests/integration/" in path
 
 
