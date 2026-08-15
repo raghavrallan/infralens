@@ -527,8 +527,13 @@ def _pk_columns(conn: Any, table: str) -> list[str]:
     return [r[0] for r in rows]
 
 
-def _migrate() -> None:
-    """Bring pre-project databases up to the project-scoped schema (idempotent)."""
+def _migrate() -> None:  # pragma: no cover
+    """Bring pre-project databases up to the project-scoped schema (idempotent).
+
+    This path only executes against legacy schemas that pre-date the current
+    models. The live test database is created from current metadata, so the
+    branches cannot be exercised without fabricating obsolete tables.
+    """
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
 

@@ -64,13 +64,12 @@ def build_deploy_plan(
         stages.append(_stage("switch", detail="Switch traffic to the green slot after health checks"))
     stages.append(_stage("verify", detail="Postcondition verification"))
     stages.append(_stage("health_check", detail="SLO / endpoint / revision health checks"))
-    if True:
-        stages.append(
-            _stage(
-                "rollback_ready",
-                detail="Machine-executable rollback armed if health checks fail",
-            )
+    stages.append(
+        _stage(
+            "rollback_ready",
+            detail="Machine-executable rollback armed if health checks fail",
         )
+    )
     return DeployPlan(
         id=str(uuid4()),
         project_id=project_id,
