@@ -1,6 +1,8 @@
 """RBAC, rollback gate, onboarding, break-glass, and delivery tests."""
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from app.core import rbac
 from app.tenancy import onboarding
 from app.platform import (
@@ -58,7 +60,11 @@ def test_validate_operation_still_requires_preflight_for_write():
 
 
 def test_onboarding_paths_shape():
-    status = onboarding.status(user={"id": "u", "username": "a", "name": "A", "role": "developer"})
+    with patch("app.tenancy.onboarding.projects.list_projects", return_value=[]):
+        with patch("app.tenancy.onboarding.memberships.primary_org_id", return_value=None):
+            status = onboarding.status(
+                user={"id": "u", "username": "a", "name": "A", "role": "developer"}
+            )
     assert "paths" in status
     assert {p["id"] for p in status["paths"]} == {"existing", "new"}
 
