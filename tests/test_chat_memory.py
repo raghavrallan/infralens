@@ -3,7 +3,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from app.chat_memory import (
+from app.chat.chat_memory import (
     _fallback,
     redact,
     refresh_memory,
@@ -70,10 +70,10 @@ class ChatMemoryTests(unittest.TestCase):
         self.assertIn("testing", fallback["summary"])
         self.assertLessEqual(len(fallback["summary"]), 2400)
 
-    @patch("app.chat_memory.SessionLocal")
-    @patch("app.chat_memory._summarise", side_effect=RuntimeError("model unavailable"))
-    @patch("app.chat_memory.get_memory", return_value=None)
-    @patch("app.chat_memory._transcript")
+    @patch("app.chat.chat_memory.SessionLocal")
+    @patch("app.chat.chat_memory._summarise", side_effect=RuntimeError("model unavailable"))
+    @patch("app.chat.chat_memory.get_memory", return_value=None)
+    @patch("app.chat.chat_memory._transcript")
     def test_summary_failure_uses_fallback_without_failing_refresh(
         self, transcript, _memory, _summarise, session_local
     ):

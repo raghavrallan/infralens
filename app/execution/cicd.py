@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 from typing import Any, Optional
 
-from app import projects
+from app.tenancy import projects
 from app.execution import debug_loop, queue, service
 from app.providers import github_infra
 

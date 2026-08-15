@@ -18,19 +18,23 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.responses import JSONResponse
 
-from app import (
-    __version__,
+from app.core import (
     auth,
     azure_client,
-    chat_memory,
-    chats,
     config,
-    connections,
+)
+from app.tenancy import (
     memberships,
-    orchestrator,
     projects,
 )
-from app.db import DEFAULT_PROJECT_ID, init_db
+from app.chat import (
+    chat_memory,
+    chats,
+    orchestrator,
+)
+from app.platform import connections
+from app import __version__
+from app.core.db import DEFAULT_PROJECT_ID, init_db
 from app.execution import chat_actions
 from app.execution import service as execution
 from app.intelligence import scheduler as intel_scheduler
@@ -44,12 +48,15 @@ _FRONTEND_DIR = Path(__file__).resolve().parents[1] / "frontend" / "out"
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    from app import observability, prompts
+    from app.core import (
+        observability,
+        prompts,
+    )
 
     observability.ensure_host_alias()
     init_db()
     auth.ensure_seed_user()
-    from app.db import ensure_tenancy_seed
+    from app.core.db import ensure_tenancy_seed
 
     ensure_tenancy_seed()
     try:
@@ -134,7 +141,7 @@ class JwtAuthMiddleware:
                 and path not in _VIEWER_WRITE_ALLOW
                 and not path.endswith("/oauth/callback")
             ):
-                from app.rbac import has_min_role
+                from app.core.rbac import has_min_role
 
                 if not has_min_role(user.get("role"), "developer"):
                     response = JSONResponse(
@@ -157,7 +164,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from app.routes_mvp import router as mvp_router
+from app.api.routes_mvp import router as mvp_router
 
 app.include_router(mvp_router)
 
@@ -257,7 +264,7 @@ def _require_project(
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
     if user is not None:
-        from app import memberships
+        from app.tenancy import memberships
 
         memberships.assert_project_access(user, project_id)
     return project
@@ -354,7 +361,7 @@ def login(body: LoginRequest) -> dict[str, Any]:
 @app.get("/api/auth/me")
 def auth_me(user: dict[str, Any] = Depends(auth.require_user)) -> dict[str, Any]:
     """Return the current user for a valid Bearer JWT."""
-    from app import memberships
+    from app.tenancy import memberships
 
     return {"user": memberships.enrich_user_public(user)}
 
@@ -409,8 +416,8 @@ def create_project(
     user: dict[str, Any] = Depends(auth.require_user),
 ) -> dict[str, Any]:
     """Create a new project in the user's org, seeded with starter workflows."""
-    from app import memberships
-    from app.rbac import assert_capability, normalize_role
+    from app.tenancy import memberships
+    from app.core.rbac import assert_capability, normalize_role
 
     assert_capability(user, "create_project")
     try:
@@ -442,7 +449,7 @@ def rename_project(
     user: dict[str, Any] = Depends(auth.require_user),
 ) -> dict[str, Any]:
     """Rename a project."""
-    from app import memberships
+    from app.tenancy import memberships
 
     memberships.assert_project_access(user, project_id)
     project = projects.rename_project(project_id, body.name)
@@ -457,7 +464,7 @@ def set_default_project(
     user: dict[str, Any] = Depends(auth.require_user),
 ) -> dict[str, Any]:
     """Set the sole persisted default project used on a fresh page load."""
-    from app import memberships
+    from app.tenancy import memberships
 
     memberships.assert_project_access(user, project_id)
     project = projects.set_default(project_id)
@@ -472,8 +479,8 @@ def delete_project(
     user: dict[str, Any] = Depends(auth.require_user),
 ) -> dict[str, bool]:
     """Delete a project and everything scoped to it (the default cannot be deleted)."""
-    from app import memberships
-    from app.rbac import assert_capability
+    from app.tenancy import memberships
+    from app.core.rbac import assert_capability
 
     assert_capability(user, "delete_project")
     memberships.assert_project_access(user, project_id)
@@ -563,7 +570,7 @@ def put_connection(
     user: dict[str, Any] = Depends(auth.require_user),
 ) -> dict[str, Any]:
     """Save or update a provider connection within a project."""
-    from app.rbac import assert_capability
+    from app.core.rbac import assert_capability
 
     assert_capability(user, "connect_provider")
     _require_project(project_id, user)
@@ -650,7 +657,7 @@ def create_action(
     user: dict[str, Any] = Depends(auth.require_user),
 ) -> dict[str, Any]:
     """Persist and dispatch a safe read action, or create a write approval."""
-    from app.rbac import assert_capability
+    from app.core.rbac import assert_capability
 
     if body.access_scope == "write":
         assert_capability(user, "propose_write")
@@ -691,7 +698,7 @@ def approve_action(
     body: ActionDecisionRequest,
     user: dict[str, Any] = Depends(auth.require_user),
 ) -> dict[str, Any]:
-    from app.rbac import assert_capability
+    from app.core.rbac import assert_capability
 
     assert_capability(user, "approve_human")
     try:
@@ -878,12 +885,12 @@ def _request_user_id(http_request: Request) -> Optional[str]:
 @app.post("/api/chat/stream")
 def chat_stream(request: ChatRequest, http_request: Request) -> StreamingResponse:
     """Stream an orchestrated chat turn as Server-Sent Events."""
-    from app import observability
+    from app.core import observability
 
     if request.skill and registry.get(request.skill) is None:
         raise HTTPException(status_code=400, detail=f"Unknown skill: {request.skill}")
     if request.skill == "solution_architect":
-        from app.rbac import assert_capability
+        from app.core.rbac import assert_capability
 
         assert_capability(getattr(http_request.state, "user", None) or {}, "run_architecture")
 
@@ -1026,7 +1033,7 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
 @app.post("/api/chat/execute-plan")
 def execute_plan(request: ExecutePlanRequest, http_request: Request) -> StreamingResponse:
     """Execute a plan the user approved (from plan mode), streaming the run."""
-    from app import observability
+    from app.core import observability
 
     chat = chats.get_chat(request.chat_id)
     if chat is None:
@@ -1038,7 +1045,7 @@ def execute_plan(request: ExecutePlanRequest, http_request: Request) -> Streamin
         if registry.get(s.skill) is not None
     ]
     if any(step.skill == "solution_architect" for step in steps):
-        from app.rbac import assert_capability
+        from app.core.rbac import assert_capability
 
         assert_capability(getattr(http_request.state, "user", None) or {}, "run_architecture")
     action_jobs: list[dict[str, Any]] = []
@@ -1137,12 +1144,12 @@ def execute_plan(request: ExecutePlanRequest, http_request: Request) -> Streamin
 @app.post("/api/chat")
 def chat(request: ChatRequest, http_request: Request) -> dict[str, Any]:
     """Run one orchestrated chat turn, persisting both messages to the chat."""
-    from app import observability
+    from app.core import observability
 
     if request.skill and registry.get(request.skill) is None:
         raise HTTPException(status_code=400, detail=f"Unknown skill: {request.skill}")
     if request.skill == "solution_architect":
-        from app.rbac import assert_capability
+        from app.core.rbac import assert_capability
 
         assert_capability(getattr(http_request.state, "user", None) or {}, "run_architecture")
 
@@ -1384,7 +1391,7 @@ def run_workflow_now(
     user: dict[str, Any] = Depends(auth.require_user),
 ) -> dict[str, Any]:
     """Queue a workflow to run now — requires a cloud account on the project."""
-    from app.rbac import assert_capability
+    from app.core.rbac import assert_capability
 
     assert_capability(user, "run_workflow")
     workflow = intel.get_workflow(workflow_id)
@@ -1530,9 +1537,10 @@ def decide_approval(
     user: dict[str, Any] = Depends(auth.require_user),
 ) -> dict[str, Any]:
     """Approve or reject a gated finding. Nothing executes — the decision is recorded."""
-    from app import break_glass, memberships
-    from app.db import Approval, SessionLocal
-    from app.rbac import can_approve_gate
+    from app.tenancy import memberships
+    from app.platform import break_glass
+    from app.core.db import Approval, SessionLocal
+    from app.core.rbac import can_approve_gate
 
     with SessionLocal() as session:
         row = session.get(Approval, approval_id)

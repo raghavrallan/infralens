@@ -6,7 +6,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app import break_glass, delivery, module_actuators, rbac
+from app.core import rbac
+from app.platform import (
+    break_glass,
+    delivery,
+    module_actuators,
+)
 from app.execution.validation import validate_operation
 
 

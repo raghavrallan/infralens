@@ -9,7 +9,7 @@ import logging
 import re
 from typing import Any, Optional
 
-from app import observability
+from app.core import observability
 
 logger = logging.getLogger(__name__)
 
@@ -83,9 +83,9 @@ def seed_core_prompts() -> None:
     if not observability.tracing_enabled():
         return
 
-    from app.chat_memory import MEMORY_SYSTEM_PROMPT
+    from app.chat.chat_memory import MEMORY_SYSTEM_PROMPT
     from app.intelligence.findings import EXTRACT_SYSTEM_PROMPT_FALLBACK
-    from app.orchestrator import (
+    from app.chat.orchestrator import (
         DETAILED_PLAN_SYSTEM_PROMPT_TEMPLATE,
         ORCHESTRATOR_SYSTEM_PROMPT,
         PLANNER_SYSTEM_PROMPT_TEMPLATE,

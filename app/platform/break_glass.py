@@ -7,8 +7,7 @@ from typing import Any, Optional
 
 from sqlalchemy import select
 
-from app.db import BreakGlassSession, SessionLocal
-from app.intelligence.risk_engine import GATE_LABELS, GATE_ORDER
+from app.core.db import BreakGlassSession, SessionLocal
 
 
 def _now() -> datetime:
@@ -145,6 +144,8 @@ def downgrade_gate(gate: str, project_id: str, *, active: Optional[bool] = None)
         active = is_active(project_id)
     if not active:
         return gate
+    from app.intelligence.risk_engine import GATE_ORDER
+
     if gate not in GATE_ORDER:
         return gate
     idx = GATE_ORDER.index(gate)  # type: ignore[arg-type]
@@ -156,6 +157,8 @@ def downgrade_gate(gate: str, project_id: str, *, active: Optional[bool] = None)
 def gate_with_break_glass(
     gate: str, project_id: str, *, active: Optional[bool] = None
 ) -> dict[str, Any]:
+    from app.intelligence.risk_engine import GATE_LABELS
+
     effective = downgrade_gate(gate, project_id, active=active)
     return {
         "gate": effective,

@@ -5,7 +5,8 @@ import json
 import time
 from typing import Any, Optional
 
-from app import azure_client, chat_memory
+from app.core import azure_client
+from app.chat import chat_memory
 from app.execution import service
 
 MAX_RETRIES = 3

@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 from sqlalchemy import select
 
-from app.db import Organization, OrgExecutorSettings, Project, SessionLocal
+from app.core.db import Organization, OrgExecutorSettings, Project, SessionLocal
 from app.org_executors.schedule import in_warm_window
 
 VALID_MODES = {"on_demand", "window", "schedule"}

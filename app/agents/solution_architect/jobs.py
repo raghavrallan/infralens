@@ -3,12 +3,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.db import DeliveryRun, SessionLocal, _now
+from app.core.db import DeliveryRun, SessionLocal, _now
 
 
 def generate_architecture(delivery_run_id: str) -> dict[str, Any]:
     from app.agents.solution_architect.graph import invoke_architect
-    from app.db import init_db
+    from app.core.db import init_db
 
     init_db()
     with SessionLocal() as session:

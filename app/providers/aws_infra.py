@@ -18,7 +18,7 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
-from app import connections
+from app.platform import connections
 
 _DEFAULT_REGION = "us-east-1"
 _SENSITIVE_PORTS = {22, 3389, 3306, 5432, 1433, 6379, 27017, 9200, 5984}

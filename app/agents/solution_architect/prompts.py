@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.prompts import get_text_prompt
+from app.core.prompts import get_text_prompt
 
 NODE_PROMPTS: dict[str, str] = {
     "architect-clarify": (
@@ -76,7 +76,7 @@ def node_prompt(name: str, *, tier: str, mode: str) -> str:
 
 
 def seed_architect_prompts() -> None:
-    from app.prompts import ensure_text_prompt
+    from app.core.prompts import ensure_text_prompt
 
     for name, prompt in NODE_PROMPTS.items():
         ensure_text_prompt(name, prompt)

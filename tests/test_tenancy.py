@@ -3,10 +3,16 @@ from __future__ import annotations
 
 import uuid
 
-from app import invites, memberships, onboarding, orgs, rbac
-from app import break_glass
-from app.auth import hash_password
-from app.db import (
+from app.core import rbac
+from app.tenancy import (
+    invites,
+    memberships,
+    onboarding,
+    orgs,
+)
+from app.platform import break_glass
+from app.core.auth import hash_password
+from app.core.db import (
     Organization,
     OrgMembership,
     Project,
@@ -50,7 +56,7 @@ def test_org_project_isolation(monkeypatch):
     memberships.ensure_org_membership(org_id=org_a["id"], user_id=user_a["id"], org_role="member")
     memberships.ensure_org_membership(org_id=org_b["id"], user_id=user_b["id"], org_role="member")
 
-    from app import projects
+    from app.tenancy import projects
 
     pa = projects.create_project(
         "ProjA", org_id=org_a["id"], owner_user_id=user_a["id"], owner_project_role="developer"
@@ -73,7 +79,7 @@ def test_onboarding_is_per_user():
     init_db()
     admin = _mk_user(username=f"admin_{uuid.uuid4().hex[:8]}", role="super_admin")
     org = orgs.create_org(name=f"Onboard-{uuid.uuid4().hex[:6]}", created_by=admin["id"])
-    from app import projects
+    from app.tenancy import projects
 
     projects.create_project(
         "AdminProj",
@@ -132,8 +138,8 @@ def test_lead_member_request_requires_approval_flag():
     lead = _mk_user(username=f"lead_{uuid.uuid4().hex[:8]}", role="devops_lead")
     org = orgs.create_org(name=f"ReqOrg-{uuid.uuid4().hex[:6]}", created_by=admin["id"])
     memberships.ensure_org_membership(org_id=org["id"], user_id=lead["id"], org_role="member")
-    from app import projects
-    from app import membership_requests
+    from app.tenancy import projects
+    from app.tenancy import membership_requests
 
     project = projects.create_project(
         "LeadProj",

@@ -4,7 +4,10 @@ from __future__ import annotations
 import json
 from typing import Any, Callable, Iterator, Optional
 
-from app import azure_client, config as app_config
+from app.core import (
+    azure_client,
+    config as app_config,
+)
 from app.agents.solution_architect import governance, prompts, tools
 from app.agents.solution_architect.state import ArchitectState, empty_state, infer_tier
 
@@ -410,7 +413,7 @@ def setup_checkpointer() -> None:
         from langgraph.checkpoint.postgres import PostgresSaver
         from psycopg_pool import ConnectionPool
 
-        from app.db import get_database_url
+        from app.core.db import get_database_url
 
         url = get_database_url().replace("postgresql+psycopg2://", "postgresql://").replace(
             "postgresql+psycopg://", "postgresql://"

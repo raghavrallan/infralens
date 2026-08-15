@@ -11,7 +11,7 @@ from typing import Any, Optional
 
 from sqlalchemy import delete, func, select
 
-from app.db import (
+from app.core.db import (
     DEFAULT_PROJECT_ID,
     Approval,
     EngineeringMemory,
@@ -386,7 +386,7 @@ def seed_default_workflows(project_id: str = DEFAULT_PROJECT_ID) -> None:
 
 def enable_workflows_when_ready(project_id: str) -> int:
     """Enable seeded workflows once Azure (or another cloud) is connected. Returns count."""
-    from app import connections
+    from app.platform import connections
 
     azure = connections.status(project_id, "azure")
     aws = connections.status(project_id, "aws")
@@ -790,8 +790,11 @@ def _approval_dict(
     now = _now()
     expires = approval.expires_at
     expired = bool(expires and expires <= now and approval.decision == "pending")
-    from app import break_glass, memory
-    from app.rbac import GATE_MIN_ROLE, ROLE_LABELS
+    from app.platform import (
+        break_glass,
+        memory,
+    )
+    from app.core.rbac import GATE_MIN_ROLE, ROLE_LABELS
 
     gate = approval.gate
     bg = break_glass.gate_with_break_glass(
@@ -852,7 +855,10 @@ def list_approvals(
     end_date: Optional[date] = None,
 ) -> list[dict[str, Any]]:
     """Approvals for a project, joined to their finding. Default: pending only."""
-    from app import break_glass, memory
+    from app.platform import (
+        break_glass,
+        memory,
+    )
 
     since, until = time_range_bounds(time_range, start_date, end_date)
     # One break-glass lookup + one memory preload for the whole list (not per row).

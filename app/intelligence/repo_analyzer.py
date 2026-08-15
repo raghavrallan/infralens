@@ -4,9 +4,9 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
-from app import projects
+from app.tenancy import projects
 from app.providers import github_infra
-from app.project_context import build_existing_context
+from app.chat.project_context import build_existing_context
 
 _BE_MARKERS = (
     "requirements.txt",

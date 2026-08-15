@@ -7,9 +7,13 @@ from uuid import uuid4
 
 import pytest
 
-from app import connections, orgs, projects
-from app.auth import hash_password
-from app.db import ExecutionJob, SessionLocal, User, init_db
+from app.tenancy import (
+    orgs,
+    projects,
+)
+from app.platform import connections
+from app.core.auth import hash_password
+from app.core.db import ExecutionJob, SessionLocal, User, init_db
 from app.execution import queue as exec_queue
 from app.execution import service as execution
 from app.org_executors import settings as org_settings

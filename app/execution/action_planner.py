@@ -8,7 +8,7 @@ import json
 import re
 from typing import Any, Optional
 
-from app import azure_client
+from app.core import azure_client
 
 _ACTION_TERMS = (
     "create", "deploy", "provision", "update", "modify", "change", "delete",

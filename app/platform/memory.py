@@ -5,7 +5,7 @@ from typing import Any, Optional
 
 from sqlalchemy import select
 
-from app.db import EngineeringMemory, SessionLocal
+from app.core.db import EngineeringMemory, SessionLocal
 
 
 def _row_dict(row: EngineeringMemory) -> dict[str, Any]:

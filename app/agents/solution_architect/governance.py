@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 from sqlalchemy import select
 
-from app.db import (
+from app.core.db import (
     ArchitectureDecision,
     ArchitectureRun,
     EngineeringMemory,

@@ -11,7 +11,7 @@ import json
 import re
 from typing import Any, Optional
 
-from app import azure_client
+from app.core import azure_client
 from app.intelligence import risk_engine
 from app.skills import blast_radius_for, remediation_class_for
 
@@ -36,7 +36,7 @@ EXTRACT_SYSTEM_PROMPT_FALLBACK = _EXTRACT_SYSTEM_PROMPT
 
 
 def _extract_system_prompt() -> str:
-    from app.prompts import get_text_prompt
+    from app.core.prompts import get_text_prompt
 
     return get_text_prompt(
         "finding-extract-system",
@@ -113,7 +113,7 @@ def _extract_structured(
     skill: str, output: str, objective: str
 ) -> Optional[list[dict[str, Any]]]:
     """Ask the model to split the analysis into discrete findings."""
-    from app import observability
+    from app.core import observability
 
     try:
         with observability.tracing_context(

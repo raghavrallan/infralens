@@ -103,7 +103,7 @@ Browser chat UI  ──▶  FastAPI (/api/chat)  ──▶  Orchestrator
 - `app/skills/classification.py` — action class, blast radius and the
   workflow-safe set for every skill.
 - `app/skills/*.py` — one file per skill (metadata, wiki, system prompt, schema).
-- `app/orchestrator.py` — modes, forced-skill routing, and the multi-agent
+- `app/chat/orchestrator.py` — modes, forced-skill routing, and the multi-agent
   planner/executor.
 - `app/intelligence/risk_engine.py` — the action-class × blast-radius gate matrix.
 - `app/intelligence/workflows.py` — workflow / run / finding persistence + the
@@ -112,10 +112,10 @@ Browser chat UI  ──▶  FastAPI (/api/chat)  ──▶  Orchestrator
 - `app/intelligence/worker.py` — the `run_workflow` job executed by `rq worker`.
 - `app/intelligence/findings.py` — normalizes skill output into gated findings.
 - `app/intelligence/scheduler.py` — APScheduler cron enqueue.
-- `app/db.py` — SQLAlchemy engine, models, init (chat + intelligence tables).
-- `app/config.py` — Postgres-backed Azure OpenAI configuration.
-- `app/connections.py` — Postgres-backed Azure/AWS/GitHub credential store.
-- `app/azure_client.py` — Azure OpenAI for one-shot skills (Langfuse OpenAI drop-in).
+- `app/core/db.py` — SQLAlchemy engine, models, init (chat + intelligence tables).
+- `app/core/config.py` — Postgres-backed Azure OpenAI configuration.
+- `app/platform/connections.py` — Postgres-backed Azure/AWS/GitHub credential store.
+- `app/core/azure_client.py` — Azure OpenAI for one-shot skills (Langfuse OpenAI drop-in).
 - `app/agents/solution_architect/` — agentic architect graph (clarify → explore →
   design → critique → senior verify → finalize). Forced via `/solution_architect`
   in Chat Agent or Plan; also powers the delivery `architecture` stage. Not

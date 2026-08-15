@@ -7,7 +7,7 @@ from typing import Any, Optional
 from fastapi import HTTPException
 from sqlalchemy import select
 
-from app.db import (
+from app.core.db import (
     Organization,
     OrgMembership,
     Project,
@@ -15,7 +15,7 @@ from app.db import (
     SessionLocal,
     User,
 )
-from app.rbac import has_min_role, normalize_role
+from app.core.rbac import has_min_role, normalize_role
 
 
 def is_super_admin(user: dict[str, Any]) -> bool:
@@ -287,7 +287,7 @@ def ensure_user_org(user: dict[str, Any]) -> str:
     user_id = str(user.get("id") or "")
     if not user_id:
         raise ValueError("Not authenticated")
-    from app import orgs
+    from app.tenancy import orgs
 
     name = (user.get("name") or user.get("username") or "Personal").strip()
     org = orgs.create_org(
@@ -349,7 +349,7 @@ def enrich_user_public(user: dict[str, Any]) -> dict[str, Any]:
             org_role = membership.org_role
     out["org_role"] = org_role
     # Effective label for shell: Org Admin if they admin an org, else global role.
-    from app.rbac import ROLE_LABELS, normalize_role
+    from app.core.rbac import ROLE_LABELS, normalize_role
 
     global_role = normalize_role(out.get("role"))
     if global_role == "super_admin":

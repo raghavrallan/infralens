@@ -19,7 +19,7 @@ from typing import Any, Optional
 
 import httpx
 
-from app import connections
+from app.platform import connections
 
 _AUTHORITY = "https://login.microsoftonline.com"
 _ARM = "https://management.azure.com"
