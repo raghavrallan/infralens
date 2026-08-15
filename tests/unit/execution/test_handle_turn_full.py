@@ -59,6 +59,7 @@ def test_create_or_hold_action_missing_fields_and_exceptions():
 
 
 @pytest.mark.unit
+@pytest.mark.infra
 def test_handle_turn_approves_pending_and_full_access_modal():
     pending = {
         "id": "a1",
@@ -85,6 +86,7 @@ def test_handle_turn_approves_pending_and_full_access_modal():
 
 
 @pytest.mark.unit
+@pytest.mark.infra
 def test_handle_turn_pending_reference_without_yes():
     pending = {
         "id": "a1",
@@ -109,6 +111,7 @@ def test_handle_turn_pending_reference_without_yes():
 
 
 @pytest.mark.unit
+@pytest.mark.infra
 def test_handle_turn_debug_and_deploy_write():
     failed = {
         "id": "a9",
@@ -171,6 +174,7 @@ def test_handle_turn_debug_and_deploy_write():
 
 
 @pytest.mark.unit
+@pytest.mark.infra
 def test_handle_turn_terraform_phases():
     with _idle():
         with patch("app.execution.chat_actions.chat_memory.get_model_context", return_value=[]):
@@ -229,6 +233,7 @@ def test_handle_turn_terraform_phases():
 
 
 @pytest.mark.unit
+@pytest.mark.infra
 def test_handle_turn_cicd_with_prepared_reruns():
     with _idle():
         with patch("app.execution.chat_actions.chat_memory.get_model_context", return_value=[]):
@@ -255,6 +260,7 @@ def test_handle_turn_cicd_with_prepared_reruns():
 
 
 @pytest.mark.unit
+@pytest.mark.infra
 def test_handle_turn_vnet_missing_inputs():
     with _idle():
         with patch("app.execution.chat_actions.chat_memory.get_model_context", return_value=[]):

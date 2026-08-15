@@ -131,6 +131,7 @@ def test_controller_should_be_active_and_tick():
 
 
 @pytest.mark.unit
+@pytest.mark.infra
 def test_ensure_planned_context_fetches_missing_live_data():
     steps = [
         PlanStep("metrics_analyzer", "cpu"),
@@ -236,6 +237,7 @@ def test_format_detailed_plan_and_security_framework():
 
 
 @pytest.mark.unit
+@pytest.mark.infra
 def test_chat_actions_nsg_pending_and_diagnostics():
     assert chat_actions._message_mentions_nsg("lock down the NSG") is True
     assert chat_actions._message_mentions_nsg("app-nsg") is True
@@ -357,6 +359,7 @@ def test_github_list_repos_pagination_and_error_detail():
 
 
 @pytest.mark.unit
+@pytest.mark.infra
 def test_handle_turn_nsg_and_auth_verify_db():
     from app.core import auth
 

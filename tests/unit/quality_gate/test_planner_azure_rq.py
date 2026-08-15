@@ -15,6 +15,7 @@ from executors.common import rq_job
 
 
 @pytest.mark.unit
+@pytest.mark.infra
 def test_handle_turn_planner_compound_clarification_and_resource_group():
     with patch("app.execution.chat_actions._pending_action", return_value=None):
         with patch("app.execution.chat_actions._latest_action", return_value=None):

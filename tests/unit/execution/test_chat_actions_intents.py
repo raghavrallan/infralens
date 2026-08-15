@@ -9,6 +9,7 @@ from app.execution import chat_actions
 
 
 @pytest.mark.unit
+@pytest.mark.infra
 def test_handle_turn_returns_none_for_ordinary_chat():
     with patch("app.execution.chat_actions._pending_action", return_value=None):
         with patch("app.execution.chat_actions._latest_action", return_value=None):
@@ -20,6 +21,7 @@ def test_handle_turn_returns_none_for_ordinary_chat():
 
 
 @pytest.mark.unit
+@pytest.mark.infra
 def test_handle_turn_reports_running_action_diagnostics():
     active = {
         "id": "a1",

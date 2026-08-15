@@ -18,6 +18,7 @@ from executors.common.runner import CliResult, run_cli
 
 
 @pytest.mark.unit
+@pytest.mark.infra
 def test_handle_turn_nsg_and_delete_resource_group():
     with patch("app.execution.chat_actions._pending_action", return_value=None):
         with patch("app.execution.chat_actions._latest_action", return_value=None):
@@ -57,6 +58,7 @@ def test_handle_turn_nsg_and_delete_resource_group():
 
 
 @pytest.mark.unit
+@pytest.mark.infra
 def test_handle_turn_yes_recovers_pending_spec():
     spec = chat_actions._resource_group_spec("demo", "eastus", "sub")
     with patch("app.execution.chat_actions._pending_action", return_value=None):
