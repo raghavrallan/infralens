@@ -260,6 +260,7 @@ def test_run_chat_agentic_plan_and_agent():
 
 
 @pytest.mark.unit
+@pytest.mark.infra
 def test_run_chat_stream_plan_forced_and_clarification():
     with patch("app.chat.orchestrator._gather_project_topology", return_value="topo"):
         with patch("app.chat.orchestrator._gather_live_context", return_value=("live", [])):

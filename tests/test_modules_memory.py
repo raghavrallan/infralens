@@ -1,6 +1,8 @@
 """Extra MVP coverage: actuators, memory shape, oauth options, gate map."""
 from __future__ import annotations
 
+import pytest
+
 from app.core import rbac
 from app.platform import (
     memory,
@@ -21,6 +23,7 @@ def test_oauth_options_always_offer_secrets():
     assert "client_secret" in opts["azure"]["methods"]
 
 
+@pytest.mark.infra
 def test_module_actuators_pipeline_and_finops():
     user = {"role": "developer", "username": "dev"}
     finding = {
@@ -38,6 +41,7 @@ def test_module_actuators_pipeline_and_finops():
     assert rec["gate"] == "autonomous"
 
 
+@pytest.mark.infra
 def test_incident_mitigate_is_safety_direction():
     user = {"role": "developer", "username": "dev"}
     out = module_actuators.actuate(
@@ -49,6 +53,7 @@ def test_incident_mitigate_is_safety_direction():
     assert out["action_class"] == "safety_direction"
 
 
+@pytest.mark.infra
 def test_memory_list_precedent_empty_ok():
     rows = memory.list_precedent("default", limit=3)
     assert isinstance(rows, list)

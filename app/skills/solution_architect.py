@@ -1,7 +1,6 @@
 """Skill: agentic solution architect (HLD, ADRs, gated findings)."""
 from typing import Any, Iterator
 
-from app.agents.solution_architect.graph import stream_architect
 from app.skills.base import AgenticSkill, SkillResult
 
 
@@ -36,6 +35,10 @@ class SolutionArchitectSkill(AgenticSkill):
     }
 
     def stream_events(self, args: dict[str, Any], *, chat_id: str = "") -> Iterator[dict[str, Any]]:
+        # Import lazily to avoid a circular import with agents.solution_architect.graph
+        # (graph → governance → risk_engine → skills → this module).
+        from app.agents.solution_architect.graph import stream_architect
+
         yield from stream_architect(args, chat_id=chat_id)
 
     def run(self, args: dict[str, Any]) -> SkillResult:

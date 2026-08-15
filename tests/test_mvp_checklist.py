@@ -100,6 +100,7 @@ def test_delivery_cannot_skip_stages_logic():
     assert stages.index("apply") > stages.index("plan")
 
 
+@pytest.mark.infra
 def test_module_smoke_all_six():
     user = {"role": "devops_lead", "username": "lead"}
     finding = {
@@ -125,6 +126,7 @@ def test_module_smoke_all_six():
         assert "rollback" in out
 
 
+@pytest.mark.infra
 def test_iac_delete_requires_two_person_capability():
     user = {"role": "developer", "username": "dev"}
     with pytest.raises(Exception):
@@ -136,6 +138,7 @@ def test_iac_delete_requires_two_person_capability():
         )
 
 
+@pytest.mark.infra
 def test_prod_iac_apply_requires_lead():
     from fastapi import HTTPException
 

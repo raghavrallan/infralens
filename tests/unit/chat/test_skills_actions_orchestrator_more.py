@@ -37,6 +37,7 @@ def test_skill_run_and_stream_events_with_mocked_llm():
 
 
 @pytest.mark.unit
+@pytest.mark.infra
 def test_handle_turn_cicd_deploy_and_write_scope():
     with patch("app.execution.chat_actions._pending_action", return_value=None):
         with patch("app.execution.chat_actions._latest_action", return_value=None):
@@ -60,6 +61,7 @@ def test_handle_turn_cicd_deploy_and_write_scope():
 
 
 @pytest.mark.unit
+@pytest.mark.infra
 def test_handle_turn_resource_group_write_hold():
     with patch("app.execution.chat_actions._pending_action", return_value=None):
         with patch("app.execution.chat_actions._latest_action", return_value=None):

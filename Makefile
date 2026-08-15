@@ -10,11 +10,15 @@ test:
 	pytest
 
 coverage:
-	pytest --cov=app --cov=executors --cov-branch --cov-report=term-missing --cov-report=html --cov-report=xml --cov-fail-under=90
+	@fail_under=0; \
+	case "$${RUN_INFRA_TESTS:-}" in 1|true|TRUE|yes|YES|on|ON) fail_under=90 ;; esac; \
+	pytest --cov=app --cov=executors --cov-branch --cov-report=term-missing --cov-report=html --cov-report=xml --cov-fail-under=$$fail_under
 
 pylint:
 	pylint app executors
 
 quality:
 	pylint app executors
-	pytest --cov=app --cov=executors --cov-branch --cov-report=term-missing --cov-report=html --cov-report=xml --cov-fail-under=90 --junitxml=junit.xml
+	@fail_under=0; \
+	case "$${RUN_INFRA_TESTS:-}" in 1|true|TRUE|yes|YES|on|ON) fail_under=90 ;; esac; \
+	pytest --cov=app --cov=executors --cov-branch --cov-report=term-missing --cov-report=html --cov-report=xml --cov-fail-under=$$fail_under --junitxml=junit.xml

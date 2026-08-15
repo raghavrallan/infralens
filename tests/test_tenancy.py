@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
+
 from app.core import rbac
 from app.tenancy import (
     invites,
@@ -21,6 +23,8 @@ from app.core.db import (
     User,
     init_db,
 )
+
+pytestmark = pytest.mark.infra
 
 
 def _mk_user(*, username: str, role: str = "developer", email: str = "") -> dict:

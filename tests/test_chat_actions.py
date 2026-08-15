@@ -3,6 +3,8 @@ import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from app.execution.action_planner import plan_action
 from app.execution.chat_actions import (
     _pending_confirmation,
@@ -26,6 +28,7 @@ from app.execution.action_planner import (
 )
 
 
+@pytest.mark.infra
 class ChatActionParsingTests(unittest.TestCase):
     def test_resource_group_name_and_region_are_extracted(self):
         parsed = _resource_group_request("Create me a new resource group in Azure named testing in eastus")

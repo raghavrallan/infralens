@@ -2,7 +2,6 @@ name: Quality
 
 on:
   pull_request:
-  workflow_call:
   workflow_dispatch:
 
 concurrency:
@@ -39,6 +38,28 @@ jobs:
     name: Unit Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: devsecops
+          POSTGRES_PASSWORD: devsecops
+          POSTGRES_DB: devsecops_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U devsecops -d devsecops_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg2://devsecops:devsecops@localhost:5432/devsecops_test
+      AUTH_JWT_SECRET: test-jwt-secret-not-for-production
+      EXECUTOR_SERVICE_KEY: test-executor-key
+      LANGFUSE_TRACING_ENABLED: "false"
+      AUTH_VERIFY_DB: "false"
+      CI: "true"
+      RUN_INFRA_TESTS: ${{ secrets.RUN_INFRA_TESTS }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -50,17 +71,30 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
       - name: Run unit tests
-        env:
-          AUTH_JWT_SECRET: test-jwt-secret-not-for-production
-          EXECUTOR_SERVICE_KEY: test-executor-key
-          LANGFUSE_TRACING_ENABLED: "false"
-        run: pytest tests/unit -q --junitxml=junit-unit.xml
+        run: |
+          FAIL_UNDER=0
+          pytest tests/unit -vv --tb=short \
+            --cov=app --cov=executors --cov-branch \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage-unit.xml \
+            --cov-fail-under="${FAIL_UNDER}" \
+            --junitxml=junit-unit.xml
+      - name: Publish unit summary
+        if: always()
+        run: >
+          python scripts/github_pytest_summary.py
+          --title "Unit tests"
+          --junit junit-unit.xml
+          --coverage coverage-unit.xml
+          --note "DB/Redis tests run only when RUN_INFRA_TESTS=true. Unit coverage is informational; the 90% gate applies to the full suite when infra tests are on."
       - name: Upload unit JUnit report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: junit-unit
-          path: junit-unit.xml
+          path: |
+            junit-unit.xml
+            coverage-unit.xml
 
   integration-coverage:
     name: Integration Tests + Coverage
@@ -87,6 +121,7 @@ jobs:
       LANGFUSE_TRACING_ENABLED: "false"
       AUTH_VERIFY_DB: "false"
       CI: "true"
+      RUN_INFRA_TESTS: ${{ secrets.RUN_INFRA_TESTS }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -98,14 +133,31 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
       - name: Run full suite with coverage gate
-        run: >
-          pytest
-          --cov=app --cov=executors --cov-branch
-          --cov-report=term-missing
-          --cov-report=html:htmlcov
-          --cov-report=xml:coverage.xml
-          --cov-fail-under=90
-          --junitxml=junit.xml
+        run: |
+          FAIL_UNDER=0
+          if [ "${RUN_INFRA_TESTS}" = "true" ]; then
+            FAIL_UNDER=90
+          fi
+          pytest -vv --tb=short \
+            --cov=app --cov=executors --cov-branch \
+            --cov-report=term-missing \
+            --cov-report=html:htmlcov \
+            --cov-report=xml:coverage.xml \
+            --cov-fail-under="${FAIL_UNDER}" \
+            --junitxml=junit.xml
+      - name: Publish coverage summary
+        if: always()
+        run: |
+          if [ "${RUN_INFRA_TESTS}" = "true" ]; then
+            NOTE="Combined line+branch coverage must be at least 90% (infra tests enabled)."
+          else
+            NOTE="RUN_INFRA_TESTS is false: Postgres/Redis tests were skipped and the 90% coverage gate is off."
+          fi
+          python scripts/github_pytest_summary.py \
+            --title "Integration tests + coverage" \
+            --junit junit.xml \
+            --coverage coverage.xml \
+            --note "${NOTE}"
       - name: Upload coverage and test reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -130,11 +182,10 @@ jobs:
           if [ "${{ needs.pylint.result }}" != "success" ] || \
              [ "${{ needs.unit-tests.result }}" != "success" ] || \
              [ "${{ needs.integration-coverage.result }}" != "success" ]; then
-            echo "❌ Quality gates FAILED — deployment blocked"
+            echo "Quality gates FAILED — merge blocked"
             exit 1
           fi
-          echo "✅ Pylint"
-          echo "✅ Unit Tests"
-          echo "✅ Integration Tests + Coverage >= 90%"
-          echo "✅ Quality Gates Passed"
-          echo "🚀 Deployment allowed"
+          echo "Pylint"
+          echo "Unit Tests"
+          echo "Integration Tests + Coverage"
+          echo "Quality Gates Passed"

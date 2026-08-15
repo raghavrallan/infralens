@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
+import app.skills  # noqa: F401 — break circular import before architect graph
 from app.agents.solution_architect import graph
 from app.agents.solution_architect.state import empty_state
 

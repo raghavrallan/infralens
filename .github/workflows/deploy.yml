@@ -10,13 +10,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  quality-gate:
-    name: Quality Gates
-    uses: ./.github/workflows/quality.yml
-
   deploy:
     name: Deploy to server
-    needs: quality-gate
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:

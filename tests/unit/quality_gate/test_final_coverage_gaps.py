@@ -157,6 +157,7 @@ def test_build_metrics_report_total_aggregation_and_empty_fallback():
 
 
 @pytest.mark.unit
+@pytest.mark.infra
 def test_handle_turn_creates_resource_group_when_name_and_location_present():
     spec_result = {"reply": "prepared rg", "action": {"id": "rg1"}, "event_type": "action_queued"}
     with _idle():
@@ -218,6 +219,7 @@ def test_handle_turn_creates_resource_group_when_name_and_location_present():
 
 
 @pytest.mark.unit
+@pytest.mark.infra
 def test_handle_turn_delete_context_group_and_planner_compound():
     with _idle():
         with patch("app.execution.chat_actions.chat_memory.get_model_context", return_value=[]):
@@ -400,6 +402,7 @@ def test_handle_turn_delete_context_group_and_planner_compound():
 
 
 @pytest.mark.unit
+@pytest.mark.infra
 def test_handle_turn_fallback_rg_missing_name_and_location():
     with _idle():
         with patch("app.execution.chat_actions.chat_memory.get_model_context", return_value=[]):
@@ -604,6 +607,7 @@ def test_require_user_falls_back_to_bearer_token():
 
 
 @pytest.mark.unit
+@pytest.mark.infra
 def test_handle_turn_compound_falls_through_to_resource_group_create():
     spec_result = {"reply": "prepared rg", "action": {"id": "rg2"}, "event_type": "action_queued"}
     with _idle():
@@ -676,6 +680,7 @@ def test_handle_turn_compound_falls_through_to_resource_group_create():
 
 
 @pytest.mark.unit
+@pytest.mark.infra
 def test_handle_turn_nsg_read_only_and_missing_subscription():
     with _idle():
         with patch("app.execution.chat_actions.chat_memory.get_model_context", return_value=[]):

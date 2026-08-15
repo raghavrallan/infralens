@@ -11,6 +11,70 @@ from pathlib import Path
 # Test environment — must run before `app.core.db` creates the SQLAlchemy engine.
 # python-dotenv in app.main does not override existing variables.
 # ---------------------------------------------------------------------------
+_ROOT = Path(__file__).resolve().parents[1]
+_FRONTEND_OUT = _ROOT / "frontend" / "out"
+_ENV_TEST = _ROOT / ".env.test"
+
+_INFRA_FIXTURES = frozenset(
+    {
+        "require_db",
+        "require_redis",
+        "client",
+        "org_with_project",
+        "db_initialized",
+        "make_user",
+        "postgres_available",
+        "redis_available",
+        "super_admin",
+        "org_admin",
+        "devops_lead",
+        "devops_engineer",
+        "developer",
+        "viewer",
+        "auth_header",
+    }
+)
+_INFRA_ROOT_FILES = frozenset(
+    {
+        "test_tenancy.py",
+        "test_org_executors.py",
+    }
+)
+_INFRA_MARKERS = frozenset({"integration", "e2e", "infra", "redis"})
+
+
+def _load_env_test() -> None:
+    """Load .env.test without overriding CI or already-exported variables."""
+    if not _ENV_TEST.exists():
+        return
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(_ENV_TEST, override=False)
+    except Exception:
+        return
+
+
+def _truthy(value: str | None) -> bool:
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def infra_tests_enabled() -> bool:
+    """DB/Redis tests run only when RUN_INFRA_TESTS is true.
+
+    GitHub Actions sets CI=true and RUN_INFRA_TESTS from the repository secret
+    (false by default). Local .env.test sets RUN_INFRA_TESTS=true.
+    """
+    if _truthy(os.environ.get("CI")):
+        return _truthy(os.environ.get("RUN_INFRA_TESTS"))
+    raw = os.environ.get("RUN_INFRA_TESTS")
+    if raw is not None and raw.strip() != "":
+        return _truthy(raw)
+    return True
+
+
+_load_env_test()
+
 os.environ.setdefault("AUTH_JWT_SECRET", "test-jwt-secret-not-for-production")
 os.environ.setdefault("AUTH_USERNAME", "test-admin")
 os.environ.setdefault("AUTH_PASSWORD", "test-password-12")
@@ -28,8 +92,7 @@ _DEFAULT_TEST_DB = (
 if not os.environ.get("DATABASE_URL"):
     os.environ["DATABASE_URL"] = os.environ.get("TEST_DATABASE_URL", _DEFAULT_TEST_DB)
 
-_ROOT = Path(__file__).resolve().parents[1]
-_FRONTEND_OUT = _ROOT / "frontend" / "out"
+os.environ.setdefault("REDIS_URL", "redis://localhost:6399/1")
 
 
 def _ensure_frontend_export() -> None:
@@ -84,9 +147,11 @@ def _ensure_test_database() -> bool:
         return False
 
 
-_ensure_test_database()
+if infra_tests_enabled():
+    _ensure_test_database()
 
 import pytest  # noqa: E402
+import app.skills  # noqa: E402,F401 — load skills before architect graph (circular import)
 import jwt  # noqa: E402
 
 
@@ -94,6 +159,30 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "unit: isolated tests")
     config.addinivalue_line("markers", "integration: requires PostgreSQL")
     config.addinivalue_line("markers", "e2e: critical-path workflows")
+    config.addinivalue_line("markers", "infra: requires Postgres or Redis (RUN_INFRA_TESTS)")
+    config.addinivalue_line("markers", "redis: requires Redis (RUN_INFRA_TESTS)")
+
+
+def _needs_infra(item: pytest.Item) -> bool:
+    if _INFRA_MARKERS.intersection(item.keywords):
+        return True
+    fixtures = set(getattr(item, "fixturenames", ()))
+    if fixtures.intersection(_INFRA_FIXTURES):
+        return True
+    path = str(getattr(item, "path", "") or item.fspath).replace("\\", "/")
+    name = path.rsplit("/", 1)[-1]
+    if name in _INFRA_ROOT_FILES:
+        return True
+    return "/tests/integration/" in path
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    if infra_tests_enabled():
+        return
+    skip = pytest.mark.skip(reason="RUN_INFRA_TESTS is false")
+    for item in items:
+        if _needs_infra(item):
+            item.add_marker(skip)
 
 
 @pytest.fixture(scope="session")
@@ -114,7 +203,7 @@ def postgres_available() -> bool:
 
 @pytest.fixture(scope="session")
 def db_initialized(postgres_available: bool) -> bool:
-    if not postgres_available:
+    if not infra_tests_enabled() or not postgres_available:
         return False
     from app.core.db import init_db
     from app.core import auth
@@ -126,8 +215,32 @@ def db_initialized(postgres_available: bool) -> bool:
 
 @pytest.fixture
 def require_db(db_initialized: bool) -> None:
+    if not infra_tests_enabled():
+        pytest.skip("RUN_INFRA_TESTS is false")
     if not db_initialized:
         pytest.skip("PostgreSQL test database is not available")
+
+
+@pytest.fixture(scope="session")
+def redis_available() -> bool:
+    if not infra_tests_enabled():
+        return False
+    try:
+        import redis
+
+        client = redis.Redis.from_url(os.environ.get("REDIS_URL", "redis://localhost:6399/1"))
+        client.ping()
+        return True
+    except Exception:
+        return False
+
+
+@pytest.fixture
+def require_redis(redis_available: bool) -> None:
+    if not infra_tests_enabled():
+        pytest.skip("RUN_INFRA_TESTS is false")
+    if not redis_available:
+        pytest.skip("Redis is not available")
 
 
 def _token_for(user: dict) -> str:
