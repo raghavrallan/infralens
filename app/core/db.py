@@ -464,6 +464,119 @@ class ArchitectureDecision(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class ProjectRequirement(Base):
+    """Structured requirement extracted from chat, docs, or the architect."""
+
+    __tablename__ = "project_requirements"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(String(36), index=True, default=DEFAULT_PROJECT_ID)
+    architecture_run_id: Mapped[str] = mapped_column(String(36), default="", index=True)
+    delivery_run_id: Mapped[str] = mapped_column(String(36), default="", index=True)
+    category: Mapped[str] = mapped_column(String(64), default="functional")
+    title: Mapped[str] = mapped_column(String(400), default="")
+    statement: Mapped[str] = mapped_column(String, default="")
+    source: Mapped[str] = mapped_column(String(32), default="user")
+    status: Mapped[str] = mapped_column(String(24), default="confirmed")
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+
+class ProjectArtifact(Base):
+    """Uploaded, generated, or referenced engineering artifact."""
+
+    __tablename__ = "project_artifacts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(String(36), index=True, default=DEFAULT_PROJECT_ID)
+    delivery_run_id: Mapped[str] = mapped_column(String(36), default="", index=True)
+    task_id: Mapped[str] = mapped_column(String(36), default="", index=True)
+    name: Mapped[str] = mapped_column(String(240), default="")
+    kind: Mapped[str] = mapped_column(String(32), default="document")
+    mime: Mapped[str] = mapped_column(String(120), default="text/plain")
+    filename: Mapped[str] = mapped_column(String(240), default="")
+    origin: Mapped[str] = mapped_column(String(24), default="upload")
+    stage: Mapped[str] = mapped_column(String(32), default="")
+    content_text: Mapped[str] = mapped_column(String, default="")
+    validation_status: Mapped[str] = mapped_column(String(24), default="pending")
+    validation_report: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    created_by: Mapped[str] = mapped_column(String(120), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+
+class DeliveryTask(Base):
+    """Stateful delivery-checklist item with dependencies and evidence."""
+
+    __tablename__ = "delivery_tasks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(String(36), index=True, default=DEFAULT_PROJECT_ID)
+    delivery_run_id: Mapped[str] = mapped_column(String(36), index=True, default="")
+    title: Mapped[str] = mapped_column(String(400), default="")
+    description: Mapped[str] = mapped_column(String, default="")
+    stage: Mapped[str] = mapped_column(String(32), default="architecture")
+    status: Mapped[str] = mapped_column(String(32), default="not_started", index=True)
+    priority: Mapped[str] = mapped_column(String(16), default="medium")
+    owner: Mapped[str] = mapped_column(String(120), default="")
+    depends_on: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    required_artifacts: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    validation_rules: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    acceptance_criteria: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    evidence: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    comments: Mapped[list[Any]] = mapped_column(JSONB, default=list)
+    ai_recommendation: Mapped[str] = mapped_column(String, default="")
+    architecture_decision_id: Mapped[str] = mapped_column(String(36), default="")
+    requirement_id: Mapped[str] = mapped_column(String(36), default="")
+    blocked_reason: Mapped[str] = mapped_column(String, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class ProjectRisk(Base):
+    """Actionable risk raised by architecture or validation."""
+
+    __tablename__ = "project_risks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(String(36), index=True, default=DEFAULT_PROJECT_ID)
+    title: Mapped[str] = mapped_column(String(400), default="")
+    severity: Mapped[str] = mapped_column(String(16), default="medium")
+    impact: Mapped[str] = mapped_column(String, default="")
+    recommendation: Mapped[str] = mapped_column(String, default="")
+    status: Mapped[str] = mapped_column(String(24), default="open")
+    related_task_id: Mapped[str] = mapped_column(String(36), default="")
+    related_decision_id: Mapped[str] = mapped_column(String(36), default="")
+    href: Mapped[str] = mapped_column(String(120), default="delivery")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class ProjectActivity(Base):
+    """Audit trail for architecture, delivery, and memory events."""
+
+    __tablename__ = "project_activities"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(String(36), index=True, default=DEFAULT_PROJECT_ID)
+    actor: Mapped[str] = mapped_column(String(120), default="system")
+    action: Mapped[str] = mapped_column(String(64), default="")
+    detail: Mapped[str] = mapped_column(String, default="")
+    ref_type: Mapped[str] = mapped_column(String(32), default="")
+    ref_id: Mapped[str] = mapped_column(String(36), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class ExecutionJob(Base):
     """A provider CLI operation tracked independently from chat output."""
 

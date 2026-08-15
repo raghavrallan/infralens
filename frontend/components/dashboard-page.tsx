@@ -16,6 +16,7 @@ import { ThemedSelect } from "./themed-select";
 import { DeliveryChecklist } from "./delivery-checklist";
 import { BreakGlassPanel } from "./break-glass-panel";
 import { MemoryStrip } from "./memory-strip";
+import { EngineeringCommand } from "./engineering-command";
 import { getStoredUser } from "../lib/auth";
 
 type Summary = Record<string, unknown>;
@@ -562,6 +563,11 @@ function getModuleIcon(key: string) {
           </div>
         </section>
         <div className="dash-grid">
+          {projectId && (
+            <section className="dash-col" style={{ gridColumn: "1 / -1" }}>
+              <EngineeringCommand projectId={projectId} />
+            </section>
+          )}
           {architectRuns.length > 0 && (
             <section className="dash-col" style={{ gridColumn: "1 / -1" }}>
               <div className="dash-section-head"><h3>Architecture</h3></div>

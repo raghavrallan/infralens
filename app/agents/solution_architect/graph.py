@@ -74,12 +74,13 @@ def explore(state: ArchitectState, emit: Emit) -> ArchitectState:
     inventory = tools.get_cloud_inventory(project_id)
     empty = tools.inventory_is_empty(inventory)
     state["mode"] = "greenfield" if empty else "brownfield"
-    evidence = [inventory]
+    evidence = [inventory, tools.search_precedent(project_id)]
+    if state.get("seed_context"):
+        evidence.insert(0, str(state.get("seed_context"))[:12000])
     if state.get("tier") in {"T2", "T3"}:
         emit({"type": "status", "text": "Gathering cost and code evidence"})
         evidence.append(tools.get_cost_report(project_id, state.get("objective") or ""))
         evidence.append(tools.get_code_artifacts(project_id))
-        evidence.append(tools.search_precedent(project_id))
         if "pci" in (state.get("objective") or "").lower() or "compliance" in (state.get("constraints") or "").lower():
             evidence.append(
                 tools.run_skill(
@@ -261,6 +262,21 @@ def finalize(state: ArchitectState, emit: Emit) -> ArchitectState:
         )
     except Exception:
         gated = list(state.get("decisions") or [])
+    try:
+        from app.platform.engineering.generate import apply_architect_result
+
+        delivery_id = ""
+        thread = str(state.get("thread_id") or "")
+        if thread.startswith("delivery:"):
+            delivery_id = thread.split(":", 1)[-1]
+        apply_architect_result(
+            dict(state),
+            run_id=run_id,
+            gated=gated,
+            delivery_run_id=delivery_id,
+        )
+    except Exception:
+        pass
     state["hld"] = _render_hld(state, gated)
     state["reply"] = state["hld"]
     governance.upsert_run(
@@ -356,12 +372,22 @@ def run_pipeline(state: ArchitectState, emit: Optional[Emit] = None) -> Architec
 
 def _initial_state(args: dict[str, Any], chat_id: str) -> ArchitectState:
     objective = str(args.get("objective") or args.get("task") or args.get("message") or "")
+    project_id = str(args.get("project_id") or "")
+    seed = str(args.get("live_environment") or args.get("seed_context") or args.get("conversation_memory") or "")
+    try:
+        from app.platform.engineering.context import architect_seed
+
+        extra = architect_seed(project_id, seed)
+        if extra:
+            seed = extra
+    except Exception:
+        pass
     return empty_state(
         objective=objective,
-        project_id=str(args.get("project_id") or ""),
+        project_id=project_id,
         user=str(args.get("user") or args.get("user_id") or ""),
         constraints=str(args.get("constraints") or args.get("operating_policy") or ""),
-        seed_context=str(args.get("live_environment") or args.get("seed_context") or args.get("conversation_memory") or ""),
+        seed_context=seed,
         tier=infer_tier(objective),
         plan_only=bool(args.get("plan_only")),
         source="delivery" if args.get("source") == "delivery" else "chat",

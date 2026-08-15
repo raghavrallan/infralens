@@ -27,12 +27,13 @@ function clearAuthStorage(): void {
 }
 
 export async function api<T>(url: string, options?: RequestInit): Promise<T> {
+  const isForm = typeof FormData !== "undefined" && options?.body instanceof FormData;
   let response: Response;
   try {
     response = await fetch(apiUrl(url), {
       ...options,
       headers: {
-        ...(options?.body ? { "Content-Type": "application/json" } : {}),
+        ...(options?.body && !isForm ? { "Content-Type": "application/json" } : {}),
         ...readAuthHeaders(),
         ...options?.headers,
       },

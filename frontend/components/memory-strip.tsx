@@ -2,60 +2,109 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../lib/api";
+import { getStoredUser } from "../lib/auth";
 
-type Precedent = {
-  id?: string;
+type MemoryItem = {
+  id: string;
+  title?: string;
   summary?: string;
-  outcome?: string;
+  source?: string;
+  confidence?: string;
+  status?: string;
+  category?: string;
+  last_verified_at?: string;
+  stale?: boolean;
   created_at?: string;
+  related_task_id?: string;
+  related_adr?: string;
 };
 
+const FILTERS = ["", "architecture", "infrastructure", "security", "database", "cloud", "cicd", "deployment", "incident", "decision", "requirement"];
+
 export function MemoryStrip({ projectId }: { projectId: string }) {
-  const [rows, setRows] = useState<Precedent[]>([]);
+  const me = getStoredUser();
+  const canVerify = ["devops_engineer", "devops_lead", "org_admin", "super_admin"].includes(me?.role || "");
+  const canArchive = ["devops_lead", "org_admin", "super_admin"].includes(me?.role || "");
+  const [rows, setRows] = useState<MemoryItem[]>([]);
+  const [category, setCategory] = useState("");
+  const [query, setQuery] = useState("");
+  const [message, setMessage] = useState("");
 
   const load = useCallback(async () => {
     if (!projectId) return;
     try {
-      setRows(
-        await api<Precedent[]>(
-          `/api/memory/precedent?project_id=${encodeURIComponent(projectId)}&limit=5`,
-        ),
-      );
+      const params = new URLSearchParams({ project_id: projectId, limit: "40" });
+      if (category) params.set("category", category);
+      if (query) params.set("q", query);
+      setRows(await api<MemoryItem[]>(`/api/engineering/memory?${params}`));
     } catch {
       setRows([]);
     }
-  }, [projectId]);
+  }, [projectId, category, query]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
+  const setStatus = async (id: string, status: string) => {
+    try {
+      await api(`/api/engineering/memory/${id}/status`, { method: "POST", body: JSON.stringify({ status }) });
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Update failed");
+    }
+  };
+
   return (
-    <section className="card">
+    <section className="card" id="memory">
       <div className="card-head">
         <h3>Engineering memory</h3>
         <span className="pill off">{rows.length}</span>
       </div>
-      <p style={{ margin: '8px 0 24px', fontSize: '13px', lineHeight: '1.5', color: 'var(--text)' }}>
-        Precedents appear after approvals and module actuations on this project.
+      <p style={{ margin: "8px 0 12px", fontSize: 13, color: "var(--muted)" }}>
+        Decisions, requirements, and outcomes from this project — not a scratch pad.
       </p>
+      <div className="eng-memory-tools">
+        <select value={category} onChange={(e) => setCategory(e.target.value)}>
+          {FILTERS.map((item) => (
+            <option key={item || "all"} value={item}>{item || "All categories"}</option>
+          ))}
+        </select>
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search memory…" />
+      </div>
       {!rows.length ? (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '16px' }}>
-          <div style={{ width: '56px', height: '56px', background: 'var(--primary-subtle)', color: 'var(--primary)', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px' }}>
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-          </div>
-          <strong style={{ fontSize: '14px', display: 'block', marginBottom: '4px' }}>No precedents yet</strong>
-          <span style={{ fontSize: '13px', color: 'var(--muted)' }}>They will appear here once available.</span>
+        <div style={{ textAlign: "center", padding: 16 }}>
+          <strong style={{ display: "block", marginBottom: 4 }}>No memories yet</strong>
+          <span className="muted">They appear after architecture, approvals, and delivery evidence.</span>
         </div>
       ) : (
-        <ul className="memory-list">
-          {rows.map((row, idx) => (
-            <li key={row.id || idx}>
-              <strong>{row.outcome || "recorded"}</strong>: {row.summary || "—"}
+        <ul className="memory-list eng-memory-list">
+          {rows.map((row) => (
+            <li key={row.id}>
+              <div className="eng-memory-row">
+                <strong>{row.title || row.summary}</strong>
+                <span className={`eng-mem-status ${row.status}`}>{row.status}{row.stale ? " · stale" : ""}</span>
+              </div>
+              <small>{row.category} · {row.source} · {row.confidence} confidence</small>
+              {row.related_adr || row.related_task_id ? (
+                <small> Linked ADR/task</small>
+              ) : null}
+              <div className="eng-memory-actions">
+                {canVerify && row.status !== "verified" && row.status !== "archived" && (
+                  <button type="button" className="tiny-btn" onClick={() => void setStatus(row.id, "verified")}>Verify</button>
+                )}
+                {canArchive && row.status !== "archived" && (
+                  <button type="button" className="tiny-btn" onClick={() => void setStatus(row.id, "archived")}>Archive</button>
+                )}
+                {canArchive && row.status === "active" && (
+                  <button type="button" className="tiny-btn" onClick={() => void setStatus(row.id, "superseded")}>Supersede</button>
+                )}
+              </div>
             </li>
           ))}
         </ul>
       )}
+      {message ? <div className="form-msg">{message}</div> : null}
     </section>
   );
 }

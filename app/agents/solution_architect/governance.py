@@ -196,10 +196,16 @@ def persist_decisions(
                     payload={
                         "skill": "solution_architect",
                         "module": "architecture",
+                        "title": item.get("title") or "ADR",
+                        "status": "active",
+                        "confidence": "high",
+                        "source": "solution_architect",
+                        "category": "decision",
                         "risk_class": risk_class,
                         "blast_radius": blast,
                         "gate": gate.gate,
                         "options_considered": item.get("options_considered") or [],
+                        "related_adr": decision_id,
                     },
                 )
             )
