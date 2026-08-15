@@ -199,19 +199,23 @@ def test_chat_agent_success_meta_and_execute_plan_stream(client, org_with_projec
     assert streamed.status_code == 200
     assert "done" in streamed.text or "final" in streamed.text
     _connect(project_id)
-    action = execution.create_action(
-        project_id=project_id,
-        provider="azure",
-        executable="az",
-        args=["group", "show", "--name", "demo", "--output", "json"],
-        target="rg/demo",
-        access_scope="read_only",
-        expected_result="exists",
-        risk="read",
-        rollback="",
-        preflight=[],
-        verify=["group", "show", "--name", "demo", "--output", "json"],
-    )
+    with patch(
+        "app.execution.service.enqueue_action",
+        return_value={"executor_available": True, "queue": "q"},
+    ):
+        action = execution.create_action(
+            project_id=project_id,
+            provider="azure",
+            executable="az",
+            args=["group", "show", "--name", "demo", "--output", "json"],
+            target="rg/demo",
+            access_scope="read_only",
+            expected_result="exists",
+            risk="read",
+            rollback="",
+            preflight=[],
+            verify=["group", "show", "--name", "demo", "--output", "json"],
+        )
     with patch("app.main.execution.create_action", return_value=action):
         with patch("app.main.config.get_azure_config", return_value=MagicMock(configured=False)):
             queued = client.post(
@@ -368,19 +372,23 @@ def test_workflows_decide_approval_missing_finding_and_dashboard_filters(
 def test_diagnose_running_and_queued_with_executor(require_db, org_with_project):
     project_id = org_with_project["project"]["id"]
     _connect(project_id)
-    action = execution.create_action(
-        project_id=project_id,
-        provider="azure",
-        executable="az",
-        args=["account", "show"],
-        target="identity",
-        access_scope="read_only",
-        expected_result="ok",
-        risk="read",
-        rollback="",
-        preflight=[],
-        verify=[],
-    )
+    with patch(
+        "app.execution.service.enqueue_action",
+        return_value={"executor_available": True, "queue": "q"},
+    ):
+        action = execution.create_action(
+            project_id=project_id,
+            provider="azure",
+            executable="az",
+            args=["account", "show"],
+            target="identity",
+            access_scope="read_only",
+            expected_result="ok",
+            risk="read",
+            rollback="",
+            preflight=[],
+            verify=[],
+        )
     with SessionLocal() as session:
         job = session.get(ExecutionJob, action["id"])
         job.status = "running"

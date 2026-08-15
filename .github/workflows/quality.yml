@@ -2,7 +2,6 @@ name: Quality
 
 on:
   pull_request:
-  workflow_call:
   workflow_dispatch:
 
 concurrency:
@@ -130,11 +129,10 @@ jobs:
           if [ "${{ needs.pylint.result }}" != "success" ] || \
              [ "${{ needs.unit-tests.result }}" != "success" ] || \
              [ "${{ needs.integration-coverage.result }}" != "success" ]; then
-            echo "❌ Quality gates FAILED — deployment blocked"
+            echo "Quality gates FAILED — merge blocked"
             exit 1
           fi
-          echo "✅ Pylint"
-          echo "✅ Unit Tests"
-          echo "✅ Integration Tests + Coverage >= 90%"
-          echo "✅ Quality Gates Passed"
-          echo "🚀 Deployment allowed"
+          echo "Pylint"
+          echo "Unit Tests"
+          echo "Integration Tests + Coverage >= 90%"
+          echo "Quality Gates Passed"

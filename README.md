@@ -226,8 +226,8 @@ chatbot.
 
 ## Testing and quality gates
 
-Backend quality is enforced locally and in CI. Deployment to production is blocked
-when any gate fails.
+Backend quality is enforced on pull requests. Merging to `master` requires the
+**Quality Gates** check to pass. After merge, only the Deploy workflow runs.
 
 ```bash
 # Install test/lint tools
@@ -271,8 +271,11 @@ CI (`.github/workflows/quality.yml`) runs on every pull request:
 3. **Integration tests + coverage** — full `pytest` against an ephemeral Postgres
    service; fails if combined line+branch coverage is below 90%
 
-`.github/workflows/deploy.yml` calls that workflow first. If any job fails,
-**deployment does not run**.
+Those jobs feed a single **Quality Gates** check. Branch protection requires that
+check before a pull request can merge.
+
+`.github/workflows/deploy.yml` runs only after a push to `master` (a completed
+merge). It does **not** re-run tests.
 
 If a check fails locally:
 

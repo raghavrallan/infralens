@@ -87,6 +87,7 @@ def _ensure_test_database() -> bool:
 _ensure_test_database()
 
 import pytest  # noqa: E402
+import app.skills  # noqa: E402,F401 — load skills before architect graph (circular import)
 import jwt  # noqa: E402
 
 
