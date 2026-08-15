@@ -233,7 +233,7 @@ Backend quality is enforced on pull requests. Merging to `master` requires the
 # Install test/lint tools
 pip install -r requirements-dev.txt
 
-# Unit tests (no PostgreSQL required for tests/unit)
+# Unit tests (some paths use Postgres when they exercise chat/action persistence)
 pytest tests/unit
 
 # Integration tests (isolated Postgres database)
@@ -267,7 +267,8 @@ the HTML report, JUnit XML, and the Pylint parseable log.
 CI (`.github/workflows/quality.yml`) runs on every pull request:
 
 1. **Pylint** — score must be ≥ 9.0
-2. **Unit tests** — `pytest tests/unit`
+2. **Unit tests** — `pytest tests/unit` against ephemeral Postgres (some unit
+   tests persist chat/action state)
 3. **Integration tests + coverage** — full `pytest` against an ephemeral Postgres
    service; fails if combined line+branch coverage is below 90%
 
