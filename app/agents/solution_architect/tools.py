@@ -94,6 +94,14 @@ def get_code_artifacts(project_id: str, kinds: Optional[list[str]] = None) -> st
 
 
 def search_precedent(project_id: str, skill: str = "solution_architect") -> str:
+    try:
+        from app.platform.engineering.knowledge import architect_context
+
+        ctx = architect_context(project_id)
+        if ctx.get("prompt"):
+            return _clip(ctx["prompt"], 8000)
+    except Exception:
+        pass
     from app.platform.memory import list_precedent
 
     try:

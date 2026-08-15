@@ -37,6 +37,8 @@ CAPABILITY_MIN_ROLE: dict[str, str] = {
     "approve_human": "devops_engineer",
     "run_workflow": "devops_engineer",
     "run_architecture": "devops_lead",
+    "verify_memory": "devops_engineer",
+    "archive_memory": "devops_lead",
     "approve_two_person": "devops_lead",
     "prod_apply": "devops_lead",
     "break_glass": "devops_lead",

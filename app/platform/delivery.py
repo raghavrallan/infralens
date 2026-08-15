@@ -243,9 +243,45 @@ def ingest_docs(run_id: str, *, docs: str, user_role: str) -> dict[str, Any]:
         artifacts["requirements"] = artifacts["docs"]
         row.artifacts = artifacts
         row.updated_at = _now()
-        if row.stage == "ingest":
-            # Stay on ingest until explicitly advanced; store content now.
-            pass
+        project_id = row.project_id
+        run_id = row.id
         session.commit()
         session.refresh(row)
-        return _dict(row)
+        payload = _dict(row)
+    try:
+        from app.platform.engineering.artifacts import save_artifact
+        from app.platform.engineering.generate import _save_requirement
+        from app.platform.engineering.knowledge import remember
+
+        save_artifact(
+            project_id=project_id,
+            name="requirements.md",
+            filename="requirements.md",
+            kind="document",
+            origin="upload",
+            content_text=docs or "",
+            delivery_run_id=run_id,
+            created_by="",
+            validate=False,
+        )
+        _save_requirement(
+            project_id=project_id,
+            category="functional",
+            title="Ingested requirements",
+            statement=(docs or "")[:8000],
+            source="document",
+            delivery_run_id=run_id,
+        )
+        remember(
+            project_id=project_id,
+            summary="Requirements ingested for delivery run",
+            kind="requirement",
+            category="requirement",
+            source="document",
+            confidence="high",
+            status="active",
+            extra={"delivery_run_id": run_id},
+        )
+    except Exception:
+        pass
+    return payload
