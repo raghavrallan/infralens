@@ -1,5 +1,5 @@
 """Solution Architect skill is agentic, not auto-routed, not workflow-safe."""
-from app.orchestrator import _skill_catalog_text
+from app.chat.orchestrator import _skill_catalog_text
 from app.skills import is_workflow_safe, registry
 
 

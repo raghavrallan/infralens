@@ -9,10 +9,11 @@ from typing import Any, Optional
 
 from sqlalchemy import select
 
-from app import mailer, memberships
-from app.auth import hash_password
-from app.db import Invite, Organization, SessionLocal, User
-from app.rbac import normalize_role
+from app.core import mailer
+from app.tenancy import memberships
+from app.core.auth import hash_password
+from app.core.db import Invite, Organization, SessionLocal, User
+from app.core.rbac import normalize_role
 
 INVITE_TTL_DAYS = 7
 

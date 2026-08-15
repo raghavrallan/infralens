@@ -8,8 +8,8 @@ import json
 import re
 from typing import Any, Optional
 
-from app import azure_client
-from app.db import Chat, ChatMemory, Message, SessionLocal
+from app.core import azure_client
+from app.core.db import Chat, ChatMemory, Message, SessionLocal
 from sqlalchemy import delete, select
 
 MAX_SUMMARY_CHARS = 2400
@@ -55,7 +55,7 @@ Keep each item concise."""
 
 
 def _memory_system_prompt() -> str:
-    from app.prompts import get_text_prompt
+    from app.core.prompts import get_text_prompt
 
     return get_text_prompt(
         "chat-memory-system",

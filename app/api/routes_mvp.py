@@ -7,26 +7,30 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
-from app import (
+from app.core import (
     auth,
-    break_glass,
-    connections,
-    delivery,
-    invites,
     mailer,
+)
+from app.tenancy import (
+    invites,
     membership_requests,
     memberships,
-    memory,
-    module_actuators,
-    oauth_providers,
     onboarding,
     orgs,
     projects,
     users_admin,
 )
-from app.db import DEFAULT_PROJECT_ID
+from app.platform import (
+    break_glass,
+    connections,
+    delivery,
+    memory,
+    module_actuators,
+    oauth_providers,
+)
+from app.core.db import DEFAULT_PROJECT_ID
 from app.providers import github_infra
-from app.rbac import (
+from app.core.rbac import (
     assert_capability,
     can_approve_gate,
     public_roles,

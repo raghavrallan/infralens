@@ -16,7 +16,7 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Iterator, Literal, Optional
 
-from app import azure_client
+from app.core import azure_client
 from app.execution.chat_actions import provider_status_text
 from app.providers import aws_infra, azure_infra, github_infra
 from app.skills import registry
@@ -1476,7 +1476,7 @@ ORCHESTRATOR_SYSTEM_PROMPT = (
 
 
 def _orchestrator_system(policy: str, live_context: Optional[str] = None) -> str:
-    from app.prompts import get_text_prompt
+    from app.core.prompts import get_text_prompt
 
     base = get_text_prompt(
         "orchestrator-system",
@@ -1492,8 +1492,8 @@ def _gather_project_topology(
     project_id: str, messages: list[dict[str, Any]]
 ) -> str:
     """Build a complete project picture for planner and skill routing."""
-    from app import chat_memory
-    from app.project_context import gather_project_topology
+    from app.chat import chat_memory
+    from app.chat.project_context import gather_project_topology
 
     user_messages = [
         str(item.get("content", ""))
@@ -1689,7 +1689,7 @@ def _build_plan(
     questions are non-empty, the caller should ask the user instead of running.
     """
     catalog = _skill_catalog_text()
-    from app.prompts import get_text_prompt
+    from app.core.prompts import get_text_prompt
 
     system_content = get_text_prompt(
         "planner-system",
@@ -1926,7 +1926,7 @@ def _build_detailed_plan(
     / steps) plus the validated, ordered PlanSteps used for execution.
     """
     catalog = _skill_catalog_text()
-    from app.prompts import get_text_prompt
+    from app.core.prompts import get_text_prompt
 
     system_content = get_text_prompt(
         "detailed-plan-system",
@@ -2323,7 +2323,7 @@ def _pretty(name: str) -> str:
 
 def _skill_deltas(skill: Any, args: dict[str, Any]) -> Iterator[str]:
     """Yield text deltas for a skill run, streaming unless it emits JSON."""
-    from app import observability
+    from app.core import observability
 
     # Bind only — do not wrap yields in tracing_context (StreamingResponse ContextVar issue).
     tokens = observability.bind_tracing(

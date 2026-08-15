@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from sqlalchemy import select
 
-from app.db import AppConfig, SessionLocal
+from app.core.db import AppConfig, SessionLocal
 
 _AZURE_KEYS = (
     "azure_openai_endpoint",

@@ -100,7 +100,7 @@ def _current_user(
     request: Request,
     authorization: Optional[str] = Header(default=None),
 ) -> dict[str, Any]:
-    from app import auth
+    from app.core import auth
 
     return auth.require_user(request, authorization)
 

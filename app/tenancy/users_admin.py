@@ -6,9 +6,10 @@ from typing import Any, Optional
 
 from sqlalchemy import select
 
-from app import auth, memberships
-from app.db import OrgMembership, SessionLocal, User
-from app.rbac import ROLE_LABELS, normalize_role
+from app.core import auth
+from app.tenancy import memberships
+from app.core.db import OrgMembership, SessionLocal, User
+from app.core.rbac import ROLE_LABELS, normalize_role
 
 
 def list_users(*, org_id: Optional[str] = None, actor: Optional[dict[str, Any]] = None) -> list[dict[str, Any]]:

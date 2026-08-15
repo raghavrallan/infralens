@@ -4,8 +4,8 @@ from __future__ import annotations
 import uuid
 from typing import Any, Optional
 
-from app import memory
-from app.rbac import assert_capability, can, has_min_role
+from app.platform import memory
+from app.core.rbac import assert_capability, can, has_min_role
 
 
 def _proposal(

@@ -94,7 +94,7 @@ def get_code_artifacts(project_id: str, kinds: Optional[list[str]] = None) -> st
 
 
 def search_precedent(project_id: str, skill: str = "solution_architect") -> str:
-    from app.memory import list_precedent
+    from app.platform.memory import list_precedent
 
     try:
         rows = list_precedent(project_id, skill=skill, limit=8)

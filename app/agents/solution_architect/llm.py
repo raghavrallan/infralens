@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from app import observability
-from app.config import get_azure_config
+from app.core import observability
+from app.core.config import get_azure_config
 
 _llm: Any = None
 _llm_signature: Optional[tuple[str, str, str, str, bool]] = None

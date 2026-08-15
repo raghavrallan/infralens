@@ -5,8 +5,8 @@ from uuid import uuid4
 
 from sqlalchemy import select
 
-from app import connections
-from app.db import (
+from app.platform import connections
+from app.core.db import (
     ExecutionApproval,
     ExecutionEvent,
     ExecutionJob,
@@ -450,7 +450,7 @@ def approve_action(action_id: str, approver: str) -> dict[str, Any]:
         session.commit()
         result = _public(job, approval)
     try:
-        from app import memory as eng_memory
+        from app.platform import memory as eng_memory
 
         eng_memory.remember_action(
             project_id=result["project_id"],
@@ -496,7 +496,7 @@ def reject_action(action_id: str, approver: str, reason: str) -> dict[str, Any]:
         session.commit()
         result = _public(job, approval)
     try:
-        from app import memory as eng_memory
+        from app.platform import memory as eng_memory
 
         eng_memory.remember_action(
             project_id=result["project_id"],
@@ -638,7 +638,7 @@ def mark_result(action_id: str, status: str, result: dict[str, Any], error: str 
         target = job.target
         session.commit()
     try:
-        from app import memory as eng_memory
+        from app.platform import memory as eng_memory
 
         eng_memory.remember_action(
             project_id=project_id,

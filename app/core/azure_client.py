@@ -18,8 +18,8 @@ agentic tool calling.
 """
 from typing import Any, Iterator, Optional
 
-from app import observability
-from app.config import AzureConfig, get_azure_config
+from app.core import observability
+from app.core.config import AzureConfig, get_azure_config
 
 _client: Any = None
 _client_signature: Optional[tuple[str, str, str, bool]] = None

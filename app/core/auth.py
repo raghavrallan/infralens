@@ -13,8 +13,8 @@ import jwt
 from fastapi import Header, HTTPException, Request
 from sqlalchemy import select, text
 
-from app.db import SessionLocal, User, engine
-from app.rbac import ROLE_LABELS, normalize_role
+from app.core.db import SessionLocal, User, engine
+from app.core.rbac import ROLE_LABELS, normalize_role
 
 DEFAULT_USERNAME = "admin"
 DEFAULT_PASSWORD = "infralens"
@@ -204,7 +204,7 @@ def authenticate(username: str, password: str) -> Optional[dict[str, Any]]:
         expires = int(time.time()) + TOKEN_TTL_SECONDS
         public = _public_user(user)
         try:
-            from app import memberships
+            from app.tenancy import memberships
 
             public = memberships.enrich_user_public(public)
         except Exception:

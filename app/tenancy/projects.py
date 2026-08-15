@@ -11,7 +11,7 @@ from typing import Any, Optional
 from sqlalchemy import delete, select, update
 from sqlalchemy.exc import ProgrammingError
 
-from app.db import (
+from app.core.db import (
     AppConfig,
     DEFAULT_PROJECT_ID,
     DEFAULT_PROJECT_CONFIG_KEY,
@@ -127,7 +127,7 @@ def list_projects(user: Optional[dict[str, Any]] = None) -> list[dict[str, Any]]
             rows = session.execute(select(Project).order_by(Project.created_at.asc())).scalars()
             return [_summary(p, default_id) for p in rows if p.id not in deleted]
 
-    from app import memberships
+    from app.tenancy import memberships
 
     # Do not auto-create a shared default for scoped users — empty means onboard.
     with SessionLocal() as session:
@@ -153,7 +153,7 @@ def create_project(
 
     # Reuse the caller's empty onboarding project so PAT/OAuth does not spawn duplicates.
     if reuse_empty and owner_user_id:
-        from app import memberships
+        from app.tenancy import memberships
 
         for existing in list_projects(user={"id": owner_user_id, "role": "developer"}):
             # Only reuse projects the user owns with no mapped repos yet.
@@ -179,7 +179,7 @@ def create_project(
     project_id = str(uuid.uuid4())
     with SessionLocal() as session:
         if not org_id:
-            from app.db import Organization
+            from app.core.db import Organization
 
             org = session.scalar(select(Organization).order_by(Organization.created_at.asc()))
             org_id = org.id if org else ""
@@ -188,7 +188,7 @@ def create_project(
         session.commit()
         summary = _summary(project, _default_id(session))
     if owner_user_id:
-        from app import memberships
+        from app.tenancy import memberships
 
         memberships.ensure_project_membership(
             project_id=project_id,

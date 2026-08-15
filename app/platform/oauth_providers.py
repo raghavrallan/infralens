@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 
 import httpx
 
-from app import connections
+from app.platform import connections
 
 # In-memory OAuth state (MVP). Survives one process; fine for Container App sticky sessions.
 _OAUTH_STATE: dict[str, dict[str, Any]] = {}

@@ -355,14 +355,20 @@ If you see 'pg_config executable not found', delete .venv and re-run setup with 
     }
 
     if (-not $SkipFrontendBuild) {
-        Write-Host "==> Building Next.js frontend"
-        Push-Location (Join-Path $Root "frontend")
+        Write-Host "==> Installing frontend packages from frontend/package.json"
+        Push-Location $FrontendDir
         try {
-            if (-not (Test-Path "node_modules")) {
-                npm install
+            $npmCmd = Get-NpmCmd
+            $install = Invoke-Native -FilePath $npmCmd -ArgumentList @("install")
+            if ($install.Output) { Write-Host $install.Output }
+            if ($install.ExitCode -ne 0) {
+                throw "Frontend npm install failed. Check Node.js/npm and frontend/package.json."
             }
-            npm run build
-            if ($LASTEXITCODE -ne 0) {
+
+            Write-Host "==> Building Next.js frontend"
+            $build = Invoke-Native -FilePath $npmCmd -ArgumentList @("run", "build")
+            if ($build.Output) { Write-Host $build.Output }
+            if ($build.ExitCode -ne 0) {
                 throw "Frontend build failed"
             }
         }
@@ -703,6 +709,18 @@ function Get-NodeExe {
         if (Test-Path $path) { return $path }
     }
     throw "node.exe not found. Install Node.js 20+ from https://nodejs.org/ and re-run setup."
+}
+
+function Get-NpmCmd {
+    $nodeDir = Split-Path (Get-NodeExe) -Parent
+    $candidates = @(
+        (Join-Path $nodeDir "npm.cmd"),
+        (Get-Command npm.cmd -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)
+    ) | Where-Object { $_ }
+    foreach ($path in $candidates) {
+        if (Test-Path $path) { return $path }
+    }
+    throw "npm.cmd not found. Install Node.js 20+ from https://nodejs.org/ and re-run setup."
 }
 
 function Wait-HttpReady {

@@ -3,9 +3,13 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional
 
-from app import connections, memberships, projects
+from app.tenancy import (
+    memberships,
+    projects,
+)
+from app.platform import connections
 from app.providers import github_infra
-from app.rbac import normalize_role
+from app.core.rbac import normalize_role
 
 
 def status(*, user: dict[str, Any]) -> dict[str, Any]:

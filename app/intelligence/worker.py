@@ -8,8 +8,8 @@ persisted for the dashboard. This module is imported by ``rq worker``.
 from rq import SimpleWorker
 from rq.timeouts import TimerDeathPenalty
 
-from app import orchestrator
-from app.db import init_db
+from app.chat import orchestrator
+from app.core.db import init_db
 from app.intelligence import findings as findings_mod
 from app.intelligence import workflows as store
 from app.skills import registry
@@ -85,7 +85,7 @@ def run_workflow(run_id: str) -> dict[str, int]:
     environment = workflow["environment"]
     policy = orchestrator.build_policy("read_only", "ask_approval")
 
-    from app import observability
+    from app.core import observability
 
     with observability.tracing_context(
         session_id=f"workflow-run:{run_id}",

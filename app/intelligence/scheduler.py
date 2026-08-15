@@ -32,8 +32,8 @@ def _enqueue_scheduled(workflow_id: str) -> None:
 
 def _pause_workflows_without_cloud() -> None:
     """Disable scheduled workflows when the project has no Azure/AWS connection."""
-    from app import connections
-    from app.db import Project, SessionLocal, Workflow
+    from app.platform import connections
+    from app.core.db import Project, SessionLocal, Workflow
 
     with SessionLocal() as session:
         for project in session.scalars(select(Project)).all():

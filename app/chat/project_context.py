@@ -10,7 +10,8 @@ import json
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal, Optional
 
-from app import connections, projects
+from app.tenancy import projects
+from app.platform import connections
 from app.providers import aws_infra, azure_infra, github_infra
 
 ProjectMode = Literal["fresh", "existing"]

@@ -7,9 +7,9 @@ from typing import Any, Optional
 
 from sqlalchemy import func, select
 
-from app import memberships
-from app.db import Organization, OrgMembership, Project, SessionLocal, User
-from app.rbac import normalize_role
+from app.tenancy import memberships
+from app.core.db import Organization, OrgMembership, Project, SessionLocal, User
+from app.core.rbac import normalize_role
 
 
 def _slugify(name: str) -> str:
@@ -143,7 +143,7 @@ def assign_org_admin(*, org_id: str, user_id: str) -> dict[str, Any]:
 
 
 def list_org_projects(org_id: str) -> list[dict[str, Any]]:
-    from app import projects as projects_mod
+    from app.tenancy import projects as projects_mod
 
     # Soft-clean empty duplicate shells left from onboarding retries.
     with SessionLocal() as session:

@@ -1,7 +1,12 @@
 """Extra MVP coverage: actuators, memory shape, oauth options, gate map."""
 from __future__ import annotations
 
-from app import memory, module_actuators, oauth_providers, rbac
+from app.core import rbac
+from app.platform import (
+    memory,
+    module_actuators,
+    oauth_providers,
+)
 
 
 def test_gate_min_roles():

@@ -17,7 +17,8 @@ from typing import Any, Optional
 
 import httpx
 
-from app import connections, projects
+from app.tenancy import projects
+from app.platform import connections
 
 # Common short aliases users type for a repo/project role.
 _REPO_ALIASES = {

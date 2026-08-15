@@ -9,9 +9,10 @@ from typing import Any, Optional
 
 from sqlalchemy import select
 
-from app import mailer, memberships
-from app.db import MembershipRequest, Project, SessionLocal, User
-from app.rbac import normalize_role
+from app.core import mailer
+from app.tenancy import memberships
+from app.core.db import MembershipRequest, Project, SessionLocal, User
+from app.core.rbac import normalize_role
 
 REQUEST_TTL_DAYS = 7
 
@@ -64,7 +65,7 @@ def create_request(
 
     raw_token = secrets.token_urlsafe(32)
     with SessionLocal() as session:
-        from app.db import OrgMembership
+        from app.core.db import OrgMembership
 
         project = session.get(Project, project_id)
         if project is None:

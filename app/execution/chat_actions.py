@@ -2,7 +2,11 @@
 import re
 from typing import Any, Optional
 
-from app import chat_memory, chats, connections
+from app.chat import (
+    chat_memory,
+    chats,
+)
+from app.platform import connections
 from app.execution import action_planner, cicd, debug_loop, deploy_orchestrator, service, terraform_runner
 
 _REGION_NAMES = {
@@ -932,7 +936,7 @@ def handle_turn(
         latest = _latest_action(chat_id)
         if latest and latest.get("status") in {"failed", "verification_failed"}:
             try:
-                from app.project_context import gather_project_topology
+                from app.chat.project_context import gather_project_topology
 
                 topology = gather_project_topology(project_id)
                 result = debug_loop.run_debug_cycle(

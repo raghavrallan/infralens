@@ -15,7 +15,7 @@ from typing import Any, Optional
 from sqlalchemy import select
 from sqlalchemy.exc import ProgrammingError
 
-from app.db import Connection, SessionLocal
+from app.core.db import Connection, SessionLocal
 
 PROVIDERS = ("azure", "aws", "github")
 

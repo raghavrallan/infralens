@@ -1,7 +1,12 @@
 """RBAC, rollback gate, onboarding, break-glass, and delivery tests."""
 from __future__ import annotations
 
-from app import break_glass, delivery, onboarding, rbac
+from app.core import rbac
+from app.tenancy import onboarding
+from app.platform import (
+    break_glass,
+    delivery,
+)
 from app.execution import service as execution
 from app.execution.validation import validate_operation
 

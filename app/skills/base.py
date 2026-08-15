@@ -12,7 +12,7 @@ tool, so the model can pick the right skill for a user's request.
 from dataclasses import dataclass, field
 from typing import Any, Iterator, Optional
 
-from app import azure_client
+from app.core import azure_client
 
 
 @dataclass
@@ -70,7 +70,7 @@ class Skill:
 
     def build_messages(self, args: dict[str, Any]) -> list[dict[str, Any]]:
         """Build the system + user messages for this skill run."""
-        from app.prompts import get_text_prompt
+        from app.core.prompts import get_text_prompt
 
         system = get_text_prompt(
             f"skill-{self.name}",
@@ -83,7 +83,7 @@ class Skill:
 
     def run(self, args: dict[str, Any]) -> SkillResult:
         """Execute the skill via one focused Azure OpenAI completion."""
-        from app import observability
+        from app.core import observability
 
         messages = self.build_messages(args)
         response_format = {"type": "json_object"} if self.json_output else None

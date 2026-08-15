@@ -29,8 +29,14 @@ if str(_ROOT) not in sys.path:
 
 from sqlalchemy import select
 
-from app import auth, connections, memberships, orgs, projects
-from app.db import (
+from app.core import auth
+from app.tenancy import (
+    memberships,
+    orgs,
+    projects,
+)
+from app.platform import connections
+from app.core.db import (
     DEFAULT_ORG_ID,
     DEFAULT_ORG_SLUG,
     Organization,
