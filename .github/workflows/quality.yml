@@ -70,13 +70,28 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
       - name: Run unit tests
-        run: pytest tests/unit -q --junitxml=junit-unit.xml
+        run: >
+          pytest tests/unit -vv --tb=short
+          --cov=app --cov=executors --cov-branch
+          --cov-report=term-missing
+          --cov-report=xml:coverage-unit.xml
+          --junitxml=junit-unit.xml
+      - name: Publish unit summary
+        if: always()
+        run: >
+          python scripts/github_pytest_summary.py
+          --title "Unit tests"
+          --junit junit-unit.xml
+          --coverage coverage-unit.xml
+          --note "Unit-only coverage is informational. The 90% gate is the full suite in Integration Tests + Coverage."
       - name: Upload unit JUnit report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: junit-unit
-          path: junit-unit.xml
+          path: |
+            junit-unit.xml
+            coverage-unit.xml
 
   integration-coverage:
     name: Integration Tests + Coverage
@@ -115,13 +130,21 @@ jobs:
           pip install -r requirements-dev.txt
       - name: Run full suite with coverage gate
         run: >
-          pytest
+          pytest -vv --tb=short
           --cov=app --cov=executors --cov-branch
           --cov-report=term-missing
           --cov-report=html:htmlcov
           --cov-report=xml:coverage.xml
           --cov-fail-under=90
           --junitxml=junit.xml
+      - name: Publish coverage summary
+        if: always()
+        run: >
+          python scripts/github_pytest_summary.py
+          --title "Integration tests + coverage"
+          --junit junit.xml
+          --coverage coverage.xml
+          --note "Combined line+branch coverage must be at least 90%."
       - name: Upload coverage and test reports
         if: always()
         uses: actions/upload-artifact@v4

@@ -267,10 +267,11 @@ the HTML report, JUnit XML, and the Pylint parseable log.
 CI (`.github/workflows/quality.yml`) runs on every pull request:
 
 1. **Pylint** — score must be ≥ 9.0
-2. **Unit tests** — `pytest tests/unit` against ephemeral Postgres (some unit
-   tests persist chat/action state)
-3. **Integration tests + coverage** — full `pytest` against an ephemeral Postgres
-   service; fails if combined line+branch coverage is below 90%
+2. **Unit tests** — `pytest tests/unit -vv` against ephemeral Postgres, with a
+   coverage report on the job summary (informational; not the 90% gate)
+3. **Integration tests + coverage** — full `pytest -vv` against ephemeral Postgres;
+   fails if combined line+branch coverage is below 90%. The job summary lists
+   coverage scores and every executed test.
 
 Those jobs feed a single **Quality Gates** check. Branch protection requires that
 check before a pull request can merge.
