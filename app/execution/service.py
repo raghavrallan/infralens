@@ -14,6 +14,14 @@ from app.core.db import (
     SessionLocal,
 )
 from app.execution.queue import enqueue_action, queue_snapshot
+
+TERMINAL = {
+    "succeeded",
+    "failed",
+    "verification_failed",
+    "canceled",
+    "rolled_back",
+}
 from app.execution.validation import (
     command_preview,
     delete_verification_confirms_absence,

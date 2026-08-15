@@ -1,0 +1,140 @@
+name: Quality
+
+on:
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pylint:
+    name: Pylint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install lint dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - name: Run Pylint (fail under 9.0)
+        run: |
+          set -o pipefail
+          pylint app executors --output-format=parseable | tee pylint.txt
+      - name: Upload Pylint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pylint-report
+          path: pylint.txt
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - name: Run unit tests
+        env:
+          AUTH_JWT_SECRET: test-jwt-secret-not-for-production
+          EXECUTOR_SERVICE_KEY: test-executor-key
+          LANGFUSE_TRACING_ENABLED: "false"
+        run: pytest tests/unit -q --junitxml=junit-unit.xml
+      - name: Upload unit JUnit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-unit
+          path: junit-unit.xml
+
+  integration-coverage:
+    name: Integration Tests + Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: devsecops
+          POSTGRES_PASSWORD: devsecops
+          POSTGRES_DB: devsecops_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U devsecops -d devsecops_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg2://devsecops:devsecops@localhost:5432/devsecops_test
+      AUTH_JWT_SECRET: test-jwt-secret-not-for-production
+      EXECUTOR_SERVICE_KEY: test-executor-key
+      LANGFUSE_TRACING_ENABLED: "false"
+      AUTH_VERIFY_DB: "false"
+      CI: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - name: Run full suite with coverage gate
+        run: >
+          pytest
+          --cov=app --cov=executors --cov-branch
+          --cov-report=term-missing
+          --cov-report=html:htmlcov
+          --cov-report=xml:coverage.xml
+          --cov-fail-under=90
+          --junitxml=junit.xml
+      - name: Upload coverage and test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-and-junit
+          path: |
+            coverage.xml
+            htmlcov
+            junit.xml
+
+  quality-gate:
+    name: Quality Gates
+    runs-on: ubuntu-latest
+    needs: [pylint, unit-tests, integration-coverage]
+    if: always()
+    steps:
+      - name: Enforce all required checks
+        run: |
+          echo "Pylint: ${{ needs.pylint.result }}"
+          echo "Unit tests: ${{ needs.unit-tests.result }}"
+          echo "Integration + coverage: ${{ needs.integration-coverage.result }}"
+          if [ "${{ needs.pylint.result }}" != "success" ] || \
+             [ "${{ needs.unit-tests.result }}" != "success" ] || \
+             [ "${{ needs.integration-coverage.result }}" != "success" ]; then
+            echo "❌ Quality gates FAILED — deployment blocked"
+            exit 1
+          fi
+          echo "✅ Pylint"
+          echo "✅ Unit Tests"
+          echo "✅ Integration Tests + Coverage >= 90%"
+          echo "✅ Quality Gates Passed"
+          echo "🚀 Deployment allowed"

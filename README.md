@@ -224,6 +224,66 @@ is the default.
 That's it — it automatically appears in the catalog and becomes callable by the
 chatbot.
 
+## Testing and quality gates
+
+Backend quality is enforced locally and in CI. Deployment to production is blocked
+when any gate fails.
+
+```bash
+# Install test/lint tools
+pip install -r requirements-dev.txt
+
+# Unit tests (no PostgreSQL required for tests/unit)
+pytest tests/unit
+
+# Integration tests (isolated Postgres database)
+# Local default: postgresql+psycopg2://devsecops:devsecops@localhost:5544/devsecops_test
+# Create it automatically on first run if Docker Postgres is up:
+#   docker compose up -d postgres
+pytest tests/integration
+
+# Full suite
+pytest
+
+# Coverage (fails if combined line+branch coverage is below 90%)
+pytest --cov=app --cov=executors --cov-branch --cov-report=term-missing --cov-report=html --cov-fail-under=90
+
+# Pylint (fails below 9.0/10)
+pylint app executors
+
+# Same gates as CI
+# Windows PowerShell:
+.\scripts\quality.ps1
+# macOS/Linux:
+make quality
+# or: bash scripts/quality.sh
+```
+
+HTML coverage is written to `htmlcov/index.html`. CI also uploads `coverage.xml`,
+the HTML report, JUnit XML, and the Pylint parseable log.
+
+### Quality gates
+
+CI (`.github/workflows/quality.yml`) runs on every pull request:
+
+1. **Pylint** — score must be ≥ 9.0
+2. **Unit tests** — `pytest tests/unit`
+3. **Integration tests + coverage** — full `pytest` against an ephemeral Postgres
+   service; fails if combined line+branch coverage is below 90%
+
+`.github/workflows/deploy.yml` calls that workflow first. If any job fails,
+**deployment does not run**.
+
+If a check fails locally:
+
+- Tests: read the assertion and the JUnit/terminal output
+- Coverage: open `htmlcov/index.html` and cover the missing lines/branches
+- Pylint: fix the reported issue; do not disable a rule unless there is a
+  documented, legitimate reason in `.pylintrc`
+
+Tests use `.env.test` values (JWT secret, executor key, dedicated database). They
+never require production Azure/AWS/GitHub credentials.
+
 ## Roadmap (next milestones)
 
 - Wire actuation onto the finding → risk → gate path: reversible changes with
