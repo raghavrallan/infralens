@@ -76,3 +76,25 @@ def test_blast_radius_from_severity():
 @pytest.mark.unit
 def test_gate_labels_cover_order():
     assert set(GATE_LABELS) == set(GATE_ORDER)
+
+
+@pytest.mark.unit
+def test_normalize_prose_blast_radius_and_swapped_risk_class():
+    from app.intelligence.risk_engine import (
+        classify,
+        normalize_action_class,
+        normalize_blast_radius,
+    )
+
+    blast = normalize_blast_radius(
+        "InfraLens-only resource group and dependent managed services"
+    )
+    assert blast == "medium"
+    assert normalize_blast_radius("high blast across the subscription") == "high"
+    assert normalize_blast_radius("LOW") == "low"
+    assert normalize_action_class("medium") == "config_code_change"
+    assert normalize_action_class("config_code_change") == "config_code_change"
+    assert normalize_action_class("irreversible destroy") == "irreversible_high_blast"
+    gated = classify("medium", blast, "prod")  # type: ignore[arg-type]
+    assert gated.gate == "human_approval"
+    assert "medium blast radius" in gated.rationale

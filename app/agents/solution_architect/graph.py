@@ -10,6 +10,7 @@ from app.core import (
 )
 from app.agents.solution_architect import governance, prompts, tools
 from app.agents.solution_architect.state import ArchitectState, empty_state, infer_tier
+from app.intelligence import risk_engine
 
 Emit = Callable[[dict[str, Any]], None]
 RECURSION_LIMIT = 12
@@ -222,7 +223,15 @@ def verify(state: ArchitectState, emit: Emit) -> ArchitectState:
             }
             for item in source[: (1 if state.get("tier") == "T1" else 6)]
         ]
-    state["decisions"] = decisions
+    state["decisions"] = [
+        {
+            **item,
+            "risk_class": risk_engine.normalize_action_class(item.get("risk_class")),
+            "blast_radius": risk_engine.normalize_blast_radius(item.get("blast_radius")),
+        }
+        for item in decisions
+        if isinstance(item, dict)
+    ]
     steps = parsed.get("plan_steps") if isinstance(parsed.get("plan_steps"), list) else []
     state["plan_steps"] = [
         {"skill": str(step.get("skill") or ""), "objective": str(step.get("objective") or "")}

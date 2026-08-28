@@ -200,9 +200,9 @@ def persist_decisions(
         gated: list[dict[str, Any]] = []
         with SessionLocal() as session:
             for item in decisions:
-                risk_class = item.get("risk_class") or "config_code_change"
-                blast = item.get("blast_radius") or "medium"
-                gate = risk_engine.classify(risk_class, blast, environment)  # type: ignore[arg-type]
+                risk_class = risk_engine.normalize_action_class(item.get("risk_class"))
+                blast = risk_engine.normalize_blast_radius(item.get("blast_radius"))
+                gate = risk_engine.classify(risk_class, blast, environment)
                 decision_id = str(uuid.uuid4())
                 session.add(
                     ArchitectureDecision(

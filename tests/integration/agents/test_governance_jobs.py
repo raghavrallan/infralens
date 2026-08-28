@@ -75,6 +75,68 @@ def test_governance_upsert_list_and_persist(require_db, org_with_project):
 
 
 @pytest.mark.integration
+def test_persist_decisions_accepts_prose_blast_radius(require_db, org_with_project):
+    """LLM verify often writes a sentence into blast_radius (varchar(16))."""
+    from sqlalchemy import select
+
+    from app.core.db import ArchitectureDecision, Finding, SessionLocal
+
+    project_id = org_with_project["project"]["id"]
+    run_id = governance.upsert_run(
+        thread_id="thread-prose-blast",
+        project_id=project_id,
+        user_id="u1",
+        objective="InfraLens prod",
+        source="chat",
+        tier="T2",
+        mode="brownfield",
+        status="running",
+    )
+    gated = governance.persist_decisions(
+        run_id=run_id,
+        project_id=project_id,
+        decisions=[
+            {
+                "title": "Adopt a private, managed data plane for InfraLens",
+                "context": (
+                    "InfraLens requires production isolation in a brownfield Azure "
+                    "subscription with unrelated existing resources."
+                ),
+                "options_considered": [
+                    "Use shared existing infrastructure and public endpoints",
+                    "Build a private data plane with managed services",
+                ],
+                "decision": (
+                    "Choose the private data plane with managed secrets and "
+                    "isolated persistence."
+                ),
+                "consequences": "Improves isolation and keeps secrets out of code.",
+                "risk_class": "medium",
+                "blast_radius": (
+                    "InfraLens-only resource group and dependent managed services"
+                ),
+                "severity": "medium",
+                "recommended_action": "Use a dedicated RG with private Postgres and Redis.",
+            }
+        ],
+    )
+    assert gated
+    assert gated[0]["gate"] == "human_approval"
+    with SessionLocal() as session:
+        row = session.scalar(
+            select(ArchitectureDecision).where(ArchitectureDecision.run_id == run_id)
+        )
+        assert row is not None
+        assert row.blast_radius == "medium"
+        assert row.risk_class == "config_code_change"
+        finding = session.scalar(
+            select(Finding).where(Finding.title.contains("private, managed data plane"))
+        )
+        assert finding is not None
+        assert finding.blast_radius == "medium"
+
+
+@pytest.mark.integration
 def test_stale_architecture_run_and_persist_failure(require_db, org_with_project):
     from datetime import datetime, timedelta, timezone
 
