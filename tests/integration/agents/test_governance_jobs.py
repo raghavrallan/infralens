@@ -137,6 +137,63 @@ def test_persist_decisions_accepts_prose_blast_radius(require_db, org_with_proje
 
 
 @pytest.mark.integration
+def test_persist_decisions_one_finding_per_adr_title(require_db, org_with_project):
+    from sqlalchemy import select
+
+    from app.core.db import Finding, SessionLocal
+
+    project_id = org_with_project["project"]["id"]
+    run_id = governance.upsert_run(
+        thread_id="thread-multi-adr",
+        project_id=project_id,
+        user_id="u1",
+        objective="InfraLens prod",
+        source="chat",
+        tier="T2",
+        mode="greenfield",
+        status="running",
+    )
+    gated = governance.persist_decisions(
+        run_id=run_id,
+        project_id=project_id,
+        decisions=[
+            {
+                "title": "Adopt a private, managed data plane for InfraLens",
+                "decision": "Private Postgres, Redis, and Key Vault.",
+                "risk_class": "config_code_change",
+                "blast_radius": "medium",
+            },
+            {
+                "title": "Choose a bounded, right-sized isolated deployment",
+                "decision": "Dedicated resource group, no shared EQIP estate.",
+                "risk_class": "config_code_change",
+                "blast_radius": "low",
+            },
+        ],
+    )
+    assert len(gated) == 2
+    with SessionLocal() as session:
+        titles = set(
+            session.scalars(
+                select(Finding.title).where(
+                    Finding.project_id == project_id,
+                    Finding.skill == "solution_architect",
+                    Finding.title.in_(
+                        {
+                            "Adopt a private, managed data plane for InfraLens",
+                            "Choose a bounded, right-sized isolated deployment",
+                        }
+                    ),
+                )
+            )
+        )
+    assert titles == {
+        "Adopt a private, managed data plane for InfraLens",
+        "Choose a bounded, right-sized isolated deployment",
+    }
+
+
+@pytest.mark.integration
 def test_stale_architecture_run_and_persist_failure(require_db, org_with_project):
     from datetime import datetime, timedelta, timezone
 
