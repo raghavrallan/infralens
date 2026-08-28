@@ -75,6 +75,65 @@ def test_governance_upsert_list_and_persist(require_db, org_with_project):
 
 
 @pytest.mark.integration
+def test_stale_architecture_run_and_persist_failure(require_db, org_with_project):
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import update
+
+    from app.core.db import ArchitectureRun, SessionLocal
+    from app.intelligence import workflows as intel
+
+    project_id = org_with_project["project"]["id"]
+    run_id = governance.upsert_run(
+        thread_id="thread-stale",
+        project_id=project_id,
+        user_id="u1",
+        objective="stuck",
+        source="chat",
+        tier="T1",
+        mode="greenfield",
+        status="running",
+    )
+    old = datetime.now(timezone.utc) - timedelta(days=13)
+    with SessionLocal() as session:
+        session.execute(
+            update(ArchitectureRun)
+            .where(ArchitectureRun.id == run_id)
+            .values(created_at=old, updated_at=old, status="running")
+        )
+        session.commit()
+    assert governance.reap_stale_architecture_runs(project_id) >= 1
+    listed = governance.list_runs(project_id)
+    stale = next(item for item in listed if item["id"] == run_id)
+    assert stale["status"] == "failed"
+
+    live_id = governance.upsert_run(
+        thread_id="thread-persist-fail",
+        project_id=project_id,
+        user_id="u1",
+        objective="persist",
+        source="chat",
+        tier="T1",
+        mode="greenfield",
+        status="running",
+    )
+    with patch(
+        "app.agents.solution_architect.governance.store.save_findings",
+        side_effect=RuntimeError("write failed"),
+    ):
+        with pytest.raises(RuntimeError, match="write failed"):
+            governance.persist_decisions(
+                run_id=live_id,
+                project_id=project_id,
+                decisions=[{"title": "queue", "decision": "Add a queue"}],
+            )
+    runs = intel.list_runs(project_id)
+    failed = [row for row in runs if row["workflow_name"] == governance.ARCHITECT_WORKFLOW_NAME]
+    assert failed
+    assert any(row["status"] == "failed" for row in failed)
+
+
+@pytest.mark.integration
 def test_generate_architecture_missing_and_success(require_db, org_with_project):
     assert jobs.generate_architecture("missing")["ok"] is False
     from app.platform import delivery
@@ -94,3 +153,32 @@ def test_generate_architecture_missing_and_success(require_db, org_with_project)
     ):
         failed = jobs.generate_architecture(run["id"])
     assert failed["ok"] is False
+
+
+@pytest.mark.integration
+def test_stale_delivery_architecture_job(require_db, org_with_project):
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import update
+
+    from app.core.db import DeliveryRun, SessionLocal
+    from app.platform import delivery
+
+    run = delivery.create_run(org_with_project["project"]["id"], created_by="tester")
+    old = datetime.now(timezone.utc) - timedelta(days=13)
+    with SessionLocal() as session:
+        row = session.get(DeliveryRun, run["id"])
+        row.artifacts = {
+            "architecture_status": "generating",
+            "architecture_proposal": {"summary": "Generating…", "accepted": False},
+        }
+        session.commit()
+        session.execute(
+            update(DeliveryRun)
+            .where(DeliveryRun.id == run["id"])
+            .values(created_at=old, updated_at=old)
+        )
+        session.commit()
+    assert delivery.reap_stale_architecture_jobs(org_with_project["project"]["id"]) >= 1
+    loaded = delivery.get_run(run["id"])
+    assert loaded["artifacts"]["architecture_status"] == "failed"

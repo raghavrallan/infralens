@@ -81,3 +81,27 @@ def test_seed_enable_update_and_approvals(require_db, org_with_project):
     assert intel.delete_workflow("missing") is False
     dash = intel.dashboard_summary(project_id, time_range="7d", module=workflow.get("module") or None)
     assert "open_findings" in dash
+
+
+def test_reap_stale_workflow_runs(require_db, org_with_project):
+    from datetime import datetime, timedelta, timezone
+
+    from app.core.db import SessionLocal, WorkflowRun
+
+    project_id = org_with_project["project"]["id"]
+    intel.seed_default_workflows(project_id)
+    workflow = intel.list_workflows(project_id)[0]
+    stale = intel.create_run(workflow["id"], trigger="manual")
+    intel.mark_run_running(stale["id"])
+    fresh = intel.create_run(workflow["id"], trigger="manual")
+    intel.mark_run_running(fresh["id"])
+    old = datetime.now(timezone.utc) - timedelta(days=13)
+    with SessionLocal() as session:
+        row = session.get(WorkflowRun, stale["id"])
+        row.created_at = old
+        row.started_at = old
+        session.commit()
+    closed = intel.reap_stale_runs(project_id)
+    assert closed >= 1
+    assert intel.get_run(stale["id"])["status"] == "failed"
+    assert intel.get_run(fresh["id"])["status"] == "running"

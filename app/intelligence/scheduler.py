@@ -17,6 +17,38 @@ from app.intelligence.queue import enqueue_run
 logger = logging.getLogger(__name__)
 
 _scheduler: BackgroundScheduler | None = None
+_REAP_JOB_ID = "reap-stale-runs"
+
+
+def _reap_stale_work() -> None:
+    try:
+        store.reap_stale_runs()
+    except Exception:
+        logger.exception("Could not reap stale workflow runs")
+    try:
+        from app.agents.solution_architect import governance
+
+        governance.reap_stale_architecture_runs()
+    except Exception:
+        logger.exception("Could not reap stale architecture runs")
+    try:
+        from app.platform import delivery
+
+        delivery.reap_stale_architecture_jobs()
+    except Exception:
+        logger.exception("Could not reap stale delivery architecture jobs")
+
+
+def _ensure_reap_job() -> None:
+    if _scheduler is None:
+        return
+    _scheduler.add_job(
+        _reap_stale_work,
+        "interval",
+        minutes=5,
+        id=_REAP_JOB_ID,
+        replace_existing=True,
+    )
 
 
 def _enqueue_scheduled(workflow_id: str) -> None:
@@ -76,6 +108,7 @@ def sync_schedules() -> None:
             args=[workflow["id"]],
             replace_existing=True,
         )
+    _ensure_reap_job()
 
 
 def start_scheduler() -> None:

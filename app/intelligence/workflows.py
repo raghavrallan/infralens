@@ -28,6 +28,11 @@ from app.skills.classification import is_workflow_safe
 # Change-producing findings wait this long for a decision; nothing auto-executes.
 _APPROVAL_TTL_HOURS = 72
 _APPROVAL_GATES = ("human_approval", "two_person")
+# RQ jobs time out at 900s; anything still queued/running after this is a zombie.
+STALE_RUN_AFTER = timedelta(minutes=30)
+STALE_RUN_ERROR = (
+    "Timed out — this run never finished. The worker likely crashed or the job was killed."
+)
 TIME_RANGE_DURATIONS = {
     "24h": timedelta(hours=24),
     "7d": timedelta(days=7),
@@ -137,6 +142,14 @@ def _iso(value: Optional[datetime]) -> Optional[str]:
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
 
 
 def time_range_bounds(
@@ -401,13 +414,39 @@ def enable_workflows_when_ready(project_id: str) -> int:
                 )
             ).all()
         )
+        enabled = 0
         for row in rows:
+            if not (row.skills or []):
+                continue
             row.enabled = True
+            enabled += 1
         session.commit()
-        return len(rows)
+        return enabled
 
 
 # ---------- Runs ----------
+
+def reap_stale_runs(project_id: Optional[str] = None) -> int:
+    """Fail queued/running workflow runs that outlived the worker timeout."""
+    cutoff = _now() - STALE_RUN_AFTER
+    closed = 0
+    with SessionLocal() as session:
+        filters = [WorkflowRun.status.in_(("queued", "running"))]
+        if project_id:
+            filters.append(WorkflowRun.project_id == project_id)
+        rows = list(session.scalars(select(WorkflowRun).where(*filters)))
+        for run in rows:
+            stamp = _as_utc(run.started_at) or _as_utc(run.created_at)
+            if stamp is None or stamp > cutoff:
+                continue
+            run.status = "failed"
+            run.error = STALE_RUN_ERROR
+            run.finished_at = _now()
+            closed += 1
+        if closed:
+            session.commit()
+    return closed
+
 
 def create_run(workflow_id: str, trigger: str = "manual") -> Optional[dict[str, Any]]:
     with SessionLocal() as session:
@@ -479,6 +518,7 @@ def list_runs(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
 ) -> list[dict[str, Any]]:
+    reap_stale_runs(project_id)
     since, until = time_range_bounds(time_range, start_date, end_date)
     with SessionLocal() as session:
         filters = [WorkflowRun.project_id == project_id]
@@ -959,6 +999,7 @@ def dashboard_summary(
     end_date: Optional[date] = None,
 ) -> dict[str, Any]:
     collapse_duplicate_findings(project_id)
+    reap_stale_runs(project_id)
     since, until = time_range_bounds(time_range, start_date, end_date)
     date_filter = []
     if module:

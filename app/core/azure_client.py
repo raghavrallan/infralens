@@ -57,6 +57,7 @@ def _get_client(config: AzureConfig) -> Any:
             azure_endpoint=config.endpoint,
             api_key=config.api_key,
             api_version=config.api_version,
+            timeout=120.0,
         )
         _client_signature = signature
     return _client
