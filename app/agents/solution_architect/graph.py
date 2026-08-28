@@ -243,7 +243,7 @@ def verify(state: ArchitectState, emit: Emit) -> ArchitectState:
 
 def finalize(state: ArchitectState, emit: Emit) -> ArchitectState:
     emit({"type": "status", "text": "Recording decisions"})
-    run_id = governance.upsert_run(
+    run_kwargs = dict(
         thread_id=state.get("thread_id") or "",
         project_id=state.get("project_id") or "",
         user_id=state.get("user") or "",
@@ -251,46 +251,43 @@ def finalize(state: ArchitectState, emit: Emit) -> ArchitectState:
         source=state.get("source") or "chat",
         tier=state.get("tier") or "T1",
         mode=state.get("mode") or "greenfield",
-        status="running",
         checkpoint=dict(state),
     )
+    run_id = governance.upsert_run(status="running", **run_kwargs)
     try:
-        gated = governance.persist_decisions(
-            run_id=run_id,
-            project_id=state.get("project_id") or "",
-            decisions=state.get("decisions") or [],
-        )
-    except Exception:
-        gated = list(state.get("decisions") or [])
-    try:
-        from app.platform.engineering.generate import apply_architect_result
+        try:
+            gated = governance.persist_decisions(
+                run_id=run_id,
+                project_id=state.get("project_id") or "",
+                decisions=state.get("decisions") or [],
+            )
+        except Exception:
+            gated = list(state.get("decisions") or [])
+        try:
+            from app.platform.engineering.generate import apply_architect_result
 
-        delivery_id = ""
-        thread = str(state.get("thread_id") or "")
-        if thread.startswith("delivery:"):
-            delivery_id = thread.split(":", 1)[-1]
-        apply_architect_result(
-            dict(state),
-            run_id=run_id,
-            gated=gated,
-            delivery_run_id=delivery_id,
-        )
+            delivery_id = ""
+            thread = str(state.get("thread_id") or "")
+            if thread.startswith("delivery:"):
+                delivery_id = thread.split(":", 1)[-1]
+            apply_architect_result(
+                dict(state),
+                run_id=run_id,
+                gated=gated,
+                delivery_run_id=delivery_id,
+            )
+        except Exception:
+            pass
+        state["hld"] = _render_hld(state, gated)
+        state["reply"] = state["hld"]
+        governance.upsert_run(status="succeeded", **{**run_kwargs, "checkpoint": dict(state)})
+        return state
     except Exception:
-        pass
-    state["hld"] = _render_hld(state, gated)
-    state["reply"] = state["hld"]
-    governance.upsert_run(
-        thread_id=state.get("thread_id") or "",
-        project_id=state.get("project_id") or "",
-        user_id=state.get("user") or "",
-        objective=state.get("objective") or "",
-        source=state.get("source") or "chat",
-        tier=state.get("tier") or "T1",
-        mode=state.get("mode") or "greenfield",
-        status="succeeded",
-        checkpoint=dict(state),
-    )
-    return state
+        try:
+            governance.upsert_run(status="failed", **{**run_kwargs, "checkpoint": dict(state)})
+        except Exception:
+            pass
+        raise
 
 
 def _default_mermaid(state: ArchitectState) -> str:

@@ -84,6 +84,7 @@ def run_workflow(run_id: str) -> dict[str, int]:
     objective = workflow["objective"] or workflow["name"]
     environment = workflow["environment"]
     policy = orchestrator.build_policy("read_only", "ask_approval")
+    collected: list[dict] = []
 
     from app.core import observability
 
@@ -103,7 +104,6 @@ def run_workflow(run_id: str) -> dict[str, int]:
             live_context = _usable_context(
                 _gather_context(objective, project_id, workflow["skills"])
             )
-            collected: list[dict] = []
             for skill_name in workflow["skills"]:
                 skill = registry.get(skill_name)
                 if skill is None:
@@ -121,12 +121,11 @@ def run_workflow(run_id: str) -> dict[str, int]:
                         environment,
                     )
                 )
+            count = store.save_findings(run_id, workflow["id"], project_id, collected)
+            store.mark_run_succeeded(run_id, count)
+            return {"findings": count}
         except Exception as exc:  # noqa: BLE001 - record the failure on the run
             store.mark_run_failed(run_id, str(exc))
             return {"findings": 0}
         finally:
             observability.flush()
-
-    count = store.save_findings(run_id, workflow["id"], project_id, collected)
-    store.mark_run_succeeded(run_id, count)
-    return {"findings": count}

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
 from typing import Any, Optional
 
 from sqlalchemy import select
@@ -19,6 +20,10 @@ from app.intelligence import workflows as store
 
 ARCHITECT_WORKFLOW_NAME = "Solution Architect Runs"
 HIGH_GATES = frozenset({"two_person"})
+STALE_ARCHITECTURE_AFTER = timedelta(minutes=30)
+STALE_ARCHITECTURE_ERROR = (
+    "Timed out — this architecture run never finished."
+)
 
 
 def ensure_architect_workflow(project_id: str) -> str:
@@ -106,6 +111,7 @@ def load_paused(thread_id: str) -> Optional[dict[str, Any]]:
 
 
 def list_runs(project_id: str, limit: int = 20) -> list[dict[str, Any]]:
+    reap_stale_architecture_runs(project_id)
     with SessionLocal() as session:
         rows = session.scalars(
             select(ArchitectureRun)
@@ -147,6 +153,32 @@ def list_runs(project_id: str, limit: int = 20) -> list[dict[str, Any]]:
         return result
 
 
+def reap_stale_architecture_runs(project_id: Optional[str] = None) -> int:
+    """Fail catalog rows left in running after the worker/API process died."""
+    cutoff = _now() - STALE_ARCHITECTURE_AFTER
+    closed = 0
+    with SessionLocal() as session:
+        filters = [ArchitectureRun.status == "running"]
+        if project_id:
+            filters.append(ArchitectureRun.project_id == project_id)
+        rows = list(session.scalars(select(ArchitectureRun).where(*filters)))
+        for row in rows:
+            stamp = row.updated_at or row.created_at
+            if stamp is not None and stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=_now().tzinfo)
+            if stamp is None or stamp > cutoff:
+                continue
+            row.status = "failed"
+            checkpoint = dict(row.checkpoint or {})
+            checkpoint["error"] = STALE_ARCHITECTURE_ERROR
+            row.checkpoint = checkpoint
+            row.updated_at = _now()
+            closed += 1
+        if closed:
+            session.commit()
+    return closed
+
+
 def persist_decisions(
     *,
     run_id: str,
@@ -159,80 +191,85 @@ def persist_decisions(
         return []
     workflow_id = ensure_architect_workflow(project_id)
     wf_run = store.create_run(workflow_id, trigger="manual")
-    workflow_run_id = (wf_run or {}).get("id") or str(uuid.uuid4())
+    if not wf_run:
+        raise RuntimeError("Could not create Solution Architect run")
+    workflow_run_id = wf_run["id"]
     store.mark_run_running(workflow_run_id)
+    try:
+        findings: list[dict[str, Any]] = []
+        gated: list[dict[str, Any]] = []
+        with SessionLocal() as session:
+            for item in decisions:
+                risk_class = item.get("risk_class") or "config_code_change"
+                blast = item.get("blast_radius") or "medium"
+                gate = risk_engine.classify(risk_class, blast, environment)  # type: ignore[arg-type]
+                decision_id = str(uuid.uuid4())
+                session.add(
+                    ArchitectureDecision(
+                        id=decision_id,
+                        run_id=run_id,
+                        title=(item.get("title") or "Architecture decision")[:400],
+                        context=item.get("context") or "",
+                        options_considered=item.get("options_considered") or [],
+                        decision=item.get("decision") or "",
+                        consequences=item.get("consequences") or "",
+                        risk_summary=gate.rationale,
+                        risk_class=risk_class,
+                        blast_radius=blast,
+                        gate_decision=gate.gate,
+                    )
+                )
+                session.add(
+                    EngineeringMemory(
+                        id=str(uuid.uuid4()),
+                        project_id=project_id,
+                        kind="architecture_decision",
+                        ref_id=decision_id,
+                        summary=item.get("title") or item.get("decision") or "ADR",
+                        outcome="proposed",
+                        payload={
+                            "skill": "solution_architect",
+                            "module": "architecture",
+                            "title": item.get("title") or "ADR",
+                            "status": "active",
+                            "confidence": "high",
+                            "source": "solution_architect",
+                            "category": "decision",
+                            "risk_class": risk_class,
+                            "blast_radius": blast,
+                            "gate": gate.gate,
+                            "options_considered": item.get("options_considered") or [],
+                            "related_adr": decision_id,
+                        },
+                    )
+                )
+                gated.append({**item, "id": decision_id, "gate": gate.gate, "gate_label": gate.label})
+                if item.get("decision") or item.get("recommended_action"):
+                    findings.append(
+                        {
+                            "skill": "solution_architect",
+                            "module": "architecture",
+                            "severity": item.get("severity") or ("high" if gate.two_person else "medium"),
+                            "title": item.get("title") or "Architecture change",
+                            "resource": item.get("resource") or "architecture",
+                            "category": "architecture",
+                            "evidence": item.get("context") or "",
+                            "recommended_action": item.get("recommended_action") or item.get("decision") or "",
+                            "risk_class": risk_class,
+                            "blast_radius": blast,
+                            "gate_decision": gate.gate,
+                            "gate_label": gate.label,
+                            "gate_rationale": gate.rationale,
+                        }
+                    )
+            session.commit()
 
-    findings: list[dict[str, Any]] = []
-    gated: list[dict[str, Any]] = []
-    with SessionLocal() as session:
-        for item in decisions:
-            risk_class = item.get("risk_class") or "config_code_change"
-            blast = item.get("blast_radius") or "medium"
-            gate = risk_engine.classify(risk_class, blast, environment)  # type: ignore[arg-type]
-            decision_id = str(uuid.uuid4())
-            session.add(
-                ArchitectureDecision(
-                    id=decision_id,
-                    run_id=run_id,
-                    title=(item.get("title") or "Architecture decision")[:400],
-                    context=item.get("context") or "",
-                    options_considered=item.get("options_considered") or [],
-                    decision=item.get("decision") or "",
-                    consequences=item.get("consequences") or "",
-                    risk_summary=gate.rationale,
-                    risk_class=risk_class,
-                    blast_radius=blast,
-                    gate_decision=gate.gate,
-                )
-            )
-            session.add(
-                EngineeringMemory(
-                    id=str(uuid.uuid4()),
-                    project_id=project_id,
-                    kind="architecture_decision",
-                    ref_id=decision_id,
-                    summary=item.get("title") or item.get("decision") or "ADR",
-                    outcome="proposed",
-                    payload={
-                        "skill": "solution_architect",
-                        "module": "architecture",
-                        "title": item.get("title") or "ADR",
-                        "status": "active",
-                        "confidence": "high",
-                        "source": "solution_architect",
-                        "category": "decision",
-                        "risk_class": risk_class,
-                        "blast_radius": blast,
-                        "gate": gate.gate,
-                        "options_considered": item.get("options_considered") or [],
-                        "related_adr": decision_id,
-                    },
-                )
-            )
-            gated.append({**item, "id": decision_id, "gate": gate.gate, "gate_label": gate.label})
-            if item.get("decision") or item.get("recommended_action"):
-                findings.append(
-                    {
-                        "skill": "solution_architect",
-                        "module": "architecture",
-                        "severity": item.get("severity") or ("high" if gate.two_person else "medium"),
-                        "title": item.get("title") or "Architecture change",
-                        "resource": item.get("resource") or "architecture",
-                        "category": "architecture",
-                        "evidence": item.get("context") or "",
-                        "recommended_action": item.get("recommended_action") or item.get("decision") or "",
-                        "risk_class": risk_class,
-                        "blast_radius": blast,
-                        "gate_decision": gate.gate,
-                        "gate_label": gate.label,
-                        "gate_rationale": gate.rationale,
-                    }
-                )
-        session.commit()
-
-    count = store.save_findings(workflow_run_id, workflow_id, project_id, findings)
-    store.mark_run_succeeded(workflow_run_id, count)
-    return gated
+        count = store.save_findings(workflow_run_id, workflow_id, project_id, findings)
+        store.mark_run_succeeded(workflow_run_id, count)
+        return gated
+    except Exception as exc:
+        store.mark_run_failed(workflow_run_id, str(exc))
+        raise
 
 
 def high_gate_unjustified(candidates: list[dict[str, Any]], environment: str = "prod") -> bool:

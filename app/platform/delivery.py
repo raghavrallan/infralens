@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from sqlalchemy import select
@@ -32,6 +32,7 @@ STAGE_MIN_ROLE: dict[str, str] = {
 
 # Accepting architecture before TF/apply path requires Lead+.
 ARCHITECTURE_ACCEPT_MIN_ROLE = "devops_lead"
+STALE_ARCHITECTURE_AFTER = timedelta(minutes=30)
 
 
 def _now() -> datetime:
@@ -109,10 +110,17 @@ def create_run(project_id: str, *, created_by: str = "") -> dict[str, Any]:
 def get_run(run_id: str) -> Optional[dict[str, Any]]:
     with SessionLocal() as session:
         row = session.get(DeliveryRun, run_id)
+        if row is None:
+            return None
+        project_id = row.project_id
+    reap_stale_architecture_jobs(project_id)
+    with SessionLocal() as session:
+        row = session.get(DeliveryRun, run_id)
         return _dict(row) if row else None
 
 
 def list_runs(project_id: str, limit: int = 20) -> list[dict[str, Any]]:
+    reap_stale_architecture_jobs(project_id)
     with SessionLocal() as session:
         rows = session.scalars(
             select(DeliveryRun)
@@ -121,6 +129,39 @@ def list_runs(project_id: str, limit: int = 20) -> list[dict[str, Any]]:
             .limit(limit)
         ).all()
         return [_dict(r) for r in rows]
+
+
+def reap_stale_architecture_jobs(project_id: Optional[str] = None) -> int:
+    """Fail delivery architecture jobs left generating after a worker death."""
+    cutoff = _now() - STALE_ARCHITECTURE_AFTER
+    closed = 0
+    with SessionLocal() as session:
+        filters = []
+        if project_id:
+            filters.append(DeliveryRun.project_id == project_id)
+        query = select(DeliveryRun)
+        if filters:
+            query = query.where(*filters)
+        rows = list(session.scalars(query))
+        for row in rows:
+            artifacts = dict(row.artifacts or {})
+            if artifacts.get("architecture_status") != "generating":
+                continue
+            stamp = row.updated_at or row.created_at
+            if stamp is not None and stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=timezone.utc)
+            if stamp is None or stamp > cutoff:
+                continue
+            artifacts["architecture_status"] = "failed"
+            proposal = dict(artifacts.get("architecture_proposal") or {})
+            proposal["summary"] = "Architecture generation timed out."
+            artifacts["architecture_proposal"] = proposal
+            row.artifacts = artifacts
+            row.updated_at = _now()
+            closed += 1
+        if closed:
+            session.commit()
+    return closed
 
 
 def _require_stage_role(user_role: str, stage: str) -> None:

@@ -121,6 +121,20 @@ def test_scheduler_sync_and_enqueue_helpers():
 
 
 @pytest.mark.unit
+def test_reap_stale_work_swallows_backend_errors():
+    with patch("app.intelligence.scheduler.store.reap_stale_runs", side_effect=RuntimeError("db")):
+        with patch(
+            "app.agents.solution_architect.governance.reap_stale_architecture_runs",
+            side_effect=RuntimeError("arch"),
+        ):
+            with patch(
+                "app.platform.delivery.reap_stale_architecture_jobs",
+                side_effect=RuntimeError("delivery"),
+            ):
+                intel_scheduler._reap_stale_work()
+
+
+@pytest.mark.unit
 def test_intelligence_worker_run_success_and_failure():
     workflow = {
         "id": "w1",
@@ -158,6 +172,20 @@ def test_intelligence_worker_run_success_and_failure():
                             result = intel_worker.run_workflow("r1")
         assert result["findings"] == 0
         failed.assert_called()
+        with patch("app.intelligence.worker.store.get_run", return_value={"id": "r1", "workflow_id": "w1"}):
+            with patch("app.intelligence.worker.store.get_workflow", return_value=workflow):
+                with patch("app.intelligence.worker.store.mark_run_running"):
+                    with patch("app.intelligence.worker._gather_context", return_value="LIVE"):
+                        with patch("app.intelligence.worker._usable_context", return_value="LIVE"):
+                            with patch("app.intelligence.worker.registry.get", return_value=None):
+                                with patch(
+                                    "app.intelligence.worker.store.save_findings",
+                                    side_effect=RuntimeError("write failed"),
+                                ):
+                                    with patch("app.intelligence.worker.store.mark_run_failed") as save_failed:
+                                        result = intel_worker.run_workflow("r1")
+        assert result["findings"] == 0
+        save_failed.assert_called()
 
 
 @pytest.mark.unit
