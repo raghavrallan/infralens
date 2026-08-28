@@ -105,3 +105,33 @@ def test_reap_stale_workflow_runs(require_db, org_with_project):
     assert closed >= 1
     assert intel.get_run(stale["id"])["status"] == "failed"
     assert intel.get_run(fresh["id"])["status"] == "running"
+
+
+def test_save_findings_same_fingerprint_in_one_batch(require_db, org_with_project):
+    """Architect ADRs all used resource=architecture; one INSERT must not UniqueViolation."""
+    project_id = org_with_project["project"]["id"]
+    intel.seed_default_workflows(project_id)
+    workflow = intel.list_workflows(project_id)[0]
+    run = intel.create_run(workflow["id"], trigger="manual")
+    assert run is not None
+    payload = {
+        "skill": "solution_architect",
+        "module": "architecture",
+        "severity": "medium",
+        "resource": "architecture",
+        "recommended_action": "adopt private data plane",
+        "gate_decision": "human_approval",
+    }
+    written = intel.save_findings(
+        run["id"],
+        workflow["id"],
+        project_id,
+        [
+            {**payload, "title": "Adopt a private data plane"},
+            {**payload, "title": "Bound the isolated deployment"},
+            {**payload, "title": "Pin images by git SHA"},
+        ],
+    )
+    assert written == 3
+    rows = intel.list_findings(project_id, skill="solution_architect")
+    assert len(rows) == 1

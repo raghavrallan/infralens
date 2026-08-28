@@ -245,13 +245,17 @@ def persist_decisions(
                 )
                 gated.append({**item, "id": decision_id, "gate": gate.gate, "gate_label": gate.label})
                 if item.get("decision") or item.get("recommended_action"):
+                    title = (item.get("title") or "Architecture change").strip()
+                    # Fingerprints key on skill+resource; a shared "architecture"
+                    # resource collapsed every ADR onto one finding_identities row.
+                    resource = (item.get("resource") or "").strip() or f"adr:{title}"
                     findings.append(
                         {
                             "skill": "solution_architect",
                             "module": "architecture",
                             "severity": item.get("severity") or ("high" if gate.two_person else "medium"),
-                            "title": item.get("title") or "Architecture change",
-                            "resource": item.get("resource") or "architecture",
+                            "title": title,
+                            "resource": resource,
                             "category": "architecture",
                             "evidence": item.get("context") or "",
                             "recommended_action": item.get("recommended_action") or item.get("decision") or "",

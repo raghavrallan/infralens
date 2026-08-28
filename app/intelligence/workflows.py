@@ -693,16 +693,21 @@ def save_findings(
         return 0
     written = 0
     with SessionLocal() as session:
+        # autoflush=False: session.get() does not see rows added earlier in this
+        # loop, so keep the ORM objects and reuse them instead of INSERTing the
+        # same finding_identities primary key again.
+        pending_findings: dict[str, Finding] = {}
+        pending_identities: dict[str, FindingIdentity] = {}
         for item in findings:
             title = item.get("title", "") or ""
             resource = item.get("resource", "") or ""
             skill = item.get("skill", "") or ""
             fp = compute_fingerprint(project_id, skill, resource, title)
             gate = item.get("gate_decision", "human_approval")
-            identity = session.get(FindingIdentity, fp)
-            existing = (
-                session.get(Finding, identity.finding_id) if identity else None
-            )
+            identity = pending_identities.get(fp) or session.get(FindingIdentity, fp)
+            existing = pending_findings.get(fp)
+            if existing is None and identity is not None:
+                existing = session.get(Finding, identity.finding_id)
 
             if existing is not None:
                 was_resolved = existing.status == "resolved"
@@ -711,9 +716,12 @@ def save_findings(
                 )
                 if was_resolved:
                     existing.status = "open"
-                identity.finding_id = existing.id
-                identity.occurrence_count = int(identity.occurrence_count or 1) + 1
-                identity.last_seen_at = _now()
+                if identity is not None:
+                    identity.finding_id = existing.id
+                    identity.occurrence_count = int(identity.occurrence_count or 1) + 1
+                    identity.last_seen_at = _now()
+                    pending_identities[fp] = identity
+                pending_findings[fp] = existing
                 _ensure_pending_approval(
                     session,
                     finding_id=existing.id,
@@ -724,41 +732,46 @@ def save_findings(
                 continue
 
             finding_id = str(uuid.uuid4())
-            session.add(
-                Finding(
-                    id=finding_id,
-                    run_id=run_id,
-                    workflow_id=workflow_id,
-                    project_id=project_id,
-                    skill=skill,
-                    module=item.get("module", ""),
-                    severity=item.get("severity", "low"),
-                    title=title,
-                    resource=resource,
-                    category=item.get("category", ""),
-                    evidence=item.get("evidence", ""),
-                    recommended_action=item.get("recommended_action", ""),
-                    risk_class=normalize_action_class(
-                        item.get("risk_class", "config_code_change")
-                    ),
-                    blast_radius=normalize_blast_radius(
-                        item.get("blast_radius", "medium")
-                    ),
-                    gate_decision=gate,
-                    gate_label=item.get("gate_label", ""),
-                    gate_rationale=item.get("gate_rationale", ""),
-                    status="open",
-                )
+            finding = Finding(
+                id=finding_id,
+                run_id=run_id,
+                workflow_id=workflow_id,
+                project_id=project_id,
+                skill=skill,
+                module=item.get("module", ""),
+                severity=item.get("severity", "low"),
+                title=title,
+                resource=resource,
+                category=item.get("category", ""),
+                evidence=item.get("evidence", ""),
+                recommended_action=item.get("recommended_action", ""),
+                risk_class=normalize_action_class(
+                    item.get("risk_class", "config_code_change")
+                ),
+                blast_radius=normalize_blast_radius(
+                    item.get("blast_radius", "medium")
+                ),
+                gate_decision=gate,
+                gate_label=item.get("gate_label", ""),
+                gate_rationale=item.get("gate_rationale", ""),
+                status="open",
             )
-            session.add(
-                FindingIdentity(
+            session.add(finding)
+            pending_findings[fp] = finding
+            if identity is None:
+                identity = FindingIdentity(
                     fingerprint=fp,
                     project_id=project_id,
                     finding_id=finding_id,
                     occurrence_count=1,
                     last_seen_at=_now(),
                 )
-            )
+                session.add(identity)
+            else:
+                identity.finding_id = finding_id
+                identity.occurrence_count = int(identity.occurrence_count or 1) + 1
+                identity.last_seen_at = _now()
+            pending_identities[fp] = identity
             _ensure_pending_approval(
                 session,
                 finding_id=finding_id,
