@@ -10,8 +10,9 @@ The subtle rule the matrix must honour: safety-direction actions (rollback,
 circuit-break, isolate) are never gated. You gate entry into risk, never the
 escape from it.
 """
+import re
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from app.skills.classification import ActionClass, BlastRadius
 
@@ -48,6 +49,53 @@ GATE_ORDER: tuple[Gate, ...] = (
     "two_person",
 )
 _GATE_ORDER = GATE_ORDER
+
+_ACTION_CLASSES: frozenset[str] = frozenset(
+    {
+        "read_diagnose",
+        "reversible_change",
+        "config_code_change",
+        "irreversible_high_blast",
+        "safety_direction",
+    }
+)
+_BLAST_RADII: frozenset[str] = frozenset({"low", "medium", "high"})
+_TOKEN_RE = re.compile(r"[a-z]+")
+
+
+def normalize_blast_radius(value: Any, default: BlastRadius = "medium") -> BlastRadius:
+    """Coerce LLM/free-text blast radius down to low|medium|high for varchar(16)."""
+    raw = str(value or "").strip().lower()
+    if raw in _BLAST_RADII:
+        return raw  # type: ignore[return-value]
+    tokens = set(_TOKEN_RE.findall(raw))
+    if "high" in tokens:
+        return "high"
+    if "medium" in tokens:
+        return "medium"
+    if "low" in tokens:
+        return "low"
+    return default
+
+
+def normalize_action_class(value: Any, default: ActionClass = "config_code_change") -> ActionClass:
+    """Coerce LLM/free-text action class onto the Risk Engine taxonomy."""
+    raw = str(value or "").strip().lower().replace(" ", "_").replace("-", "_")
+    if raw in _ACTION_CLASSES:
+        return raw  # type: ignore[return-value]
+    if raw in _BLAST_RADII:
+        return default
+    if "irreversible" in raw or "destroy" in raw:
+        return "irreversible_high_blast"
+    if "safety" in raw or "rollback" in raw or "mitigat" in raw:
+        return "safety_direction"
+    if "read" in raw or "diagnose" in raw:
+        return "read_diagnose"
+    if "reversible" in raw:
+        return "reversible_change"
+    if "config" in raw or "code" in raw:
+        return "config_code_change"
+    return default
 
 
 @dataclass(frozen=True)
@@ -99,6 +147,7 @@ def classify(
     step (e.g. auto-apply becomes human approval) so a large change is never
     softer-gated than a small one.
     """
+    blast_radius = normalize_blast_radius(blast_radius)
     if action_class == "safety_direction":
         return GateDecision(
             gate="autonomous",

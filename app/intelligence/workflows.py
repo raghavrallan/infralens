@@ -23,6 +23,7 @@ from app.core.db import (
 )
 from app.intelligence.findings import compute_fingerprint
 from app.intelligence.risk_engine import GATE_LABELS as _GATE_LABELS
+from app.intelligence.risk_engine import normalize_action_class, normalize_blast_radius
 from app.skills.classification import is_workflow_safe
 
 # Change-producing findings wait this long for a decision; nothing auto-executes.
@@ -559,8 +560,12 @@ def _apply_finding_fields(
     row.recommended_action = (
         item.get("recommended_action", "") or row.recommended_action
     )
-    row.risk_class = item.get("risk_class", row.risk_class) or "config_code_change"
-    row.blast_radius = item.get("blast_radius", row.blast_radius) or "medium"
+    row.risk_class = normalize_action_class(
+        item.get("risk_class", row.risk_class) or "config_code_change"
+    )
+    row.blast_radius = normalize_blast_radius(
+        item.get("blast_radius", row.blast_radius) or "medium"
+    )
     row.gate_decision = item.get("gate_decision", row.gate_decision) or "human_approval"
     row.gate_label = item.get("gate_label", "") or row.gate_label
     row.gate_rationale = item.get("gate_rationale", "") or row.gate_rationale
@@ -733,8 +738,12 @@ def save_findings(
                     category=item.get("category", ""),
                     evidence=item.get("evidence", ""),
                     recommended_action=item.get("recommended_action", ""),
-                    risk_class=item.get("risk_class", "config_code_change"),
-                    blast_radius=item.get("blast_radius", "medium"),
+                    risk_class=normalize_action_class(
+                        item.get("risk_class", "config_code_change")
+                    ),
+                    blast_radius=normalize_blast_radius(
+                        item.get("blast_radius", "medium")
+                    ),
                     gate_decision=gate,
                     gate_label=item.get("gate_label", ""),
                     gate_rationale=item.get("gate_rationale", ""),
