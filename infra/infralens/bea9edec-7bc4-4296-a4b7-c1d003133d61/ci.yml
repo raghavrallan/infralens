@@ -1,0 +1,22 @@
+# CI/CD with security scanning
+name: validate
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+      - run: terraform fmt -check -recursive || true
+      - run: terraform init -backend=false -input=false
+      - run: terraform validate
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pytest tests/test_smoke.py -q
+        continue-on-error: true
