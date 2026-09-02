@@ -87,6 +87,32 @@ def test_chat_stream_orchestrator_events(client, org_with_project):
     assert "failed" in failed.text.lower() or "model down" in failed.text
 
 
+def test_chat_stream_sends_status_before_orchestrator(client, org_with_project):
+    headers = _headers(org_with_project)
+    project_id = org_with_project["project"]["id"]
+    with patch("app.main.chat_actions.handle_turn", return_value=None):
+        with patch("app.main.config.get_azure_config") as cfg:
+            cfg.return_value.configured = True
+            with patch(
+                "app.main.orchestrator.run_chat_stream",
+                return_value=iter(
+                    [
+                        {"type": "status", "text": "Loading project context"},
+                        {"type": "final", "mode": "agent", "reply": "ok", "skills_used": []},
+                    ]
+                ),
+            ):
+                response = client.post(
+                    "/api/chat/stream",
+                    json={"message": "hi there", "project_id": project_id},
+                    headers=headers,
+                )
+    assert response.status_code == 200
+    assert "Working on it" in response.text
+    body = response.text
+    assert body.index("Working on it") < body.index("ok")
+
+
 def test_execute_plan_stream_when_configured(client, org_with_project):
     headers = _headers(org_with_project)
     project_id = org_with_project["project"]["id"]

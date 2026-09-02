@@ -194,3 +194,23 @@ def test_execute_plan_stream_with_no_azure_steps():
                             )
                         )
     assert events[-1]["reply"] == "ran"
+
+
+@pytest.mark.unit
+def test_generic_triggers_skip_bare_cloud_words():
+    from app.chat.orchestrator import _GENERIC_TRIGGERS, _provider_block
+
+    assert "cloud" not in _GENERIC_TRIGGERS
+    assert "resources" not in _GENERIC_TRIGGERS
+    spec = {
+        "module": MagicMock(is_connected=lambda _pid: True, build_environment_report=lambda _pid: {"text": "LIVE"}),
+        "triggers": ["azure"],
+        "label": "AZURE",
+        "name": "azure",
+        "source": "ARM",
+        "conn_err": Exception,
+        "api_err": Exception,
+        "advice": "check creds",
+    }
+    assert _provider_block(spec, False, "design a cloud native app", "p1") is None
+    assert "LIVE" in (_provider_block(spec, False, "review my cloud", "p1") or "")

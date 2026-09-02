@@ -128,8 +128,31 @@ def test_delivery_run_transition_and_docs(require_db, org_with_project):
     assert ingested["artifacts"]["docs"].startswith("# requirements")
     with pytest.raises(PermissionError):
         delivery.transition(run["id"], to_stage="apply", user_role="developer")
-    advanced = delivery.transition(run["id"], to_stage="architecture", user_role="developer")
+    with patch("app.platform.delivery._enqueue_architecture_job"):
+        advanced = delivery.transition(run["id"], to_stage="architecture", user_role="developer")
     assert advanced["stage"] == "architecture"
+    with pytest.raises(ValueError, match="ready"):
+        delivery.transition(
+            run["id"],
+            to_stage="architecture",
+            user_role="devops_lead",
+            artifact_key="architecture_accepted",
+            artifact_value=True,
+        )
+    with pytest.raises(ValueError, match="ready"):
+        delivery.transition(run["id"], to_stage="terraform", user_role="devops_engineer")
+    from app.core.db import DeliveryRun, SessionLocal
+
+    with SessionLocal() as session:
+        row = session.get(DeliveryRun, run["id"])
+        artifacts = dict(row.artifacts or {})
+        artifacts["architecture_status"] = "failed"
+        row.artifacts = artifacts
+        session.commit()
+    with patch("app.platform.delivery._enqueue_architecture_job") as enqueue:
+        retried = delivery.retry_architecture(run["id"], user_role="developer")
+        enqueue.assert_called_once_with(run["id"])
+    assert retried["artifacts"]["architecture_status"] == "generating"
 
 
 def test_workflow_findings_dashboard_and_memory(require_db, org_with_project):

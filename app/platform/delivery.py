@@ -68,11 +68,11 @@ def _dict(row: DeliveryRun) -> dict[str, Any]:
     elif row.stage == "architecture":
         next_actions.append("Review architecture proposal and accept (Lead+)")
     elif row.stage == "terraform":
-        next_actions.append("Generate Terraform PR/bundle (never silent apply)")
+        next_actions.append("Generate artifacts, then push IaC to the mapped GitHub repo")
     elif row.stage == "plan":
-        next_actions.append("Review plan ActionDiff + rollback")
+        next_actions.append("Run terraform plan in the isolated project workspace")
     elif row.stage == "apply":
-        next_actions.append("Gated infra apply (prod needs Lead+)")
+        next_actions.append("Lead+ apply with this project's cloud credentials only")
     elif row.stage == "code":
         next_actions.append("Scaffold app code PR")
     return {
@@ -203,6 +203,12 @@ def transition(
             raise ValueError("Cannot move delivery stage backwards")
 
         artifacts = dict(row.artifacts or {})
+        architecture_status = str(artifacts.get("architecture_status") or "")
+        if to_stage == "architecture" and artifact_key == "architecture_accepted":
+            if architecture_status != "ready":
+                raise ValueError("Architecture must be ready before it can be accepted")
+        if to_stage == "terraform" and architecture_status != "ready":
+            raise ValueError("Architecture must be ready before moving to Terraform")
         if artifact_key:
             artifacts[artifact_key] = artifact_value
         if to_stage == "architecture" and "architecture_proposal" not in artifacts:
@@ -222,20 +228,27 @@ def transition(
             _enqueue_architecture_job(run_id)
             return payload
         if to_stage == "terraform" and "terraform_pr" not in artifacts:
+            model = (artifacts.get("architecture_proposal") or {}).get("architecture") or {}
+            files = []
+            for item in model.get("components") or []:
+                for spec in item.get("artifacts") or [item.get("artifact") or {}]:
+                    name = (spec or {}).get("name")
+                    if name:
+                        files.append(name)
             artifacts["terraform_pr"] = {
-                "status": "proposed",
-                "title": "chore: scaffold Terraform for delivery run",
-                "files": ["main.tf", "variables.tf", "outputs.tf"],
+                "status": "in_progress",
+                "title": "Generate Terraform from the architecture model",
+                "files": files or ["providers.tf", "backend.tf"],
                 "silent_apply": False,
-                "message": "Terraform generated as PR/bundle — never silent apply.",
+                "message": "Use Generate artifact on each task. Apply stays Lead-gated.",
             }
         if to_stage == "plan" and "action_diff" not in artifacts:
             artifacts["action_diff"] = {
-                "plan_summary": "Terraform plan: +12 ~3 -0",
+                "plan_summary": "No terraform plan has been executed yet. Generate and validate artifacts first.",
                 "blast_radius": "medium",
-                "rollback": "terraform destroy targeted resources / revert PR",
-                "expected_result": "Infra matches desired state without deleting prod data",
-                "preflight": "terraform plan -out=tfplan",
+                "rollback": "Revert the PR / do not apply",
+                "expected_result": "Plan matches the architecture model without deleting unrelated prod data",
+                "preflight": "terraform init -backend=false && terraform validate && terraform plan",
             }
         if to_stage == "apply" and "apply_result" not in artifacts:
             artifacts["apply_result"] = {
@@ -260,6 +273,36 @@ def transition(
         session.commit()
         session.refresh(row)
         return _dict(row)
+
+
+def retry_architecture(run_id: str, *, user_role: str) -> dict[str, Any]:
+    _require_stage_role(user_role, "architecture")
+    with SessionLocal() as session:
+        row = session.get(DeliveryRun, run_id)
+        if row is None:
+            raise LookupError("Delivery run not found")
+        if row.status != "active":
+            raise ValueError("Delivery run is not active")
+        if row.stage != "architecture":
+            raise ValueError("Architecture can only be retried in the architecture stage")
+        artifacts = dict(row.artifacts or {})
+        if artifacts.get("architecture_status") == "generating":
+            raise ValueError("Architecture generation is already in progress")
+        artifacts["architecture_status"] = "generating"
+        artifacts.pop("architecture_accepted", None)
+        artifacts["architecture_proposal"] = {
+            "summary": "Generating architecture from ingested requirements…",
+            "components": [],
+            "notes": str(artifacts.get("docs") or artifacts.get("requirements") or "")[:2000],
+            "accepted": False,
+        }
+        row.artifacts = artifacts
+        row.updated_at = _now()
+        session.commit()
+        session.refresh(row)
+        payload = _dict(row)
+    _enqueue_architecture_job(run_id)
+    return payload
 
 
 def _enqueue_architecture_job(run_id: str) -> None:

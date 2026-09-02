@@ -119,6 +119,12 @@ CATALOG: list[dict[str, Any]] = [
 
 ALWAYS_TAIL = [
     {
+        "title": "Integration tests",
+        "stage": "testing",
+        "artifacts": [{"name": "tests/test_smoke.py", "kind": "python"}],
+        "rules": ["python"],
+    },
+    {
         "title": "Validate artifacts and plans",
         "stage": "validation",
         "artifacts": [{"name": "validation-report.md", "kind": "document"}],
@@ -185,7 +191,10 @@ def apply_architect_result(
         state.get("mermaid"),
         gated,
     )
-    delivery_run_id = delivery_run_id or _latest_delivery_run(project_id)
+    source = str(state.get("source") or "")
+    create_checklist = source != "chat"
+    if create_checklist:
+        delivery_run_id = delivery_run_id or _latest_delivery_run(project_id)
 
     _save_requirement(
         project_id=project_id,
@@ -227,49 +236,111 @@ def apply_architect_result(
             delivery_run_id=delivery_run_id,
         )
 
-    existing = {item["title"] for item in task_store.list_tasks(project_id, delivery_run_id)}
+    architecture = state.get("architecture") if isinstance(state.get("architecture"), dict) else {}
+    text = _blob(text, architecture.get("components"), architecture.get("analysis"))
     created: list[dict[str, Any]] = []
-    previous_id = ""
-    for spec in _select_specs(text, gated):
-        if spec["title"] in existing:
-            continue
-        depends = [previous_id] if previous_id else []
-        item = task_store.create_task(
-            project_id=project_id,
-            delivery_run_id=delivery_run_id,
-            title=spec["title"],
-            description=spec.get("description") or f"Generated from architecture run {run_id}",
-            stage=spec["stage"],
-            depends_on=depends,
-            required_artifacts=spec.get("artifacts") or [],
-            validation_rules=spec.get("rules") or [],
-            acceptance_criteria=[
-                "Required artifacts attached or generated",
-                "Validation passed where rules exist",
-                "Reviewer approved",
-            ],
-            architecture_decision_id=str(spec.get("decision_id") or ""),
-            ai_recommendation=spec.get("why") or "",
-            status="blocked" if depends else "ready",
-        )
-        created.append(item)
-        previous_id = item["id"]
-        existing.add(spec["title"])
+    if create_checklist:
+        existing = {item["title"] for item in task_store.list_tasks(project_id, delivery_run_id)}
+        previous_id = ""
+        for spec in _select_specs(text, gated, architecture=architecture):
+            if spec["title"] in existing:
+                continue
+            depends = [previous_id] if previous_id else []
+            item = task_store.create_task(
+                project_id=project_id,
+                delivery_run_id=delivery_run_id,
+                title=spec["title"],
+                description=spec.get("description") or f"Generated from architecture run {run_id}",
+                stage=spec["stage"],
+                depends_on=depends,
+                required_artifacts=spec.get("artifacts") or [],
+                validation_rules=spec.get("rules") or [],
+                acceptance_criteria=[
+                    "Required artifacts attached or generated",
+                    "Validation passed where rules exist",
+                    "Reviewer approved",
+                ],
+                architecture_decision_id=str(spec.get("decision_id") or ""),
+                ai_recommendation=spec.get("why") or "",
+                status="blocked" if depends else "ready",
+            )
+            created.append(item)
+            previous_id = item["id"]
+            existing.add(spec["title"])
 
     risks = _risks_from_text(project_id, text, created)
     activity.record(
         project_id,
-        "checklist_generated",
-        detail=f"{len(created)} delivery tasks from architecture",
+        "checklist_generated" if create_checklist else "architecture_recorded",
+        detail=(
+            f"{len(created)} delivery tasks from architecture"
+            if create_checklist
+            else "Chat architecture recorded without appending delivery tasks"
+        ),
         ref_type="architecture_run",
         ref_id=run_id,
     )
     return {"ok": True, "tasks": len(created), "risks": len(risks), "delivery_run_id": delivery_run_id}
 
 
-def _select_specs(text: str, gated: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _select_specs(
+    text: str,
+    gated: list[dict[str, Any]],
+    architecture: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     selected: list[dict[str, Any]] = []
     seen: set[str] = set()
+    for component in (architecture or {}).get("components") or []:
+        if not isinstance(component, dict):
+            continue
+        title = str(component.get("name") or component.get("title") or "").strip()
+        artifacts = list(component.get("artifacts") or [])
+        if not artifacts and component.get("artifact"):
+            artifacts = [component["artifact"]]
+        if not title or not artifacts:
+            continue
+        if title in seen:
+            continue
+        kinds = [str(item.get("kind") or "") for item in artifacts if isinstance(item, dict)]
+        names = [str(item.get("name") or "") for item in artifacts if isinstance(item, dict)]
+        rules: list[str] = []
+        if any(kind == "terraform" or name.endswith(".tf") for kind, name in zip(kinds, names)):
+            rules = ["terraform"]
+        elif any(kind in {"yaml", "cicd"} or name.endswith((".yml", ".yaml")) for kind, name in zip(kinds, names)):
+            rules = ["yaml"]
+        elif any(kind == "python" or name.endswith(".py") for kind, name in zip(kinds, names)):
+            rules = ["python"]
+        selected.append(
+            {
+                "title": title,
+                "stage": component.get("stage") or "infrastructure",
+                "artifacts": artifacts,
+                "rules": rules,
+                "why": component.get("reason") or component.get("purpose") or "",
+                "description": component.get("purpose") or "",
+            }
+        )
+        seen.add(title)
+    if selected:
+        for decision in gated or []:
+            title = str(decision.get("title") or decision.get("decision") or "").strip()
+            if title and title not in seen:
+                selected.append(
+                    {
+                        "title": f"Implement: {title[:80]}",
+                        "stage": "architecture",
+                        "artifacts": [{"name": "adr-notes.md", "kind": "document"}],
+                        "rules": [],
+                        "decision_id": decision.get("id") or "",
+                        "why": decision.get("decision") or "",
+                    }
+                )
+                seen.add(title)
+        for tail in ALWAYS_TAIL:
+            if tail["title"] not in seen:
+                selected.append(dict(tail))
+                seen.add(tail["title"])
+        return selected
     for spec in CATALOG:
         if any(key in text for key in spec["keys"]):
             if spec["title"] not in seen:

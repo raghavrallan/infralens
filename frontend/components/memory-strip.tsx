@@ -38,12 +38,19 @@ export function MemoryStrip({ projectId }: { projectId: string }) {
       if (query) params.set("q", query);
       setRows(await api<MemoryItem[]>(`/api/engineering/memory?${params}`));
     } catch {
-      setRows([]);
+      // Keep the last good memory list if the API blips.
     }
   }, [projectId, category, query]);
 
   useEffect(() => {
     void load();
+    const onRefresh = () => { void load(); };
+    window.addEventListener("infralens-refresh", onRefresh);
+    const timer = window.setInterval(onRefresh, 15000);
+    return () => {
+      window.removeEventListener("infralens-refresh", onRefresh);
+      window.clearInterval(timer);
+    };
   }, [load]);
 
   const setStatus = async (id: string, status: string) => {

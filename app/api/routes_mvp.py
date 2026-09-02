@@ -107,6 +107,20 @@ class DeliveryTransitionRequest(BaseModel):
     artifact_value: Any = None
 
 
+class DeliveryApplyRequest(BaseModel):
+    confirm_destroy: bool = False
+
+
+class DeliveryRevertRequest(BaseModel):
+    confirm: bool = False
+    reason: str = ""
+
+
+class DeliveryRevertDecideRequest(BaseModel):
+    approve: bool
+    confirm: bool = False
+
+
 class ActuatorRequest(BaseModel):
     project_id: str = DEFAULT_PROJECT_ID
     finding: dict[str, Any] = {}
@@ -457,11 +471,12 @@ def list_delivery_runs(
 @router.get("/api/delivery/runs/{run_id}")
 def get_delivery_run(
     run_id: str,
-    _user: dict[str, Any] = Depends(auth.require_user),
+    user: dict[str, Any] = Depends(auth.require_user),
 ) -> dict[str, Any]:
     row = delivery.get_run(run_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Delivery run not found")
+    memberships.assert_project_access(user, row["project_id"])
     return row
 
 
@@ -495,6 +510,202 @@ def delivery_transition(
             artifact_key=body.artifact_key,
             artifact_value=body.artifact_value,
             approved_by=user.get("username") or "",
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _delivery_run_for_user(run_id: str, user: dict[str, Any]) -> dict[str, Any]:
+    row = delivery.get_run(run_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Delivery run not found")
+    memberships.assert_project_access(user, row["project_id"])
+    return row
+
+
+@router.post("/api/delivery/runs/{run_id}/workspace/sync")
+def delivery_sync_workspace(
+    run_id: str,
+    user: dict[str, Any] = Depends(auth.require_user),
+) -> dict[str, Any]:
+    _delivery_run_for_user(run_id, user)
+    assert_capability(user, "propose_write")
+    try:
+        from app.platform.engineering import iac_delivery
+
+        return iac_delivery.sync_workspace(run_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/api/delivery/runs/{run_id}/github/push")
+def delivery_push_github(
+    run_id: str,
+    user: dict[str, Any] = Depends(auth.require_user),
+) -> dict[str, Any]:
+    _delivery_run_for_user(run_id, user)
+    assert_capability(user, "propose_write")
+    try:
+        from app.platform.engineering import iac_delivery
+
+        return iac_delivery.push_github(run_id, username=user.get("username") or "")
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/api/delivery/runs/{run_id}/terraform/init")
+def delivery_terraform_init(
+    run_id: str,
+    user: dict[str, Any] = Depends(auth.require_user),
+) -> dict[str, Any]:
+    _delivery_run_for_user(run_id, user)
+    assert_capability(user, "propose_write")
+    try:
+        from app.platform.engineering import iac_delivery
+
+        return iac_delivery.run_init(run_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/api/delivery/runs/{run_id}/terraform/plan")
+def delivery_terraform_plan(
+    run_id: str,
+    user: dict[str, Any] = Depends(auth.require_user),
+) -> dict[str, Any]:
+    _delivery_run_for_user(run_id, user)
+    assert_capability(user, "propose_write")
+    try:
+        from app.platform.engineering import iac_delivery
+
+        return iac_delivery.run_plan(run_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/api/delivery/runs/{run_id}/terraform/apply")
+def delivery_terraform_apply(
+    run_id: str,
+    body: DeliveryApplyRequest,
+    user: dict[str, Any] = Depends(auth.require_user),
+) -> dict[str, Any]:
+    _delivery_run_for_user(run_id, user)
+    assert_capability(user, "prod_apply")
+    try:
+        from app.platform.engineering import iac_delivery
+
+        return iac_delivery.run_apply(
+            run_id,
+            user_role=user.get("role") or "viewer",
+            confirm_destroy=body.confirm_destroy,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/api/delivery/runs/{run_id}/terraform/revert")
+def delivery_terraform_revert(
+    run_id: str,
+    body: DeliveryRevertRequest,
+    user: dict[str, Any] = Depends(auth.require_user),
+) -> dict[str, Any]:
+    row = _delivery_run_for_user(run_id, user)
+    from app.platform.engineering import iac_revert
+
+    if not iac_revert.can_execute_revert(user, row["project_id"]):
+        assert_capability(user, "propose_write")
+    try:
+        return iac_revert.request_or_run(
+            run_id,
+            user,
+            confirm=body.confirm,
+            reason=body.reason,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/api/delivery/runs/{run_id}/terraform/revert/requests")
+def delivery_terraform_revert_requests(
+    run_id: str,
+    user: dict[str, Any] = Depends(auth.require_user),
+) -> list[dict[str, Any]]:
+    row = _delivery_run_for_user(run_id, user)
+    from app.platform.engineering import iac_revert
+
+    return iac_revert.list_requests(run_id, project_id=row["project_id"])
+
+
+@router.post("/api/delivery/runs/{run_id}/terraform/revert/requests/{request_id}/decide")
+def delivery_terraform_revert_decide(
+    run_id: str,
+    request_id: str,
+    body: DeliveryRevertDecideRequest,
+    user: dict[str, Any] = Depends(auth.require_user),
+) -> dict[str, Any]:
+    row = _delivery_run_for_user(run_id, user)
+    from app.platform.engineering import iac_revert
+
+    if not iac_revert.can_execute_revert(user, row["project_id"]):
+        raise HTTPException(status_code=403, detail="Org Admin or Super Admin required to decide revert")
+    try:
+        return iac_revert.decide_request(
+            run_id,
+            request_id,
+            user,
+            approve=body.approve,
+            confirm=body.confirm,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/api/delivery/runs/{run_id}/architecture/retry")
+def delivery_retry_architecture(
+    run_id: str,
+    user: dict[str, Any] = Depends(auth.require_user),
+) -> dict[str, Any]:
+    try:
+        return delivery.retry_architecture(
+            run_id, user_role=user.get("role") or "viewer"
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

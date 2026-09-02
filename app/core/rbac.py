@@ -41,6 +41,7 @@ CAPABILITY_MIN_ROLE: dict[str, str] = {
     "archive_memory": "devops_lead",
     "approve_two_person": "devops_lead",
     "prod_apply": "devops_lead",
+    "prod_revert": "org_admin",
     "break_glass": "devops_lead",
     "manage_users": "org_admin",
     "invite_users": "org_admin",

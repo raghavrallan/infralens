@@ -30,6 +30,10 @@ def test_metric_intent_keywords_and_llm_parse():
     types, _name, metrics, all_res = _keyword_metric_scope("cpu and memory for all container apps")
     assert "container_app" in (types or [])
     assert "cpu" in (metrics or [])
+    _t, _n, knowledge_metrics, _a = _keyword_metric_scope(
+        "What did we already decide about PostgreSQL? Use engineering memory."
+    )
+    assert knowledge_metrics in (None, [])
     assert all_res is True or types
     assert _looks_like_metrics_followup("container app") is True
     assert _looks_like_metrics_followup("which repo is backend vs frontend") is False

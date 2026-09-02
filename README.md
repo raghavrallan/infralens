@@ -110,6 +110,8 @@ Browser chat UI  ──▶  FastAPI (/api/chat)  ──▶  Orchestrator
   six-module mapping.
 - `app/intelligence/queue.py` — Redis/RQ wiring.
 - `app/intelligence/worker.py` — the `run_workflow` job executed by `rq worker`.
+- `app/agents/solution_architect/` — delivery architecture graph (discovery →
+  structured model → ADRs → tasks). See [docs/solution-architect.md](docs/solution-architect.md).
 - `app/intelligence/findings.py` — normalizes skill output into gated findings.
 - `app/intelligence/scheduler.py` — APScheduler cron enqueue.
 - `app/core/db.py` — SQLAlchemy engine, models, init (chat + intelligence tables).
@@ -166,7 +168,7 @@ copy .env.example .env      # Windows  (cp on macOS/Linux)
 # REDIS_URL defaults to redis://localhost:6399/0 (the compose mapping)
 
 # 6. Run the single local frontend + API entrypoint
-uvicorn app.main:app --reload
+python scripts/run_local_api.py
 
 # 7. In a second shell, run the worker that executes queued workflows.
 # This cross-platform worker class runs in-process with a timer-based timeout,

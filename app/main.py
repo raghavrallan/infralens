@@ -179,6 +179,41 @@ def _refresh_chat_memory(chat_id: str) -> None:
         return
 
 
+def _persist_chat_iac(
+    project_id: str,
+    skills: list[Any] | None,
+    *,
+    actor: str = "",
+    forced: str = "",
+) -> dict[str, Any]:
+    names = {str(item) for item in (skills or []) if item}
+    if forced:
+        names.add(forced)
+    if "terraform_generator" not in names or not project_id:
+        return {}
+    try:
+        from app.platform.engineering.iac_generate import generate_missing_for_project
+
+        return generate_missing_for_project(project_id, actor=actor)
+    except Exception:
+        return {}
+
+
+def _with_iac_note(reply: str, persisted: dict[str, Any]) -> str:
+    count = int(persisted.get("count") or 0)
+    if count <= 0:
+        return reply
+    return (
+        (reply or "")
+        + f"\n\nAttached {count} delivery checklist artifacts from the architecture model. Nothing has been applied."
+    )
+
+
+def _sse_payload(event: dict[str, Any]) -> dict[str, Any]:
+    """Keep SSE lines small so the client can parse `final` reliably."""
+    return {key: value for key, value in event.items() if key not in {"architecture", "mermaid"}}
+
+
 class ChatRequest(BaseModel):
     message: str
     chat_id: Optional[str] = None
@@ -906,21 +941,8 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
     else:
         chats.add_message(chat_id, "user", request.message)
 
-    special_action: Optional[dict[str, Any]] = None
-    if request.mode == "agent":
-        try:
-            special_action = chat_actions.handle_turn(
-                chat_id, request.project_id, request.message, request.action_scope, request.access_level
-            )
-        except ValueError as exc:
-            special_action = {
-                "reply": f"I could not prepare that Azure action: {exc}",
-                "action": None,
-                "event_type": "action_failed",
-            }
-
     def sse(event: dict[str, Any]) -> str:
-        return f"data: {json.dumps(event, default=str)}\n\n"
+        return f"data: {json.dumps(_sse_payload(event), default=str)}\n\n"
 
     def generate() -> Any:
         # Do not wrap yields in tracing_context — ASGI may resume this generator
@@ -932,8 +954,24 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
             feature="chat",
             generation_name="chat-stream",
         )
+        saved_assistant = False
         try:
             yield sse({"type": "chat", "chat_id": chat_id})
+            yield sse({"type": "status", "text": "Working on it"})
+
+            special_action: Optional[dict[str, Any]] = None
+            if request.mode == "agent" and request.skill != "solution_architect":
+                yield sse({"type": "status", "text": "Checking for a live action"})
+                try:
+                    special_action = chat_actions.handle_turn(
+                        chat_id, request.project_id, request.message, request.action_scope, request.access_level
+                    )
+                except ValueError as exc:
+                    special_action = {
+                        "reply": f"I could not prepare that Azure action: {exc}",
+                        "action": None,
+                        "event_type": "action_failed",
+                    }
 
             if special_action is not None:
                 action = special_action.get("action")
@@ -958,7 +996,7 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                 if special_action.get("pending_action_spec"):
                     meta["pending_action_spec"] = special_action["pending_action_spec"]
                 chats.add_message(chat_id, "assistant", reply, meta)
-                _refresh_chat_memory(chat_id)
+                saved_assistant = True
                 yield sse({
                     "type": "final",
                     "mode": "agent",
@@ -967,6 +1005,7 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                     **({"required_action_scope": special_action["required_action_scope"]} if special_action.get("required_action_scope") else {}),
                     **({"action_id": action["id"], "action": action} if action else {}),
                 })
+                _refresh_chat_memory(chat_id)
                 return
 
             if not config.get_azure_config().configured:
@@ -978,8 +1017,9 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                 )
                 yield sse({"type": "delta", "text": reply})
                 chats.add_message(chat_id, "assistant", reply, {"mode": request.mode})
-                _refresh_chat_memory(chat_id)
+                saved_assistant = True
                 yield sse({"type": "final", "mode": request.mode, "reply": reply, "chat_id": chat_id})
+                _refresh_chat_memory(chat_id)
                 return
 
             history = chat_memory.get_model_context(
@@ -1011,7 +1051,17 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                 yield sse({"type": "delta", "text": message})
                 final = {"mode": request.mode, "reply": message}
 
-            reply = final.get("reply", "")
+            reply = str(final.get("reply") or "") or "I could not generate a reply."
+            persisted = _persist_chat_iac(
+                request.project_id,
+                list(final.get("skills_used") or []),
+                actor=user_id,
+                forced=request.skill or "",
+            )
+            reply = _with_iac_note(reply, persisted)
+            final["reply"] = reply
+            if persisted:
+                final["generated_artifacts"] = persisted.get("count") or 0
             chats.add_message(
                 chat_id,
                 "assistant",
@@ -1022,11 +1072,25 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                     "charts": final.get("charts", []),
                 },
             )
-            _refresh_chat_memory(chat_id)
+            saved_assistant = True
             final["chat_id"] = chat_id
             yield sse({"type": "final", **final})
+            _refresh_chat_memory(chat_id)
+        except Exception as exc:  # noqa: BLE001
+            if saved_assistant:
+                raise
+            message = f"The request failed while generating a response: {exc}"
+            try:
+                chats.add_message(chat_id, "assistant", message, {"mode": request.mode, "error": True})
+            except Exception:
+                pass
+            yield sse({"type": "delta", "text": message})
+            yield sse({"type": "final", "mode": request.mode, "reply": message, "chat_id": chat_id})
         finally:
-            observability.flush()
+            try:
+                observability.flush()
+            except Exception:
+                pass
             observability.reset_tracing(tokens)
 
     return StreamingResponse(generate(), media_type="text/event-stream")
@@ -1067,7 +1131,7 @@ def execute_plan(request: ExecutePlanRequest, http_request: Request) -> Streamin
     user_id = _request_user_id(http_request)
 
     def sse(event: dict[str, Any]) -> str:
-        return f"data: {json.dumps(event, default=str)}\n\n"
+        return f"data: {json.dumps(_sse_payload(event), default=str)}\n\n"
 
     def generate() -> Any:
         tokens = observability.bind_tracing(
@@ -1123,6 +1187,13 @@ def execute_plan(request: ExecutePlanRequest, http_request: Request) -> Streamin
                 final = {"mode": "agent", "reply": message}
 
             reply = final.get("reply", "")
+            persisted = _persist_chat_iac(
+                request.project_id,
+                list(final.get("skills_used") or [step.skill for step in steps]),
+                actor=user_id,
+            )
+            reply = _with_iac_note(reply, persisted)
+            final["reply"] = reply
             chats.add_message(
                 chat_id,
                 "assistant",
@@ -1133,9 +1204,9 @@ def execute_plan(request: ExecutePlanRequest, http_request: Request) -> Streamin
                     "charts": final.get("charts", []),
                 },
             )
-            _refresh_chat_memory(chat_id)
             final["chat_id"] = chat_id
             yield sse({"type": "final", **final})
+            _refresh_chat_memory(chat_id)
         finally:
             observability.flush()
             observability.reset_tracing(tokens)
@@ -1174,7 +1245,7 @@ def chat(request: ChatRequest, http_request: Request) -> dict[str, Any]:
         generation_name="chat",
     ):
         try:
-            if request.mode == "agent":
+            if request.mode == "agent" and request.skill != "solution_architect":
                 try:
                     special_action = chat_actions.handle_turn(
                         chat_id,
@@ -1253,6 +1324,13 @@ def chat(request: ChatRequest, http_request: Request) -> dict[str, Any]:
             except azure_client.AzureOpenAINotConfiguredError as exc:
                 turn = orchestrator.ChatTurn(mode=request.mode, reply=str(exc))
 
+            persisted = _persist_chat_iac(
+                request.project_id,
+                list(turn.skills_used or []),
+                actor=user_id,
+                forced=request.skill or "",
+            )
+            turn.reply = _with_iac_note(turn.reply, persisted)
             chats.add_message(
                 chat_id,
                 "assistant",

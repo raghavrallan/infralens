@@ -56,10 +56,15 @@ def list_artifacts(
         return [_dict(row) for row in rows]
 
 
-def get_artifact(artifact_id: str) -> Optional[dict[str, Any]]:
+def get_artifact(artifact_id: str, *, full: bool = False) -> Optional[dict[str, Any]]:
     with SessionLocal() as session:
         row = session.get(ProjectArtifact, artifact_id)
-        return _dict(row) if row else None
+        if row is None:
+            return None
+        payload = _dict(row)
+        if full:
+            payload["content_text"] = row.content_text or ""
+        return payload
 
 
 def save_artifact(
@@ -166,11 +171,23 @@ def _validate(kind: str, filename: str, content: str) -> dict[str, Any]:
     checks: list[dict[str, Any]] = []
     name = (filename or "").lower()
     if kind == "terraform" or name.endswith(".tf"):
-        checks.append(_check("has_resource_or_module", bool(re.search(r"\b(resource|module|data|provider)\b", content))))
+        has_cloud = bool(re.search(r"\b(azurerm_|aws_|google_)", content))
+        has_block = bool(re.search(r"\b(resource|module|data|provider|terraform)\b", content))
+        stub_only = "null_resource" in content and not has_cloud
+        checks.append(_check("has_resource_or_module", has_block and not stub_only, "Reject null_resource-only stubs"))
         checks.append(_check("terraform_fmt_hint", "\t" not in content[:2000] or True))
-        binary = _maybe_terraform_validate(content)
-        if binary is not None:
-            checks.append(binary)
+        if name.endswith("backend.tf") and "backend" in content:
+            checks.append(
+                _check(
+                    "terraform_backend",
+                    True,
+                    "Backend config; validate together with providers.tf.",
+                )
+            )
+        else:
+            binary = _maybe_terraform_validate(content)
+            if binary is not None:
+                checks.append(binary)
     elif kind in {"yaml", "cicd", "kubernetes"} or name.endswith((".yml", ".yaml")):
         try:
             import yaml  # type: ignore
@@ -219,10 +236,35 @@ def _check(name: str, ok: bool, detail: str = "") -> dict[str, Any]:
 
 
 def _maybe_terraform_validate(content: str) -> Optional[dict[str, Any]]:
+    fragment = "terraform {" not in content and "provider " not in content
+    if fragment:
+        ok = bool(re.search(r"\b(azurerm_|aws_|google_|variable |resource )", content))
+        return _check(
+            "terraform_fragment",
+            ok,
+            "Companion .tf file; bundle-validate after providers.tf is generated.",
+        )
     try:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "main.tf"
             path.write_text(content, encoding="utf-8")
+            init = subprocess.run(
+                ["terraform", "init", "-backend=false", "-input=false", "-no-color"],
+                cwd=tmp,
+                capture_output=True,
+                text=True,
+                timeout=45,
+                check=False,
+            )
+            if init.returncode != 0:
+                static_ok = bool(re.search(r"required_providers", content)) and bool(
+                    re.search(r"\b(resource|variable)\b", content)
+                )
+                return _check(
+                    "terraform_validate",
+                    static_ok,
+                    f"init unavailable; static check used. {(init.stderr or init.stdout or '')[:400]}",
+                )
             proc = subprocess.run(
                 ["terraform", "validate", "-no-color"],
                 cwd=tmp,

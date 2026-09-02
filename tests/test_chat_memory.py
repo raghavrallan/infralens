@@ -94,6 +94,19 @@ class ChatMemoryTests(unittest.TestCase):
         self.assertEqual(result["project_id"], "project-1")
         session.commit.assert_called()
 
+    def test_get_model_context_includes_project_engineering_memory(self):
+        from app.chat.chat_memory import get_model_context
+
+        with patch("app.chat.chat_memory.get_memory", return_value=None):
+            with patch("app.chat.chat_memory._transcript", return_value=(None, [])):
+                with patch(
+                    "app.chat.chat_memory._project_engineering_memory",
+                    return_value="ENGINEERING MEMORY\n- Use private PostgreSQL",
+                ):
+                    context = get_model_context("chat-1", current_message="what did we decide?", project_id="p1")
+        joined = " ".join(item["content"] for item in context)
+        self.assertIn("private PostgreSQL", joined)
+
 
 if __name__ == "__main__":
     unittest.main()

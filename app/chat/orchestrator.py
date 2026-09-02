@@ -14,23 +14,26 @@ import json
 import os
 import re
 from dataclasses import asdict, dataclass, field
-from typing import Any, Iterator, Literal, Optional
+from typing import Any, Callable, Iterator, Literal, Optional
 
 from app.core import azure_client
 from app.execution.chat_actions import provider_status_text
 from app.providers import aws_infra, azure_infra, github_infra
 from app.skills import registry
 
-# Terms that mean "review my whole setup" — trigger every connected provider.
+# Phrases that mean "review my whole setup" — trigger every connected provider.
+# Keep these as phrases so ordinary words like "cloud" or "resources" do not
+# force a full Azure/GitHub estate crawl on every turn.
 _GENERIC_TRIGGERS = (
-    "infrastructure",
-    "infra",
-    "environment",
-    "posture",
-    "estate",
     "my cloud",
-    "cloud",
-    "resources",
+    "my infra",
+    "my infrastructure",
+    "review my infra",
+    "review my infrastructure",
+    "review my cloud",
+    "whole estate",
+    "cloud estate",
+    "cloud posture",
     "security review",
     "harden",
     "improve my",
@@ -823,7 +826,18 @@ def _keyword_metric_scope(
     metrics: list[str] = []
     if "cpu" in lowered:
         metrics.append("cpu")
-    if "memory" in lowered or "mem " in lowered:
+    engineering_knowledge = any(
+        term in lowered
+        for term in (
+            "engineering memory",
+            "project memory",
+            "we decided",
+            "already decide",
+            "prior decision",
+            "what did we decide",
+        )
+    )
+    if ("memory" in lowered or "mem " in lowered) and not engineering_knowledge:
         metrics.append("memory")
     if "request" in lowered or "throughput" in lowered:
         metrics.append("requests")
@@ -1279,11 +1293,15 @@ def _gather_live_context(
         if security_block:
             blocks.append(security_block)
     if not force_security:
-        blocks.extend(
-            block
-            for spec in _PROVIDER_SPECS
-            if (block := _provider_block(spec, force_env, task_lower, project_id))
-        )
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=max(1, len(_PROVIDER_SPECS))) as pool:
+            for block in pool.map(
+                lambda spec: _provider_block(spec, force_env, task_lower, project_id),
+                _PROVIDER_SPECS,
+            ):
+                if block:
+                    blocks.append(block)
     if diagnostic and azure_infra.is_connected(project_id):
         blocks.insert(
             0,
@@ -1724,10 +1742,13 @@ def _build_plan(
             "exposure → 'cloud_posture' (pair with 'drift_auditor' when the "
             "user also asks about IaC gaps).\n"
             "- Billing / cost / spend → 'cost_analyzer'.\n"
-            "- Performance / metrics / CPU / memory / tokens / 'last 24 hours' / "
+            "- Performance / metrics / CPU / RAM / tokens / 'last 24 hours' / "
             "follow-ups like 'container app' or 'all' → 'metrics_analyzer'. Do "
             "NOT clarify the app name; live metrics below already enumerate "
             "resources when the user asked for all or a type.\n"
+            "- 'What did we decide', ADRs, engineering memory, prior architecture "
+            "decisions → do NOT use metrics_analyzer. Answer from ENGINEERING MEMORY "
+            "and the delivery checklist.\n"
             "- Error / HTTP status counts / 4xx / 5xx → 'log_analyzer'.\n"
             "Never ask the user to paste files that are already provided below. "
             "Never ask which Azure app, subscription, resource group, or GitHub "
@@ -2444,9 +2465,9 @@ def _stream_steps(
             result_content = "".join(collected)
             runs.append(AgentRun(skill=step.skill, objective=step.objective, output=result_content))
             continue
-        result = sk.run(args)
+        result = yield from _stream_and_collect(_skill_deltas(sk, args))
         runs.append(
-            AgentRun(skill=step.skill, objective=step.objective, output=result.content)
+            AgentRun(skill=step.skill, objective=step.objective, output=result)
         )
 
     yield {"type": "status", "text": "Synthesizing"}
@@ -2480,6 +2501,32 @@ def _stream_steps(
     yield {"type": "final", **turn.to_dict()}
 
 
+def _heartbeat_call(label: str, fn: Callable[[], Any]) -> Iterator[dict[str, Any]]:
+    """Yield status heartbeats while a blocking gather runs on a worker thread."""
+    import threading
+    from queue import Empty, SimpleQueue
+
+    result: SimpleQueue = SimpleQueue()
+
+    def runner() -> None:
+        try:
+            result.put((True, fn()))
+        except Exception as exc:  # noqa: BLE001
+            result.put((False, exc))
+
+    thread = threading.Thread(target=runner, name="chat-gather", daemon=True)
+    thread.start()
+    yield {"type": "status", "text": label}
+    while True:
+        try:
+            ok, payload = result.get(timeout=12)
+            if not ok:
+                raise payload
+            return payload
+        except Empty:
+            yield {"type": "status", "text": label}
+
+
 def run_chat_stream(
     messages: list[dict[str, Any]],
     project_id: str,
@@ -2497,24 +2544,30 @@ def run_chat_stream(
     policy = build_agent_policy(action_scope, access_level) if mode == "agent" else build_policy(action_scope, access_level)
     task = _last_user_message(messages)
     contextual_task = _contextual_task(messages)
-    topology = _gather_project_topology(project_id, messages)
+    topology = yield from _heartbeat_call(
+        "Loading project context",
+        lambda: _gather_project_topology(project_id, messages),
+    )
     forced = registry.get(skill) if skill else None
     agentic = _is_agentic(forced)
     if agentic:
         live_context, charts = provider_status_text(project_id, action_scope), []
         live_context = _merge_context(topology, live_context)
     else:
-        live_context, charts = _gather_live_context(
-            contextual_task,
-            project_id,
-            force=(
-                skill in {"cloud_posture", "drift_auditor"}
-                or _looks_like_diagnostic_intent(contextual_task)
+        live_context, charts = yield from _heartbeat_call(
+            "Checking live environment",
+            lambda: _gather_live_context(
+                contextual_task,
+                project_id,
+                force=(
+                    skill in {"cloud_posture", "drift_auditor"}
+                    or _looks_like_diagnostic_intent(contextual_task)
+                ),
+                force_cost=(skill == "cost_analyzer"),
+                force_metrics=(skill == "metrics_analyzer"),
+                force_logs=(skill == "log_analyzer"),
+                force_security=(skill in _SECURITY_SKILLS or _is_security_task(task)),
             ),
-            force_cost=(skill == "cost_analyzer"),
-            force_metrics=(skill == "metrics_analyzer"),
-            force_logs=(skill == "log_analyzer"),
-            force_security=(skill in _SECURITY_SKILLS or _is_security_task(task)),
         )
         status_context = provider_status_text(project_id, action_scope)
         live_context = _merge_context(topology, live_context, status_context)
@@ -2606,8 +2659,14 @@ def execute_plan_stream(
         )
         yield {"type": "final", **turn.to_dict()}
         return
-    topology = _gather_project_topology(project_id, messages)
-    live_context, charts = _gather_live_context(contextual_task, project_id)
+    topology = yield from _heartbeat_call(
+        "Loading project context",
+        lambda: _gather_project_topology(project_id, messages),
+    )
+    live_context, charts = yield from _heartbeat_call(
+        "Checking live environment",
+        lambda: _gather_live_context(contextual_task, project_id),
+    )
     live_context = _merge_context(topology, live_context)
     live_context, charts = _ensure_planned_context(
         contextual_task, project_id, valid, live_context, charts

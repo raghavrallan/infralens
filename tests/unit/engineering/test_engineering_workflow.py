@@ -175,6 +175,31 @@ def test_artifact_validation_terraform_yaml_docker_python_json():
     with patch("app.platform.engineering.artifacts._maybe_terraform_validate", return_value=None):
         tf = _validate("terraform", "main.tf", 'resource "aws_vpc" "main" {}')
     assert tf["status"] == "passed"
+
+
+@pytest.mark.unit
+def test_null_resource_stub_fails_terraform_validation():
+    report = _validate(
+        "terraform",
+        "network.tf",
+        'terraform {}\nresource "null_resource" "x" { triggers = { a = "1" } }\n',
+    )
+    assert report["status"] == "failed"
+
+
+@pytest.mark.unit
+def test_backend_tf_validates_as_backend_companion():
+    report = _validate(
+        "terraform",
+        "backend.tf",
+        'terraform {\n  backend "local" {\n    path = "terraform.tfstate"\n  }\n}\n',
+    )
+    assert report["status"] == "passed"
+    assert any(item["name"] == "terraform_backend" for item in report["checks"])
+
+
+@pytest.mark.unit
+def test_artifact_validation_python_docker_json():
     bad_py = _validate("python", "app.py", "def broken(:\n  pass")
     assert bad_py["status"] == "failed"
     good_py = _validate("python", "app.py", "def ok():\n    return 1\n")
@@ -188,13 +213,47 @@ def test_artifact_validation_terraform_yaml_docker_python_json():
 
 
 @pytest.mark.unit
+def test_get_artifact_full_returns_complete_text():
+    from app.platform.engineering.artifacts import get_artifact
+
+    with patch("app.platform.engineering.artifacts.SessionLocal") as session_local:
+        row = SimpleNamespace(
+            id="a1",
+            project_id="p1",
+            delivery_run_id="",
+            task_id="t1",
+            name="README.md",
+            kind="document",
+            mime="text/plain",
+            filename="README.md",
+            origin="generated",
+            stage="",
+            content_text="x" * 25_000,
+            validation_status="passed",
+            validation_report={},
+            version=1,
+            created_by="u",
+            created_at=None,
+            updated_at=None,
+        )
+        session_local.return_value.__enter__.return_value.get.return_value = row
+        preview = get_artifact("a1")
+        full = get_artifact("a1", full=True)
+    assert preview is not None and full is not None
+    assert len(preview["content_text"]) == 20_000
+    assert len(full["content_text"]) == 25_000
+
+
+@pytest.mark.unit
 def test_generated_stubs_are_valid_enough_to_attach():
     tf = _stub_artifact("terraform", "network.tf", "Create VPC", "")
-    assert "resource" in tf
+    assert "azurerm_virtual_network" in tf
+    providers = _stub_artifact("terraform", "providers.tf", "Terraform backend", "")
+    assert "required_providers" in providers
     yml = _stub_artifact("yaml", "ci.yml", "CI/CD", "")
     assert "jobs:" in yml
     py = _stub_artifact("python", "test_smoke.py", "Tests", "")
-    assert "def test_placeholder" in py
+    assert "def test_architecture_contract" in py
     md = _stub_artifact("document", "architecture.md", "Docs", "Write the HLD")
     assert "Docs" in md
 
@@ -247,6 +306,12 @@ def test_production_readiness_blocks_incomplete_gates():
     )
     assert ready["ready"] is True
 
+    empty = production_readiness("p1", items=[], risks=[])
+    names = {check["name"]: check["ok"] for check in empty["checks"]}
+    assert names["Architecture approved"] is False
+    assert names["Tests passed"] is True
+    assert empty["ready"] is False
+
 
 @pytest.mark.unit
 def test_recommendations_and_summary_use_live_gaps():
@@ -289,6 +354,14 @@ def test_recommendations_and_summary_use_live_gaps():
     assert "80%" in summary
     assert "blocked" in summary.lower()
     assert "Security approved" in summary
+    ready_summary = _summary(
+        {"architecture": {"percent": 0}},
+        [],
+        items,
+        {"ready": False, "checks": []},
+        architecture_status="ready",
+    )
+    assert "proposal is ready" in ready_summary.lower()
 
 
 @pytest.mark.unit
@@ -398,6 +471,31 @@ def test_apply_architect_result_writes_requirements_tasks_and_memory():
 
 
 @pytest.mark.unit
+def test_apply_architect_result_chat_does_not_append_tasks():
+    from app.platform.engineering.generate import apply_architect_result
+
+    with patch("app.platform.engineering.generate._latest_delivery_run", return_value="del-1"):
+        with patch("app.platform.engineering.generate._save_requirement", return_value="req-1"):
+            with patch("app.platform.engineering.generate.knowledge.remember"):
+                with patch("app.platform.engineering.generate.task_store.create_task") as create_task:
+                    with patch("app.platform.engineering.generate._risks_from_text", return_value=[]):
+                        with patch("app.platform.engineering.generate.activity.record"):
+                            result = apply_architect_result(
+                                {
+                                    "project_id": "p1",
+                                    "source": "chat",
+                                    "objective": "EKS plus RDS",
+                                    "assumptions": ["single region"],
+                                },
+                                run_id="run-chat",
+                                gated=[{"id": "adr-1", "title": "Use EKS"}],
+                            )
+    assert result["ok"] is True
+    assert result["tasks"] == 0
+    create_task.assert_not_called()
+
+
+@pytest.mark.unit
 def test_architect_initial_state_merges_memory_seed():
     from app.agents.solution_architect import graph
 
@@ -417,3 +515,29 @@ def test_search_precedent_prefers_knowledge_prompt():
     ):
         text = tools.search_precedent("p1")
     assert "EKS" in text
+
+
+@pytest.mark.unit
+def test_generate_missing_for_project_writes_required_files():
+    from app.platform.engineering.iac_generate import generate_missing_for_project
+
+    tasks = [
+        {
+            "id": "t1",
+            "title": "Network (VPC/VNet, subnets, routing)",
+            "description": "vnet",
+            "delivery_run_id": "d1",
+            "required_artifacts": [{"name": "network.tf", "kind": "terraform"}],
+            "artifacts": [],
+        }
+    ]
+    with patch("app.platform.engineering.tasks.list_tasks", return_value=tasks):
+        with patch(
+            "app.platform.engineering.artifacts.save_artifact",
+            return_value={"validation_status": "passed"},
+        ) as save:
+            with patch("app.platform.engineering.iac_workspace.sync", return_value={"workspace": "w"}):
+                out = generate_missing_for_project("p1", actor="admin")
+    assert out["count"] == 1
+    assert save.call_args.kwargs["name"] == "network.tf"
+    assert "azurerm_" in save.call_args.kwargs["content_text"]

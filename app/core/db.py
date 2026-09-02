@@ -194,6 +194,24 @@ class MembershipRequest(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class RevertRequest(Base):
+    """Non-admin request to revert an isolated Terraform apply; Org Admin / Super Admin decides."""
+
+    __tablename__ = "revert_requests"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    org_id: Mapped[str] = mapped_column(String(36), index=True, default="")
+    project_id: Mapped[str] = mapped_column(String(36), index=True)
+    delivery_run_id: Mapped[str] = mapped_column(String(36), index=True)
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    reason: Mapped[str] = mapped_column(String, default="")
+    requested_by: Mapped[str] = mapped_column(String(36), default="")
+    decided_by: Mapped[str] = mapped_column(String(36), default="")
+    decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    executed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class BreakGlassSession(Base):
     """Time-boxed gate downgrade window opened by DevOps Lead+."""
 

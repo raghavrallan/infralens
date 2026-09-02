@@ -5,7 +5,7 @@ from typing import Any
 
 from sqlalchemy import select
 
-from app.core.db import ArchitectureDecision, ArchitectureRun, ProjectRisk, SessionLocal
+from app.core.db import Approval, DeliveryRun, Finding, ProjectRisk, SessionLocal
 from app.platform.engineering import artifacts as artifact_store
 from app.platform.engineering import knowledge, tasks as task_store
 
@@ -53,7 +53,13 @@ def build_health(project_id: str) -> dict[str, Any]:
     recommendations = _recommendations(items, artifact_rows, risks, memory_rows)
     timeline = _timeline(items)
     readiness = production_readiness(project_id, items=items, risks=risks)
-    summary = _summary(bars, blockers, items, readiness)
+    summary = _summary(
+        bars,
+        blockers,
+        items,
+        readiness,
+        architecture_status=_delivery_architecture_status(project_id),
+    )
     return {
         "overall": overall,
         "bars": bars,
@@ -90,7 +96,15 @@ def production_readiness(
 
     arch_done = [item for item in items if item["stage"] == "architecture" and item["status"] == "completed"]
     arch_total = [item for item in items if item["stage"] == "architecture"]
-    add("Architecture approved", bool(arch_done) or not arch_total, f"{len(arch_done)}/{len(arch_total)} architecture tasks complete")
+    add(
+        "Architecture approved",
+        bool(arch_done),
+        (
+            f"{len(arch_done)}/{len(arch_total)} architecture tasks complete"
+            if arch_total
+            else "No architecture tasks yet"
+        ),
+    )
     infra = [item for item in items if item["stage"] == "infrastructure"]
     add(
         "Infrastructure validated",
@@ -104,7 +118,11 @@ def production_readiness(
         f"{sum(1 for i in sec if i['status']=='completed')}/{len(sec)} security tasks",
     )
     tests = [item for item in items if item["stage"] == "testing"]
-    add("Tests passed", all(item["status"] == "completed" for item in tests) if tests else False)
+    add(
+        "Tests passed",
+        all(item["status"] == "completed" for item in tests) if tests else True,
+        f"{sum(1 for i in tests if i['status']=='completed')}/{len(tests)} test tasks" if tests else "No testing tasks in this delivery",
+    )
     add("No critical open risks", not any(risk["severity"] == "critical" or risk["severity"] == "high" for risk in risks))
     missing_art = [item for item in items if item.get("missing_artifacts")]
     add("Required artifacts available", not missing_art, f"{len(missing_art)} tasks missing files")
@@ -142,15 +160,16 @@ def _open_risks(project_id: str) -> list[dict[str, Any]]:
 
 def _pending_adrs(project_id: str) -> int:
     with SessionLocal() as session:
-        runs = session.scalars(
-            select(ArchitectureRun.id).where(ArchitectureRun.project_id == project_id)
+        rows = session.execute(
+            select(Approval.id)
+            .join(Finding, Finding.id == Approval.finding_id)
+            .where(
+                Approval.project_id == project_id,
+                Approval.decision == "pending",
+                Finding.skill == "solution_architect",
+            )
         ).all()
-        if not runs:
-            return 0
-        rows = session.scalars(
-            select(ArchitectureDecision).where(ArchitectureDecision.run_id.in_(list(runs)))
-        ).all()
-        return sum(1 for row in rows if (row.gate_decision or "") in {"human_approval", "two_person", ""})
+        return len(rows)
 
 
 def _blockers(items: list[dict[str, Any]], risks: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -283,15 +302,36 @@ def _timeline(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+def _delivery_architecture_status(project_id: str) -> str:
+    with SessionLocal() as session:
+        run = session.scalar(
+            select(DeliveryRun)
+            .where(DeliveryRun.project_id == project_id)
+            .order_by(DeliveryRun.updated_at.desc())
+        )
+        if run is None:
+            return ""
+        return str((run.artifacts or {}).get("architecture_status") or "")
+
+
 def _summary(
     bars: dict[str, dict[str, Any]],
     blockers: list[dict[str, Any]],
     items: list[dict[str, Any]],
     readiness: dict[str, Any],
+    architecture_status: str = "",
 ) -> str:
     arch = bars.get("architecture", {}).get("percent", 0)
+    if architecture_status == "ready" and arch == 0:
+        arch_line = "Architecture proposal is ready; implementation tasks are not complete yet."
+    elif architecture_status == "generating":
+        arch_line = "Architecture proposal is still generating."
+    elif architecture_status == "failed":
+        arch_line = "Architecture proposal failed and needs a retry."
+    else:
+        arch_line = f"The architecture is {arch}% complete."
     lines = [
-        f"The architecture is {arch}% complete.",
+        arch_line,
         f"{sum(1 for item in items if item['status']=='blocked')} infrastructure/delivery tasks are blocked."
         if any(item["status"] == "blocked" for item in items)
         else "No delivery tasks are currently blocked.",

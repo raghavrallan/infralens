@@ -69,29 +69,100 @@ export async function api<T>(url: string, options?: RequestInit): Promise<T> {
   return (response.status === 204 ? null : await response.json()) as T;
 }
 
+export class StreamIdleError extends Error {
+  constructor(message = "The chat stream stalled. Try again.") {
+    super(message);
+    this.name = "StreamIdleError";
+  }
+}
+
+function dispatchSseChunk(chunk: string, onEvent: (event: StreamEvent) => void) {
+  const line = chunk.split("\n").find((item) => item.startsWith("data: "));
+  if (!line) return;
+  try {
+    onEvent(JSON.parse(line.slice(6)) as StreamEvent);
+  } catch {
+    // Ignore incomplete or non-JSON server events.
+  }
+}
+
+function readWithIdle(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  idleMs: number | undefined,
+  signal: AbortSignal | undefined,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  const read = reader.read();
+  if (!idleMs && !signal) return read;
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = idleMs
+      ? globalThis.setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          reject(new StreamIdleError());
+        }, idleMs)
+      : 0;
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      if (timer) globalThis.clearTimeout(timer);
+      const reason = signal?.reason;
+      reject(reason instanceof Error ? reason : new DOMException("Aborted", "AbortError"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    read.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        if (timer) globalThis.clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        if (settled) return;
+        settled = true;
+        if (timer) globalThis.clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
 export async function consumeSse(
   response: Response,
   onEvent: (event: StreamEvent) => void,
+  options?: { idleMs?: number; signal?: AbortSignal; onIdle?: () => void },
 ): Promise<void> {
   if (!response.body) throw new Error("The server returned no stream.");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  while (true) {
-    const { done, value } = await reader.read();
-    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
-    const chunks = buffer.split("\n\n");
-    buffer = chunks.pop() || "";
-    for (const chunk of chunks) {
-      const line = chunk.split("\n").find((item) => item.startsWith("data: "));
-      if (!line) continue;
+  try {
+    while (true) {
+      if (options?.signal?.aborted) {
+        const reason = options.signal.reason;
+        throw reason instanceof Error ? reason : new DOMException("Aborted", "AbortError");
+      }
       try {
-        onEvent(JSON.parse(line.slice(6)) as StreamEvent);
-      } catch {
-        // Ignore incomplete or non-JSON server events.
+        const { done, value } = await readWithIdle(reader, options?.idleMs, options?.signal);
+        buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+        const chunks = buffer.split("\n\n");
+        buffer = chunks.pop() || "";
+        for (const chunk of chunks) dispatchSseChunk(chunk, onEvent);
+        if (done) break;
+      } catch (error) {
+        if (error instanceof StreamIdleError) options?.onIdle?.();
+        throw error;
       }
     }
-    if (done) break;
+    if (buffer.trim()) dispatchSseChunk(buffer, onEvent);
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      // Stream already closed.
+    }
   }
 }
 

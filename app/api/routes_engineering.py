@@ -52,6 +52,7 @@ class AcceptRecommendationRequest(BaseModel):
     reason: str = ""
     stage: str = "infrastructure"
     related_task_id: str = ""
+    action: str = ""
 
 
 class RequirementAnswerRequest(BaseModel):
@@ -173,6 +174,18 @@ def get_artifacts(
     return artifact_store.list_artifacts(project_id, task_id=task_id)
 
 
+@router.get("/api/engineering/artifacts/{artifact_id}")
+def get_artifact(
+    artifact_id: str,
+    user: dict[str, Any] = Depends(auth.require_user),
+) -> dict[str, Any]:
+    row = artifact_store.get_artifact(artifact_id, full=True)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    _project(user, row["project_id"])
+    return row
+
+
 @router.post("/api/engineering/artifacts/{artifact_id}/validate")
 def post_validate(
     artifact_id: str,
@@ -201,7 +214,16 @@ def generate_for_task(
     for spec in required:
         name = spec.get("name") if isinstance(spec, dict) else str(spec)
         kind = (spec.get("kind") if isinstance(spec, dict) else body.kind) or body.kind
-        content = _stub_artifact(kind, name, task["title"], task["description"])
+        from app.platform.engineering.iac_generate import generate_artifact_content
+
+        content = generate_artifact_content(
+            name=name or "artifact",
+            kind=kind,
+            title=task["title"],
+            description=str(task.get("description") or ""),
+            project_id=task["project_id"],
+            delivery_run_id=str(task.get("delivery_run_id") or ""),
+        )
         saved.append(
             artifact_store.save_artifact(
                 project_id=task["project_id"],
@@ -223,7 +245,15 @@ def generate_for_task(
         ref_type="task",
         ref_id=task_id,
     )
-    return {"task": task_store.get_task(task_id), "artifacts": saved}
+    workspace = {}
+    if task.get("delivery_run_id"):
+        try:
+            from app.platform.engineering import iac_workspace
+
+            workspace = iac_workspace.sync(task["project_id"], str(task["delivery_run_id"]))
+        except Exception:
+            workspace = {}
+    return {"task": task_store.get_task(task_id), "artifacts": saved, "workspace": workspace}
 
 
 @router.get("/api/engineering/memory")
@@ -232,10 +262,11 @@ def get_memory(
     category: str = "",
     status: str = "",
     q: str = "",
+    limit: int = 80,
     user: dict[str, Any] = Depends(auth.require_user),
 ) -> list[dict[str, Any]]:
     _project(user, project_id)
-    return knowledge.list_knowledge(project_id, category=category, status=status, query=q)
+    return knowledge.list_knowledge(project_id, category=category, status=status, query=q, limit=limit)
 
 
 @router.post("/api/engineering/memory/{item_id}/status")
@@ -288,6 +319,22 @@ def accept_recommendation(
 ) -> dict[str, Any]:
     _project(user, body.project_id)
     assert_capability(user, "propose_write")
+    action = (body.action or "").strip()
+    if action == "generate_terraform" or body.title.lower().startswith("generate terraform"):
+        from app.platform.engineering.iac_generate import generate_missing_for_project
+
+        result = generate_missing_for_project(
+            body.project_id, actor=user.get("username") or ""
+        )
+        activity.record(
+            body.project_id,
+            "artifacts_generated",
+            actor=user.get("username") or "",
+            detail=f"{result.get('count') or 0} artifacts from recommendation",
+            ref_type="project",
+            ref_id=body.project_id,
+        )
+        return {"action": "generate_terraform", **result}
     task = task_store.create_task(
         project_id=body.project_id,
         title=body.title or "Follow-up task",
@@ -335,22 +382,12 @@ def answer_requirement(
 
 
 def _stub_artifact(kind: str, name: str, title: str, description: str) -> str:
-    slug = "".join(ch if ch.isalnum() else "_" for ch in title.lower())[:40]
-    if kind == "terraform" or str(name).endswith(".tf"):
-        return (
-            f'# Generated for: {title}\n'
-            f'# Review before apply. Estimates only — not a live bill.\n'
-            f'terraform {{\n  required_version = ">= 1.5.0"\n}}\n\n'
-            f'resource "null_resource" "{slug or "component"}" {{\n'
-            f'  triggers = {{ purpose = "{title}" }}\n}}\n'
-        )
-    if kind in {"yaml", "cicd", "kubernetes"} or str(name).endswith((".yml", ".yaml")):
-        return (
-            f"# Generated for: {title}\n"
-            "name: ci\non:\n  push:\n    branches: [main]\n"
-            "jobs:\n  validate:\n    runs-on: ubuntu-latest\n    steps:\n"
-            "      - uses: actions/checkout@v4\n      - run: echo validate\n"
-        )
-    if kind == "python":
-        return f'"""Smoke test generated for {title}."""\n\ndef test_placeholder():\n    assert True\n'
-    return f"# {title}\n\n{description or 'Generated artifact. Replace with the real file.'}\n"
+    from app.platform.engineering.iac_generate import generate_artifact_content
+
+    return generate_artifact_content(
+        name=name,
+        kind=kind,
+        title=title,
+        description=description,
+        project_id="",
+    )
