@@ -113,6 +113,38 @@ def test_stream_architect_awaiting_and_complete():
 
 
 @pytest.mark.unit
+def test_stream_architect_yields_status_before_pipeline_returns():
+    import threading
+
+    released = threading.Event()
+    done = empty_state(
+        objective="Add queue",
+        project_id="p1",
+        user="u1",
+        constraints="",
+        seed_context="",
+        tier="T1",
+        plan_only=False,
+        source="chat",
+        thread_id="t-live",
+    )
+    done["reply"] = "HLD"
+
+    def blocking_pipeline(_state, emit):
+        emit({"type": "status", "text": "Clarifying the ask"})
+        released.wait(timeout=2)
+        return done
+
+    with patch("app.agents.solution_architect.graph.run_pipeline", side_effect=blocking_pipeline):
+        gen = graph.stream_architect({"objective": "design"}, chat_id="t-live")
+        first = next(gen)
+        released.set()
+        rest = list(gen)
+    assert first["type"] == "status"
+    assert rest[-1]["type"] == "final"
+
+
+@pytest.mark.unit
 def test_chat_memory_normalise_and_record_outcome():
     cleaned = _clean_items(["resource-group", "", None, "resource-group"])
     assert "resource-group" in cleaned

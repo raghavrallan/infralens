@@ -34,6 +34,8 @@ class ArchitectState(TypedDict, total=False):
     pending_question: str
     reply: str
     messages: list[dict[str, Any]]
+    discovery: dict[str, Any]
+    architecture: dict[str, Any]
 
 
 def empty_state(**overrides: Any) -> ArchitectState:
@@ -63,6 +65,8 @@ def empty_state(**overrides: Any) -> ArchitectState:
         "pending_question": "",
         "reply": "",
         "messages": [],
+        "discovery": {},
+        "architecture": {},
     }
     state.update(overrides)  # type: ignore[typeddict-item]
     return state

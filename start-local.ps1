@@ -557,6 +557,8 @@ function Stop-MatchingAppProcesses {
             $_.CommandLine -and (
                 ($_.CommandLine -like "*uvicorn*app.main:app*") -or
                 ($_.CommandLine -like "*uvicorn.exe*app.main:app*") -or
+                ($_.CommandLine -like "*scripts\\run_local_api.py*") -or
+                ($_.CommandLine -like "*scripts/run_local_api.py*") -or
                 ($_.CommandLine -like "*rq.exe*worker*intelligence*") -or
                 ($_.CommandLine -like "*rq worker intelligence*")
             )
@@ -782,10 +784,11 @@ function Write-ChildScripts {
         "set `"CONTROL_PLANE_URL=$cp`""
         "set `"APP_HOST=$HostName`""
         "set `"APP_PORT=$Port`""
+        "set `"PYTHONPATH=$Root`""
         "echo DevSecOps API - leave this CMD window open"
         "echo API (hot reload) on http://${HostName}:${Port}"
         "echo."
-        "`"$UvicornExe`" app.main:app --reload --host $HostName --port $Port"
+        "`"$VenvPython`" `"$Root\scripts\run_local_api.py`""
         "echo."
         "echo API exited. Press any key to close this window."
         "pause >nul"
@@ -980,6 +983,8 @@ function Stop-AppProcesses {
         Where-Object {
             $_.CommandLine -and (
                 ($_.CommandLine -like "*uvicorn*app.main:app*") -or
+                ($_.CommandLine -like "*scripts\\run_local_api.py*") -or
+                ($_.CommandLine -like "*scripts/run_local_api.py*") -or
                 ($_.CommandLine -like "*rq.exe*worker*intelligence*") -or
                 ($_.CommandLine -like "*rq worker intelligence*") -or
                 ($_.CommandLine -like "*run-api.cmd*") -or

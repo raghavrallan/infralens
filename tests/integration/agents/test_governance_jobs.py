@@ -258,20 +258,42 @@ def test_generate_architecture_missing_and_success(require_db, org_with_project)
     from app.platform import delivery
 
     run = delivery.create_run(org_with_project["project"]["id"], created_by="tester")
+    configured = MagicMock(configured=True)
+    with patch("app.core.config.get_azure_config", return_value=configured):
+        with patch(
+            "app.agents.solution_architect.graph.stream_architect",
+            return_value=iter(
+                [
+                    {"type": "status", "text": "Clarifying the ask"},
+                    {
+                        "type": "final",
+                        "reply": "HLD",
+                        "plan": [{"skill": "infrastructure_architect"}],
+                        "tier": "T1",
+                        "architecture": {"cloud": "azure", "components": [{"name": "Compute platform"}]},
+                    },
+                ]
+            ),
+        ):
+            result = jobs.generate_architecture(run["id"])
+        assert result["ok"] is True
+        loaded = delivery.get_run(run["id"])
+        assert loaded["artifacts"]["architecture_status"] == "ready"
+        assert loaded["artifacts"].get("architecture_progress") == "Clarifying the ask"
+        with patch(
+            "app.agents.solution_architect.graph.stream_architect",
+            side_effect=RuntimeError("llm down"),
+        ):
+            failed = jobs.generate_architecture(run["id"])
+        assert failed["ok"] is False
+    missing_llm = delivery.create_run(org_with_project["project"]["id"], created_by="tester")
     with patch(
-        "app.agents.solution_architect.graph.invoke_architect",
-        return_value={"reply": "HLD", "plan": [{"skill": "infrastructure_architect"}], "tier": "T1"},
+        "app.core.config.get_azure_config",
+        return_value=MagicMock(configured=False),
     ):
-        result = jobs.generate_architecture(run["id"])
-    assert result["ok"] is True
-    loaded = delivery.get_run(run["id"])
-    assert loaded["artifacts"]["architecture_status"] == "ready"
-    with patch(
-        "app.agents.solution_architect.graph.invoke_architect",
-        side_effect=RuntimeError("llm down"),
-    ):
-        failed = jobs.generate_architecture(run["id"])
-    assert failed["ok"] is False
+        blocked = jobs.generate_architecture(missing_llm["id"])
+    assert blocked["ok"] is False
+    assert delivery.get_run(missing_llm["id"])["artifacts"]["architecture_status"] == "failed"
 
 
 @pytest.mark.integration

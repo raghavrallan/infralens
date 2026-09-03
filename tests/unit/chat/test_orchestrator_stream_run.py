@@ -344,3 +344,31 @@ def test_skill_args_security_and_vuln_triage():
     assert "findings" in triage
     generic = _skill_args("report_writer", "task", "obj", "policy", "live")
     assert generic["task"] == "task"
+
+
+@pytest.mark.unit
+def test_run_chat_stream_emits_status_before_gather_returns():
+    import threading
+
+    released = threading.Event()
+
+    def slow_topology(*_a, **_k):
+        released.wait(timeout=2)
+        return "topo"
+
+    with patch("app.chat.orchestrator._gather_project_topology", side_effect=slow_topology):
+        with patch("app.chat.orchestrator._gather_live_context", return_value=("live", [])):
+            with patch("app.chat.orchestrator.provider_status_text", return_value="status"):
+                with patch(
+                    "app.chat.orchestrator._build_plan",
+                    return_value=("need", [], ["Which team?"]),
+                ):
+                    gen = run_chat_stream(
+                        [{"role": "user", "content": "help"}],
+                        "p1",
+                    )
+                    first = next(gen)
+                    released.set()
+                    rest = list(gen)
+    assert first["type"] == "status"
+    assert rest[-1]["type"] == "final"

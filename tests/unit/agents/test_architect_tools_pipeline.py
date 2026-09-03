@@ -35,12 +35,13 @@ def test_architect_tools_safe_wrappers_and_allowlist():
     with patch("app.providers.github_infra.is_connected", return_value=True):
         with patch("app.providers.github_infra.build_code_report", return_value="tf files"):
             assert "tf files" in tools.get_code_artifacts("p1", kinds=["terraform"])
-    with patch("app.platform.memory.list_precedent", return_value=[]):
-        assert "No engineering precedent" in tools.search_precedent("p1")
-    with patch("app.platform.memory.list_precedent", side_effect=RuntimeError("db")):
-        assert "unavailable" in tools.search_precedent("p1")
-    with patch("app.platform.memory.list_precedent", return_value=[{"summary": "prior"}]):
-        assert "prior" in tools.search_precedent("p1")
+    with patch("app.platform.engineering.knowledge.architect_context", return_value={}):
+        with patch("app.platform.memory.list_precedent", return_value=[]):
+            assert "No engineering precedent" in tools.search_precedent("p1")
+        with patch("app.platform.memory.list_precedent", side_effect=RuntimeError("db")):
+            assert "unavailable" in tools.search_precedent("p1")
+        with patch("app.platform.memory.list_precedent", return_value=[{"summary": "prior"}]):
+            assert "prior" in tools.search_precedent("p1")
     assert "allow-list" in tools.run_skill("terraform_executor", {})
     with patch("app.skills.registry.get", return_value=None):
         assert "Unknown skill" in tools.run_skill("iac_reviewer", {})

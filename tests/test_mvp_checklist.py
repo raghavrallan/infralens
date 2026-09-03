@@ -24,6 +24,8 @@ def test_rbac_matrix_capabilities():
         ("developer", "create_github_repo", True),
         ("developer", "approve_two_person", False),
         ("developer", "prod_apply", False),
+        ("devops_lead", "prod_revert", False),
+        ("org_admin", "prod_revert", True),
         ("devops_engineer", "approve_human", True),
         ("devops_engineer", "approve_two_person", False),
         ("devops_lead", "approve_two_person", True),

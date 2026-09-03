@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, apiUrl, consumeSse } from "../lib/api";
+import { api, apiUrl, consumeSse, StreamIdleError } from "../lib/api";
 import { authHeaders, clearSession } from "../lib/auth";
 import { chatHref, readChatIdFromUrl, syncChatUrl } from "../lib/chat-route";
 import { copyText } from "../lib/clipboard";
@@ -105,6 +105,7 @@ export function ChatPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const streamAbortRef = useRef<AbortController | null>(null);
+  const stopRequestedRef = useRef(false);
   const selectGenerationRef = useRef(0);
   const chatIdRef = useRef<string | null>(null);
 
@@ -290,9 +291,24 @@ export function ChatPage() {
       }
       if (!cancelled && Date.now() - started < 5 * 60 * 1000) {
         timer = window.setTimeout(() => void poll(), 1200);
+      } else if (!cancelled) {
+        setMessages((current) => {
+          const last = current[current.length - 1];
+          if (!last || last.role !== "user") return current;
+          return [
+            ...current,
+            {
+              id: `assistant-missing-${Date.now()}`,
+              role: "assistant",
+              content: "The reply never arrived. Send the question again.",
+              error: true,
+            },
+          ];
+        });
+        setStatus("Connected");
       }
     };
-    setStatus("Working…");
+    setStatus("Waiting for reply…");
     timer = window.setTimeout(() => void poll(), 800);
     return () => {
       cancelled = true;
@@ -508,60 +524,90 @@ export function ChatPage() {
     streamAbortRef.current?.abort();
     const controller = new AbortController();
     streamAbortRef.current = controller;
-    const response = await fetch(apiUrl(url), {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    if (response.status === 401) {
-      clearSession();
-      window.location.replace("/login");
-      throw new Error("Not authenticated");
+    const timeout = window.setTimeout(() => controller.abort(), 180000);
+    try {
+      const response = await fetch(apiUrl(url), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      if (response.status === 401) {
+        clearSession();
+        window.location.replace("/login");
+        throw new Error("Not authenticated");
+      }
+      if (!response.ok) throw new Error("The stream failed to start.");
+      let accumulated = "";
+      let sawFinal = false;
+      await consumeSse(
+        response,
+        (event: StreamEvent) => {
+          if (event.chat_id) {
+            const nextId = String(event.chat_id);
+            setChatId(nextId);
+            chatIdRef.current = nextId;
+            syncChatUrl(nextId, "replace");
+          }
+          if (event.action_id || event.action) {
+            const action = event.action || ({ id: String(event.action_id), provider: String(event.provider || "azure"), status: String(event.type || "planned") } as Action);
+            setActiveAction((current) => ({ ...current, ...action, id: action.id || String(event.action_id) }));
+          }
+          if (event.type === "action_planned" || event.type === "approval_required" || event.type === "action_queued" || event.type === "action_started" || event.type === "action_output" || event.type === "action_verified" || event.type === "action_succeeded" || event.type === "action_failed") {
+            setActiveAction((current) => current ? { ...current, status: String(event.type || "planned").replace("action_", "") } : current);
+          }
+          if (event.type === "status") setStatus(String(event.text || "Working…"));
+          if (event.type === "delta") {
+            accumulated = accumulated + String(event.text || "");
+            setMessages((current) => current.map((message) => message.id === messageId ? { ...message, content: accumulated, streaming: true } : message));
+          }
+          if (event.type === "final") {
+            sawFinal = true;
+            if (event.required_action_scope === "write" && projectId) {
+              setActionScope("write");
+              window.localStorage.setItem(`actionScope:${projectId}`, "write");
+            }
+            accumulated = String(event.reply || accumulated);
+            const responseMode: ChatMode = event.mode === "plan" ? "plan" : "agent";
+            const plan = responseMode === "plan" && Array.isArray(event.plan) ? event.plan : undefined;
+            const charts = Array.isArray(event.charts) ? event.charts : undefined;
+            setMessages((current) => current.map((message) => message.id === messageId ? { ...message, content: accumulated, streaming: false, displayMode: responseMode, plan, charts, architectTier: typeof event.tier === "string" ? event.tier : undefined, architectMode: typeof event.architect_mode === "string" ? event.architect_mode : undefined } : message));
+            if (responseMode === "plan" && plan?.length) setPendingPlan({ messageId, steps: plan });
+            else setPendingPlan(null);
+            setStatus(configured ? "Connected" : "Not configured");
+          }
+        },
+        {
+          idleMs: 60000,
+          signal: controller.signal,
+          onIdle: () => controller.abort(),
+        },
+      );
+      if (!sawFinal) throw new Error("The reply was cut off before it finished.");
+    } finally {
+      window.clearTimeout(timeout);
     }
-    if (!response.ok) throw new Error("The stream failed to start.");
-    let accumulated = "";
-    await consumeSse(response, (event: StreamEvent) => {
-      if (event.chat_id) {
-        const nextId = String(event.chat_id);
-        setChatId(nextId);
-        chatIdRef.current = nextId;
-        syncChatUrl(nextId, "replace");
-      }
-      if (event.action_id || event.action) {
-        const action = event.action || ({ id: String(event.action_id), provider: String(event.provider || "azure"), status: String(event.type || "planned") } as Action);
-        setActiveAction((current) => ({ ...current, ...action, id: action.id || String(event.action_id) }));
-      }
-      if (event.type === "action_planned" || event.type === "approval_required" || event.type === "action_queued" || event.type === "action_started" || event.type === "action_output" || event.type === "action_verified" || event.type === "action_succeeded" || event.type === "action_failed") {
-        setActiveAction((current) => current ? { ...current, status: String(event.type || "planned").replace("action_", "") } : current);
-      }
-      if (event.type === "status") setStatus(String(event.text || "Working…"));
-      if (event.type === "delta") {
-        accumulated = accumulated + String(event.text || "");
-        setMessages((current) => current.map((message) => message.id === messageId ? { ...message, content: accumulated, streaming: true } : message));
-      }
-      if (event.type === "final") {
-        if (event.required_action_scope === "write" && projectId) {
-          setActionScope("write");
-          window.localStorage.setItem(`actionScope:${projectId}`, "write");
-        }
-        accumulated = String(event.reply || accumulated);
-        const responseMode: ChatMode = event.mode === "plan" ? "plan" : "agent";
-        const plan = responseMode === "plan" && Array.isArray(event.plan) ? event.plan : undefined;
-        const charts = Array.isArray(event.charts) ? event.charts : undefined;
-        setMessages((current) => current.map((message) => message.id === messageId ? { ...message, content: accumulated, streaming: false, displayMode: responseMode, plan, charts, architectTier: typeof event.tier === "string" ? event.tier : undefined, architectMode: typeof event.architect_mode === "string" ? event.architect_mode : undefined } : message));
-        if (responseMode === "plan" && plan?.length) setPendingPlan({ messageId, steps: plan });
-        else setPendingPlan(null);
-        setStatus(configured ? "Connected" : "Not configured");
-      }
-    });
     await loadChats(projectId || undefined);
+  };
+
+  const stopStream = () => {
+    stopRequestedRef.current = true;
+    streamAbortRef.current?.abort();
+  };
+
+  const finishAssistant = (messageId: string, patch: Partial<UiMessage>) => {
+    setMessages((current) =>
+      current.map((message) =>
+        message.id === messageId ? { ...message, streaming: false, ...patch } : message,
+      ),
+    );
   };
 
   const sendMessage = async () => {
     const text = input.trim();
     if (!text || sending || !projectId) return;
     const editId = editingMessageId;
+    const generation = selectGenerationRef.current;
     setSlashOpen(false);
     setInput("");
     setEditingMessageId(null);
@@ -569,6 +615,7 @@ export function ChatPage() {
     setActiveAction(null);
     setActionEvents([]);
     setSending(true);
+    stopRequestedRef.current = false;
     let activeChatId = chatId;
     if (!activeChatId) {
       try {
@@ -593,30 +640,73 @@ export function ChatPage() {
       if (index < 0) return [...current, userMessage, { id: assistantId, role: "assistant", content: "", streaming: true }];
       return [...current.slice(0, index), { ...current[index], content: text }, { id: assistantId, role: "assistant", content: "", streaming: true }];
     });
+    const started = Date.now();
     try {
       await runStream("/api/chat/stream", { chat_id: activeChatId, project_id: projectId, message: text, edit_message_id: editId, mode, skill: skill || null, action_scope: actionScope, access_level: accessLevel }, assistantId);
     } catch (error) {
-      if (isAbortError(error)) return;
-      setMessages((current) => current.map((message) => message.id === assistantId ? { ...message, content: error instanceof Error ? error.message : "Something went wrong reaching the server.", streaming: false, error: true } : message));
+      if (selectGenerationRef.current !== generation) return;
+      if (isAbortError(error) && stopRequestedRef.current) {
+        finishAssistant(assistantId, { content: "Stopped.", error: true });
+        setStatus(configured ? "Connected" : "Not configured");
+        return;
+      }
+      if (isAbortError(error) || error instanceof StreamIdleError) {
+        finishAssistant(assistantId, {
+          content: Date.now() - started >= 170000 ? "The chat reply timed out. Try again." : "The reply was cut off before it finished.",
+          error: true,
+        });
+        setStatus(configured ? "Connected" : "Not configured");
+        return;
+      }
+      finishAssistant(assistantId, { content: error instanceof Error ? error.message : "Something went wrong reaching the server.", error: true });
     } finally {
-      setSending(false);
+      if (selectGenerationRef.current === generation) {
+        setSending(false);
+        setMessages((current) =>
+          current.map((message) =>
+            message.id === assistantId && message.streaming
+              ? {
+                  ...message,
+                  streaming: false,
+                  content: message.content || "The reply was cut off before it finished.",
+                  error: !message.content,
+                }
+              : message,
+          ),
+        );
+      }
       inputRef.current?.focus();
     }
   };
 
   const executePlan = async () => {
     if (!pendingPlan || !chatId || sending) return;
+    const generation = selectGenerationRef.current;
     setSending(true);
+    stopRequestedRef.current = false;
     setPendingPlan(null);
     const assistantId = `assistant-${Date.now()}`;
     setMessages((current) => [...current, { id: assistantId, role: "assistant", content: "", streaming: true }]);
     try {
       await runStream("/api/chat/execute-plan", { chat_id: chatId, project_id: projectId, steps: pendingPlan.steps, action_scope: actionScope, access_level: accessLevel }, assistantId);
     } catch (error) {
-      if (isAbortError(error)) return;
-      setMessages((current) => current.map((message) => message.id === assistantId ? { ...message, content: error instanceof Error ? error.message : "The plan failed.", streaming: false, error: true } : message));
+      if (selectGenerationRef.current !== generation) return;
+      if (isAbortError(error) && stopRequestedRef.current) {
+        finishAssistant(assistantId, { content: "Stopped.", error: true });
+        return;
+      }
+      finishAssistant(assistantId, { content: error instanceof Error ? error.message : "The plan failed.", error: true });
     } finally {
-      setSending(false);
+      if (selectGenerationRef.current === generation) {
+        setSending(false);
+        setMessages((current) =>
+          current.map((message) =>
+            message.id === assistantId && message.streaming
+              ? { ...message, streaming: false, content: message.content || "The plan was cut off before it finished.", error: !message.content }
+              : message,
+          ),
+        );
+      }
     }
   };
 
@@ -741,7 +831,6 @@ export function ChatPage() {
               </div>}
               {showPlanApproval(message) && <div className="plan-actions"><div className="plan-list">{message.plan?.map((step) => <div className="plan-step" key={`${step.skill}-${step.objective}`}><strong>{prettyName(step.skill)}</strong><span>{step.objective}</span></div>)}</div><button className="primary" onClick={() => void executePlan()} disabled={sending}>Approve and execute</button></div>}
             </div>)}
-            {!sending && !chatLoading && messages.length > 0 && messages[messages.length - 1]?.role === "user" && <div className="message assistant"><div className="message-role">Assistant</div><div className="message-content"><MarkdownContent text="Working…" /></div></div>}
             {activeAction && <section className="action-activity" aria-live="polite">
               <div className="action-activity-head"><div className="action-activity-title"><span className="activity-icon">›_</span><div><span className="message-role">Provider activity</span><strong>{activeAction.target || "Provider operation"}</strong></div></div><div className="action-activity-meta"><span className={`activity-status ${activeAction.status}`}>{activeAction.status.replaceAll("_", " ")}</span><span className="action-provider">{activeAction.provider}</span></div></div>
               {activeAction.command_preview && <code className="action-command">{activeAction.command_preview}</code>}
@@ -755,7 +844,7 @@ export function ChatPage() {
             {slashOpen && slashMatches.length > 0 && <div className="slash-menu scroll">{slashMatches.map((item, index) => <button type="button" className={`slash-item${index === slashIndex ? " active" : ""}`} key={item.name} onClick={() => chooseSkill(item.name)}><strong>/{item.name}</strong><span>{item.description}</span></button>)}</div>}
             {suggestedSkill && <div className="suggest-bar"><span className="suggest-label">Suggested skill</span><button type="button" className="suggest-pill" onClick={acceptSuggestion}>{prettyName(suggestedSkill.name)}</button><span className="suggest-hint">Press Tab</span></div>}
             {editingMessageId && <div className="edit-context"><span>Editing your question</span><button type="button" onClick={() => { setEditingMessageId(null); setInput(""); inputRef.current?.focus(); }}>Cancel</button></div>}
-            <div className="composer-row"><textarea id="input" ref={inputRef} value={input} rows={1} style={{ minHeight: input.startsWith("Explain this finding") ? "156px" : undefined }} onChange={(event) => onInput(event.target.value)} onKeyDown={onKeyDown} placeholder="Describe your task, paste a pipeline / IaC / scan output, or type / to pick a skill…" /><button id="send-btn" type="submit" disabled={sending}>{sending ? "…" : "Send"}</button></div>
+            <div className="composer-row"><textarea id="input" ref={inputRef} value={input} rows={1} style={{ minHeight: input.startsWith("Explain this finding") ? "156px" : undefined }} onChange={(event) => onInput(event.target.value)} onKeyDown={onKeyDown} placeholder="Describe your task, paste a pipeline / IaC / scan output, or type / to pick a skill…" />{sending ? <button id="stop-btn" type="button" onClick={stopStream}>Stop</button> : <button id="send-btn" type="submit">Send</button>}</div>
             <div className="composer-controls"><label className="control"><span>Actions</span><ThemedSelect className="control-select" value={actionScope} ariaLabel="Actions" onChange={selectActionScope} options={[{ value: "read_only", label: "Read-only actions" }, { value: "write", label: "Write actions" }]} /></label><label className="control"><span>Access</span><ThemedSelect className="control-select" value={accessLevel} ariaLabel="Access" onChange={(value) => setAccessLevel(value as typeof accessLevel)} options={[{ value: "ask_approval", label: "Ask for approval" }, { value: "auto_approve", label: "Approve for me" }, { value: "full_access", label: "Full access" }]} /></label><span className={`action-scope-note${actionScope === "write" ? " write" : ""}`}>{actionScope === "write" ? "Write actions enabled for this request" : "Read-only actions"}</span><span className="composer-hint">{mode === "plan" ? "Plans are read-only until approved." : "Shift+Enter for a new line."}</span></div>
           </form>
         </main>

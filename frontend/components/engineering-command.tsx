@@ -66,16 +66,21 @@ export function EngineeringCommand({ projectId }: { projectId: string }) {
     setBusy(rec.id);
     setMessage("");
     try {
-      await api("/api/engineering/recommendations/accept", {
+      const result = await api<{ action?: string; count?: number }>("/api/engineering/recommendations/accept", {
         method: "POST",
         body: JSON.stringify({
           project_id: projectId,
           title: rec.title,
           reason: rec.reason,
           stage: "infrastructure",
+          action: rec.action || "",
         }),
       });
-      setMessage("Added to the delivery checklist.");
+      setMessage(
+        result.action === "generate_terraform"
+          ? `Generated ${result.count ?? 0} missing artifacts.`
+          : "Added to the delivery checklist.",
+      );
       await load();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not add task");
@@ -157,7 +162,7 @@ export function EngineeringCommand({ projectId }: { projectId: string }) {
                       disabled={busy === rec.id}
                       onClick={() => void accept(rec)}
                     >
-                      Add to Delivery Checklist
+                      {rec.action === "generate_terraform" ? "Generate artifacts" : "Add to Delivery Checklist"}
                     </button>
                   ) : null}
                 </li>

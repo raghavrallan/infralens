@@ -254,13 +254,19 @@ def build_environment_report(project_id: str, max_resources: int = 500) -> dict[
     sections.append("Resource inventory (name, type, resourceGroup, location):\n"
                     + _format_rows(inventory, limit=max_resources))
 
-    for label, query in _PROBES:
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _probe(item: tuple[str, str]) -> tuple[str, str]:
+        label, query = item
         try:
             rows = _run_query(token, subs, query)
+            return label, _format_rows(rows)
         except AzureApiError as exc:
-            sections.append(f"{label}:\n(could not evaluate: {exc})")
-            continue
-        sections.append(f"{label}:\n{_format_rows(rows)}")
+            return label, f"(could not evaluate: {exc})"
+
+    with ThreadPoolExecutor(max_workers=min(6, max(1, len(_PROBES)))) as pool:
+        for label, body in pool.map(_probe, _PROBES):
+            sections.append(f"{label}:\n{body}")
 
     text = "\n\n".join(sections)
     return {

@@ -99,13 +99,32 @@ def _terraform_available() -> bool:
     return shutil.which("terraform") is not None
 
 
+_PHASE_TIMEOUTS = {
+    "init": 300,
+    "validate": 180,
+    "plan": 600,
+    "apply": 1800,
+    "destroy": 1800,
+}
+
+
+def _decode_captured(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
 def run_local_phase(
     project_id: str,
     phase: str,
     *,
     name: str = "default",
     auto_approve: bool = False,
-    timeout: int = 300,
+    timeout: int | None = None,
+    env: dict[str, str] | None = None,
+    init_backend: bool = True,
 ) -> dict[str, Any]:
     """Run a local terraform phase when the binary is available (dev/control plane)."""
     if phase not in {"init", "validate", "plan", "apply", "destroy"}:
@@ -118,7 +137,14 @@ def run_local_phase(
     root = workspace_dir(project_id, name)
     argv = ["terraform", "-chdir=" + str(root), phase]
     if phase == "init":
-        argv.append("-input=false")
+        # Isolated plan/apply need the configured backend (local state).
+        # -backend=false leaves .terraform uninitialized and plan then fails
+        # with "Backend initialization required" against backend "local".
+        argv.extend(["-input=false", "-no-color"])
+        if init_backend:
+            argv.append("-reconfigure")
+        else:
+            argv.append("-backend=false")
     elif phase == "plan":
         argv.extend(["-input=false", "-no-color", "-out=tfplan"])
     elif phase in {"apply", "destroy"}:
@@ -127,15 +153,34 @@ def run_local_phase(
             argv.append("tfplan")
         elif auto_approve:
             argv.append("-auto-approve")
-    completed = subprocess.run(
-        argv,
-        shell=False,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        check=False,
-        env=os.environ.copy(),
-    )
+    limit = int(timeout) if timeout is not None else _PHASE_TIMEOUTS.get(phase, 300)
+    try:
+        completed = subprocess.run(
+            argv,
+            shell=False,
+            capture_output=True,
+            text=True,
+            timeout=limit,
+            check=False,
+            env=env if env is not None else os.environ.copy(),
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout = _decode_captured(exc.stdout)[:200000]
+        stderr = (
+            f"terraform {phase} timed out after {limit}s. " + _decode_captured(exc.stderr)
+        )[:200000]
+        result = {
+            "phase": phase,
+            "returncode": 124,
+            "stdout": stdout,
+            "stderr": stderr,
+            "workspace": str(root),
+            "timed_out": True,
+        }
+        if phase == "plan":
+            result["plan_summary"] = parse_plan_summary(stdout + "\n" + stderr)
+            result["blast_radius"] = blast_radius_for_plan(result["plan_summary"])
+        return result
     stdout = (completed.stdout or "")[:200000]
     stderr = (completed.stderr or "")[:200000]
     result = {
@@ -144,11 +189,95 @@ def run_local_phase(
         "stdout": stdout,
         "stderr": stderr,
         "workspace": str(root),
+        "timed_out": False,
     }
     if phase == "plan":
         result["plan_summary"] = parse_plan_summary(stdout + "\n" + stderr)
         result["blast_radius"] = blast_radius_for_plan(result["plan_summary"])
     return result
+
+
+def run_local_import(
+    project_id: str,
+    address: str,
+    resource_id: str,
+    *,
+    name: str = "default",
+    timeout: int = 180,
+    env: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Adopt an existing cloud resource into the isolated workspace state."""
+    if not _terraform_available():
+        raise RuntimeError("Terraform CLI is not installed on this host.")
+    if not re.match(r"^[A-Za-z0-9_./\[\]-]+$", address or ""):
+        raise ValueError("Invalid Terraform import address")
+    if not (resource_id or "").startswith("/"):
+        raise ValueError("Invalid cloud resource id")
+    root = workspace_dir(project_id, name)
+    argv = [
+        "terraform",
+        "-chdir=" + str(root),
+        "import",
+        "-input=false",
+        "-no-color",
+        address,
+        resource_id,
+    ]
+    completed = subprocess.run(
+        argv,
+        shell=False,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+        env=env if env is not None else os.environ.copy(),
+    )
+    return {
+        "phase": "import",
+        "address": address,
+        "returncode": completed.returncode,
+        "stdout": (completed.stdout or "")[:20000],
+        "stderr": (completed.stderr or "")[:20000],
+        "workspace": str(root),
+    }
+
+
+def run_local_state_rm(
+    project_id: str,
+    address: str,
+    *,
+    name: str = "default",
+    env: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    if not _terraform_available():
+        raise RuntimeError("Terraform CLI is not installed on this host.")
+    if not re.match(r"^[A-Za-z0-9_./\[\]-]+$", address or ""):
+        raise ValueError("Invalid Terraform state address")
+    root = workspace_dir(project_id, name)
+    completed = subprocess.run(
+        [
+            "terraform",
+            "-chdir=" + str(root),
+            "state",
+            "rm",
+            "-no-color",
+            address,
+        ],
+        shell=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+        env=env if env is not None else os.environ.copy(),
+    )
+    return {
+        "phase": "state_rm",
+        "address": address,
+        "returncode": completed.returncode,
+        "stdout": (completed.stdout or "")[:8000],
+        "stderr": (completed.stderr or "")[:8000],
+        "workspace": str(root),
+    }
 
 
 def _cloud_provider_for_project(project_id: str) -> str:

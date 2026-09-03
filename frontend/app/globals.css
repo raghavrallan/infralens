@@ -495,7 +495,7 @@ body.scroll-page .page {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: 2000;
   display: grid;
   place-items: center;
   padding: 24px;
@@ -2112,7 +2112,8 @@ select option:hover {
   border-color: var(--border-strong);
 }
 
-#send-btn {
+#send-btn,
+#stop-btn {
   background: var(--solid);
   color: var(--solid-text);
   border: none;
@@ -2124,6 +2125,12 @@ select option:hover {
   padding: 15px 26px;
   border-radius: var(--radius-lg);
   cursor: pointer;
+}
+
+#stop-btn {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
 }
 
 #send-btn:hover {
@@ -7703,6 +7710,49 @@ html[data-theme="dark"] .platform-role-badge.platform-dev {
 .eng-task-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .eng-blocked { color: #ea580c; }
 .eng-files, .eng-criteria { margin: 6px 0; padding-left: 16px; }
+.eng-file-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--primary);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+}
+.eng-file-view {
+  margin: 10px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.eng-file-view-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.eng-file-view pre {
+  margin: 0;
+  padding: 12px;
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 12px;
+  color: var(--text);
+}
+.tf-repair {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  max-height: 220px;
+  overflow: auto;
+}
+.tf-repair p {
+  margin: 0 0 6px;
+}
 .eng-memory-tools { display: flex; gap: 8px; margin-bottom: 12px; }
 .eng-memory-tools select, .eng-memory-tools input {
   flex: 1; background: var(--panel); border: 1px solid var(--border); color: var(--text);
@@ -7714,3 +7764,33 @@ html[data-theme="dark"] .platform-role-badge.platform-dev {
 @media (max-width: 820px) {
   .eng-split { grid-template-columns: 1fr; }
 }
+
+.arch-diagram {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: stretch;
+  margin: 12px 0;
+}
+.arch-diagram-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.arch-node {
+  min-width: 140px;
+  max-width: 200px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  display: grid;
+  gap: 4px;
+}
+.arch-node strong { font-size: 13px; }
+.arch-node span { font-size: 11px; color: var(--primary); text-transform: uppercase; letter-spacing: 0.04em; }
+.arch-node small { color: var(--muted); font-size: 12px; }
+.arch-arrow { color: var(--muted); font-size: 18px; }
+.arch-analysis { display: grid; gap: 8px; margin: 8px 0 0; }
+.arch-analysis h5 { margin: 0; font-size: 12px; text-transform: uppercase; color: var(--muted); }
+.arch-analysis ul { margin: 0; padding-left: 18px; font-size: 13px; }

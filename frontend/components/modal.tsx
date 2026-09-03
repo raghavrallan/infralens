@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
+import { createPortal } from "react-dom";
 
 export function Modal({ title, eyebrow, description, children, onClose, wide = false }: {
   title: string;
@@ -10,6 +11,10 @@ export function Modal({ title, eyebrow, description, children, onClose, wide = f
   onClose: () => void;
   wide?: boolean;
 }) {
+  const [host, setHost] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    setHost(document.body);
+  }, []);
   useEffect(() => {
     const handler = (event: KeyboardEvent) => event.key === "Escape" && onClose();
     document.addEventListener("keydown", handler);
@@ -24,7 +29,8 @@ export function Modal({ title, eyebrow, description, children, onClose, wide = f
       document.body.style.paddingRight = previousPaddingRight;
     };
   }, [onClose]);
-  return (
+  if (!host) return null;
+  return createPortal(
     <div className="modal-overlay open" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <div className={`modal${wide ? " modal-wide" : ""}`} role="dialog" aria-modal="true">
         <div className="modal-accent" />
@@ -35,7 +41,8 @@ export function Modal({ title, eyebrow, description, children, onClose, wide = f
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    host,
   );
 }
 

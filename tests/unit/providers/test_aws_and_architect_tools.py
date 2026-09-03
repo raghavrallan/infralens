@@ -44,8 +44,9 @@ def test_run_skill_allowlist_and_preview_gate():
         assert tools.run_skill("iac_reviewer", {"input": "x"}) == "ok"
     gate = tools.preview_gate("config_code_change", "low", "dev")
     assert gate["gate"]
-    with patch("app.platform.memory.list_precedent", return_value=[]):
-        assert "No engineering precedent" in tools.search_precedent("p1")
+    with patch("app.platform.engineering.knowledge.architect_context", return_value={}):
+        with patch("app.platform.memory.list_precedent", return_value=[]):
+            assert "No engineering precedent" in tools.search_precedent("p1")
 
 
 @pytest.mark.unit

@@ -1,6 +1,8 @@
 """Terraform pipeline, CI/CD watchers, debug retry, and deploy failure hook."""
 from __future__ import annotations
 
+import shutil
+import subprocess
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -23,6 +25,72 @@ def test_run_local_phase_rejects_unknown_and_missing_binary(tmp_path, monkeypatc
         with patch("app.execution.terraform_runner.subprocess.run", return_value=completed):
             result = terraform_runner.run_local_phase("p1", "plan")
     assert result["plan_summary"]["add"] == 1
+    captured: dict[str, list[str]] = {}
+
+    def fake_init(argv, **_kwargs):
+        captured["argv"] = list(argv)
+        return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+    with patch("app.execution.terraform_runner._terraform_available", return_value=True):
+        with patch("app.execution.terraform_runner.subprocess.run", side_effect=fake_init):
+            terraform_runner.run_local_phase("p1", "init")
+    assert captured["argv"][2] == "init"
+    assert "-reconfigure" in captured["argv"]
+    assert "-backend=false" not in captured["argv"]
+    with patch("app.execution.terraform_runner._terraform_available", return_value=True):
+        with patch("app.execution.terraform_runner.subprocess.run", side_effect=fake_init):
+            terraform_runner.run_local_phase("p1", "init", init_backend=False)
+    assert "-backend=false" in captured["argv"]
+    assert "-reconfigure" not in captured["argv"]
+
+
+@pytest.mark.unit
+def test_run_local_phase_apply_timeout_is_result_not_raise(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.execution.terraform_runner._WORKSPACE_ROOT", tmp_path)
+    with patch("app.execution.terraform_runner._terraform_available", return_value=True):
+        with patch(
+            "app.execution.terraform_runner.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd=["terraform", "apply"], timeout=1, output="still applying"),
+        ):
+            result = terraform_runner.run_local_phase("p1", "apply", timeout=1)
+    assert result["timed_out"] is True
+    assert result["returncode"] == 124
+    assert "timed out after 1s" in result["stderr"]
+    assert "still applying" in result["stdout"]
+
+
+@pytest.mark.unit
+def test_reconfigure_unblocks_plan_after_backend_false_init(tmp_path, monkeypatch):
+    if shutil.which("terraform") is None:
+        pytest.skip("terraform CLI is not installed")
+    monkeypatch.setattr("app.execution.terraform_runner._WORKSPACE_ROOT", tmp_path)
+    root = terraform_runner.write_files(
+        "p1",
+        {
+            "providers.tf": 'terraform {\n  required_version = ">= 1.0.0"\n}\n',
+            "backend.tf": 'terraform {\n  backend "local" {\n    path = "terraform.tfstate"\n  }\n}\n',
+        },
+        "run1",
+    )
+    stale = subprocess.run(
+        ["terraform", f"-chdir={root}", "init", "-backend=false", "-input=false", "-no-color"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert stale.returncode == 0
+    blocked = subprocess.run(
+        ["terraform", f"-chdir={root}", "plan", "-input=false", "-no-color"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert blocked.returncode != 0
+    assert "Backend initialization required" in (blocked.stderr or "") + (blocked.stdout or "")
+    init = terraform_runner.run_local_phase("p1", "init", name="run1")
+    assert init["returncode"] == 0
+    plan = terraform_runner.run_local_phase("p1", "plan", name="run1")
+    assert plan["returncode"] in {0, 2}
 
 
 @pytest.mark.unit

@@ -18,7 +18,10 @@ RECURSION_LIMIT = 12
 
 def _json_chat(system: str, user: str, name: str) -> dict[str, Any]:
     if not app_config.get_azure_config().configured:
-        return {}
+        raise RuntimeError(
+            "Azure OpenAI is not configured. Open Settings and add the platform "
+            "endpoint and API key."
+        )
     try:
         completion = azure_client.chat(
             [
@@ -31,9 +34,11 @@ def _json_chat(system: str, user: str, name: str) -> dict[str, Any]:
         )
         content = completion.choices[0].message.content or "{}"
         parsed = json.loads(content)
-        return parsed if isinstance(parsed, dict) else {}
-    except Exception:
-        return {}
+    except Exception as exc:
+        raise RuntimeError(f"Azure OpenAI request failed ({name}): {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise RuntimeError(f"Azure OpenAI returned a non-object JSON response ({name})")
+    return parsed
 
 
 def _node_prompt(name: str, state: ArchitectState) -> str:
@@ -75,13 +80,23 @@ def explore(state: ArchitectState, emit: Emit) -> ArchitectState:
     inventory = tools.get_cloud_inventory(project_id)
     empty = tools.inventory_is_empty(inventory)
     state["mode"] = "greenfield" if empty else "brownfield"
-    evidence = [inventory, tools.search_precedent(project_id)]
+    emit({"type": "status", "text": "Reading mapped repository and live inventory"})
+    code = tools.get_code_artifacts(project_id)
+    from app.agents.solution_architect.discovery import discover
+
+    state["discovery"] = discover(
+        project_id=project_id,
+        inventory=inventory,
+        code=code,
+        objective=state.get("objective") or "",
+        seed=state.get("seed_context") or "",
+    )
+    evidence = [inventory, code, tools.search_precedent(project_id)]
     if state.get("seed_context"):
         evidence.insert(0, str(state.get("seed_context"))[:12000])
     if state.get("tier") in {"T2", "T3"}:
         emit({"type": "status", "text": "Gathering cost and code evidence"})
         evidence.append(tools.get_cost_report(project_id, state.get("objective") or ""))
-        evidence.append(tools.get_code_artifacts(project_id))
         if "pci" in (state.get("objective") or "").lower() or "compliance" in (state.get("constraints") or "").lower():
             evidence.append(
                 tools.run_skill(
@@ -103,7 +118,11 @@ def explore(state: ArchitectState, emit: Emit) -> ArchitectState:
             )
     parsed = _json_chat(
         _node_prompt("architect-explore", state),
-        "\n\n".join(evidence)[:20000],
+        (
+            "Discovery:\n"
+            f"{json.dumps(state.get('discovery') or {}, default=str)[:4000]}\n\n"
+            + "\n\n".join(evidence)
+        )[:20000],
         "architect-explore",
     )
     if parsed.get("mode") in {"greenfield", "brownfield"}:
@@ -133,30 +152,18 @@ def design(state: ArchitectState, emit: Emit) -> ArchitectState:
         )
     parsed = _json_chat(
         _node_prompt("architect-design", state),
+        f"Discovery:\n{json.dumps(state.get('discovery') or {}, default=str)[:4000]}\n\n"
         f"Notes:\n{state.get('exploration_notes')}\n\nLLD:\n{lld[:8000]}\n\n"
         f"Assumptions:\n{state.get('assumptions')}",
         "architect-design",
     )
     candidates = parsed.get("candidates") if isinstance(parsed.get("candidates"), list) else []
     if not candidates:
-        candidates = [
-            {
-                "pillar": "data_architecture",
-                "title": "Managed queue + existing API",
-                "recommended": True,
-                "change": "Add a managed job queue beside the current API.",
-                "risk_class": "config_code_change",
-                "blast_radius": "low" if state.get("tier") == "T1" else "medium",
-                "options_considered": [
-                    {"name": "Managed queue", "tradeoffs": "Operationally light"},
-                    {"name": "Self-hosted broker", "tradeoffs": "More control, more ops"},
-                ],
-                "consequences": "API gains async work without a platform rewrite.",
-                "justified": True,
-            }
-        ]
+        from app.agents.solution_architect.model import fallback_candidates
+
+        candidates = fallback_candidates(state)
     state["candidates"] = candidates
-    state["mermaid"] = str(parsed.get("mermaid") or _default_mermaid(state))
+    state["mermaid"] = str(parsed.get("mermaid") or mermaid_from_state(state))
     state["hld"] = str(parsed.get("hld_outline") or "")
     return state
 
@@ -272,6 +279,9 @@ def finalize(state: ArchitectState, emit: Emit) -> ArchitectState:
             )
         except Exception:
             gated = list(state.get("decisions") or [])
+        from app.agents.solution_architect.model import build_architecture
+
+        state["architecture"] = build_architecture(state)
         try:
             from app.platform.engineering.generate import apply_architect_result
 
@@ -286,7 +296,8 @@ def finalize(state: ArchitectState, emit: Emit) -> ArchitectState:
                 delivery_run_id=delivery_id,
             )
         except Exception:
-            pass
+            if state.get("source") == "delivery":
+                raise
         state["hld"] = _render_hld(state, gated)
         state["reply"] = state["hld"]
         governance.upsert_run(status="succeeded", **{**run_kwargs, "checkpoint": dict(state)})
@@ -299,21 +310,21 @@ def finalize(state: ArchitectState, emit: Emit) -> ArchitectState:
         raise
 
 
+def mermaid_from_state(state: ArchitectState) -> str:
+    from app.agents.solution_architect.model import mermaid_from_discovery
+
+    return mermaid_from_discovery(state)
+
+
 def _default_mermaid(state: ArchitectState) -> str:
-    label = (state.get("objective") or "system")[:40].replace('"', "")
-    return (
-        "flowchart LR\n"
-        f'  users[Users] --> api[API / {label}]\n'
-        "  api --> queue[Job queue]\n"
-        "  api --> db[(Data store)]\n"
-        "  queue --> workers[Workers]\n"
-        "  workers --> db\n"
-    )
+    return mermaid_from_state(state)
 
 
 def _render_hld(state: ArchitectState, gated: list[dict[str, Any]]) -> str:
     assumptions = state.get("assumptions") or []
-    mermaid = state.get("mermaid") or _default_mermaid(state)
+    mermaid = state.get("mermaid") or mermaid_from_state(state)
+    architecture = state.get("architecture") if isinstance(state.get("architecture"), dict) else {}
+    analysis = architecture.get("analysis") if isinstance(architecture.get("analysis"), dict) else {}
     lines = [
         f"# Architecture proposal ({state.get('tier')}, {state.get('mode')})",
         "",
@@ -325,10 +336,40 @@ def _render_hld(state: ArchitectState, gated: list[dict[str, Any]]) -> str:
         lines.extend(f"- {item}" for item in assumptions)
     else:
         lines.append("- None recorded.")
+    if architecture.get("cloud"):
+        lines.extend(
+            [
+                "",
+                "## Recommended platform",
+                f"- Cloud: {architecture.get('cloud')}",
+                f"- Mode: {architecture.get('mode') or state.get('mode')}",
+                f"- IaC: {architecture.get('iac_strategy') or 'Terraform via PR'}",
+            ]
+        )
+    components = architecture.get("components") or []
+    if components:
+        lines.extend(["", "## Components"])
+        for item in components:
+            lines.append(
+                f"- **{item.get('name')}** ({item.get('service')}): {item.get('purpose')}"
+            )
+            if item.get("reason") and item.get("reason") != item.get("purpose"):
+                lines.append(f"  - Why: {item.get('reason')}")
+    if analysis:
+        lines.extend(["", "## Why this design"])
+        for key in ("brownfield", "security", "scaling", "cost", "availability"):
+            value = analysis.get(key)
+            if isinstance(value, list):
+                lines.append(f"### {key.replace('_', ' ').title()}")
+                lines.extend(f"- {item}" for item in value)
+            elif value:
+                lines.append(f"- {value}")
     lines.extend(["", "## Context diagram", "", "```mermaid", mermaid.strip(), "```", "", "## ADRs"])
     for item in gated or state.get("decisions") or []:
         lines.append(f"### {item.get('title')}")
         lines.append(item.get("decision") or item.get("change") or "")
+        if item.get("consequences"):
+            lines.append(f"_Why: {item.get('consequences')}_")
         if item.get("gate") or item.get("gate_decision"):
             lines.append(f"_Gate: {item.get('gate') or item.get('gate_decision')}_")
         lines.append("")
@@ -403,14 +444,34 @@ def _initial_state(args: dict[str, Any], chat_id: str) -> ArchitectState:
 
 
 def stream_architect(args: dict[str, Any], *, chat_id: str) -> Iterator[dict[str, Any]]:
-    events: list[dict[str, Any]] = []
+    import threading
+    from queue import SimpleQueue
+
+    events: SimpleQueue = SimpleQueue()
+    holder: dict[str, Any] = {}
 
     def emit(event: dict[str, Any]) -> None:
-        events.append(event)
+        events.put(event)
 
-    state = run_pipeline(_initial_state(args, chat_id), emit)
-    for event in events:
-        yield event
+    def runner() -> None:
+        try:
+            holder["state"] = run_pipeline(_initial_state(args, chat_id), emit)
+        except Exception as exc:  # noqa: BLE001
+            holder["error"] = exc
+        finally:
+            events.put(None)
+
+    thread = threading.Thread(target=runner, name="architect-stream", daemon=True)
+    thread.start()
+    while True:
+        item = events.get()
+        if item is None:
+            break
+        yield item
+    thread.join(timeout=2)
+    if holder.get("error"):
+        raise holder["error"]
+    state = holder.get("state") or {}
     if state.get("awaiting_input"):
         question = state.get("pending_question") or state.get("reply") or "Need one clarification before designing."
         yield {"type": "delta", "text": question}
@@ -428,6 +489,8 @@ def stream_architect(args: dict[str, Any], *, chat_id: str) -> Iterator[dict[str
     }
     if state.get("plan_only"):
         payload["plan"] = state.get("plan_steps") or []
+    payload["architecture"] = state.get("architecture") or {}
+    payload["mermaid"] = state.get("mermaid") or ""
     yield payload
 
 

@@ -263,6 +263,27 @@ def render_recent_context(
     return "\n".join(lines)[:MAX_RECENT_CONTEXT_CHARS].rstrip()
 
 
+def _project_engineering_memory(project_id: Optional[str]) -> str:
+    """Project-level decisions/tasks so chat skills can recall prior architecture."""
+    if not project_id:
+        return ""
+    try:
+        from app.platform.engineering import tasks as task_store
+        from app.platform.engineering.knowledge import architect_context
+
+        ctx = architect_context(project_id)
+        prompt = str(ctx.get("prompt") or "").strip()
+        tasks = task_store.list_tasks(project_id)
+        done = sum(1 for item in tasks if item.get("status") == "completed")
+        titles = ", ".join(str(item.get("title") or "") for item in tasks[:12] if item.get("title"))
+        parts = [prompt] if prompt else []
+        if tasks:
+            parts.append(f"DELIVERY CHECKLIST: {done}/{len(tasks)} completed. {titles}")
+        return "\n".join(parts).strip()
+    except Exception:
+        return ""
+
+
 def get_model_context(
     chat_id: str,
     current_message: Optional[str] = None,
@@ -281,6 +302,9 @@ def get_model_context(
             "",
         )
     result = render_model_context(memory, current_message)
+    project_block = _project_engineering_memory(project_id)
+    if project_block:
+        result.insert(0, {"role": "system", "content": _clip(project_block, MAX_CONTEXT_CHARS)})
     recent = render_recent_context(transcript, current_message)
     if recent:
         recent_message = {"role": "system", "content": recent}

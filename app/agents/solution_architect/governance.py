@@ -124,6 +124,8 @@ def list_runs(project_id: str, limit: int = 20) -> list[dict[str, Any]]:
             decisions = session.scalars(
                 select(ArchitectureDecision).where(ArchitectureDecision.run_id == row.id)
             )
+            checkpoint = dict(row.checkpoint or {})
+            architecture = checkpoint.get("architecture") if isinstance(checkpoint.get("architecture"), dict) else {}
             result.append(
                 {
                     "id": row.id,
@@ -136,6 +138,16 @@ def list_runs(project_id: str, limit: int = 20) -> list[dict[str, Any]]:
                     "status": row.status,
                     "created_at": row.created_at.isoformat() if row.created_at else None,
                     "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                    "mermaid": architecture.get("mermaid") or checkpoint.get("mermaid") or "",
+                    "architecture": {
+                        "cloud": architecture.get("cloud") or "",
+                        "stack": architecture.get("stack") or {},
+                        "iac_strategy": architecture.get("iac_strategy") or "",
+                        "components": architecture.get("components") or [],
+                        "analysis": architecture.get("analysis") or {},
+                    }
+                    if architecture
+                    else None,
                     "decisions": [
                         {
                             "id": item.id,

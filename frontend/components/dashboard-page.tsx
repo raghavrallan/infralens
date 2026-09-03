@@ -17,6 +17,7 @@ import { DeliveryChecklist } from "./delivery-checklist";
 import { BreakGlassPanel } from "./break-glass-panel";
 import { MemoryStrip } from "./memory-strip";
 import { EngineeringCommand } from "./engineering-command";
+import { ArchitectureDiagram } from "./architecture-diagram";
 import { getStoredUser } from "../lib/auth";
 
 type Summary = Record<string, unknown>;
@@ -84,6 +85,14 @@ export function DashboardPage() {
     status?: string;
     source?: string;
     updated_at?: string;
+    mermaid?: string;
+    architecture?: {
+      cloud?: string;
+      stack?: { frameworks?: string[]; languages?: string[] };
+      components?: Array<{ name?: string; service?: string; purpose?: string }>;
+      iac_strategy?: string;
+      analysis?: { brownfield?: string; security?: string[]; cost?: string[] };
+    } | null;
     decisions?: Array<{ id: string; title?: string; gate_decision?: string }>;
   }>>([]);
   const [severity, setSeverity] = useState("");
@@ -92,6 +101,7 @@ export function DashboardPage() {
   const [timeRange, setTimeRange] = useState("all");
   const [updated, setUpdated] = useState<Date | null>(null);
   const [loading, setLoading] = useState(true);
+  const [azureConfigured, setAzureConfigured] = useState<boolean | null>(null);
   const requestRef = useRef(0);
   const [workflowModal, setWorkflowModal] = useState<
     Workflow | null | undefined
@@ -175,6 +185,9 @@ export function DashboardPage() {
     void Promise.all([
       loadProjects(),
       api<Catalog>("/api/intelligence/catalog").then(setCatalog),
+      api<{ azure_configured: boolean }>("/api/health")
+        .then((health) => setAzureConfigured(health.azure_configured))
+        .catch(() => setAzureConfigured(false)),
     ]);
   }, [loadProjects]);
   useEffect(() => {
@@ -389,7 +402,10 @@ function getModuleIcon(key: string) {
             </span>
             <button
               className="ghost"
-              onClick={() => void loadData()}
+              onClick={() => {
+                void loadData();
+                window.dispatchEvent(new Event("infralens-refresh"));
+              }}
               disabled={!projectId}
             >
               Refresh
@@ -409,6 +425,13 @@ function getModuleIcon(key: string) {
             <strong>{activeModuleLabel}</strong>
           </div>
           <p>{activeModuleDescription}</p>
+          {azureConfigured === false ? (
+            <p className="form-msg">
+              Platform Azure OpenAI is not configured. Chat, Solution Architect, and
+              scheduled workflows will fail until you add the endpoint and API key in{" "}
+              <a href="/settings/">Settings</a>.
+            </p>
+          ) : null}
           {activeModule?.skills?.length ? (
             <div className="module-definition-skills">
               {activeModule.skills.map((skill) => (
@@ -579,11 +602,29 @@ function getModuleIcon(key: string) {
                       <span className="finding-meta">{item.status} · {item.source}</span>
                     </div>
                     <h4>{item.objective || "Architecture run"}</h4>
+                    {item.architecture?.cloud ? (
+                      <p className="finding-meta">
+                        {item.architecture.cloud}
+                        {(item.architecture.stack?.frameworks || []).length
+                          ? ` · ${(item.architecture.stack?.frameworks || []).join(", ")}`
+                          : ""}
+                      </p>
+                    ) : null}
+                    <ArchitectureDiagram components={item.architecture?.components} />
+                    {item.architecture?.analysis?.brownfield ? (
+                      <p className="finding-evidence">{item.architecture.analysis.brownfield}</p>
+                    ) : null}
                     {(item.decisions || []).map((decision) => (
                       <p key={decision.id} className="finding-evidence">
                         {decision.title} {decision.gate_decision ? `· ${decision.gate_decision}` : ""}
                       </p>
                     ))}
+                    {item.mermaid ? (
+                      <details>
+                        <summary>Context diagram source</summary>
+                        <pre style={{ whiteSpace: "pre-wrap", fontSize: 12 }}>{item.mermaid}</pre>
+                      </details>
+                    ) : null}
                   </article>
                 ))}
               </div>

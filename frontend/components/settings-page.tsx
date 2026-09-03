@@ -297,10 +297,20 @@ export function SettingsPage() {
       );
     }
   }, []);
+  const applyAzureConfig = (data: Partial<typeof azure>) => {
+    setAzure((current) => ({
+      ...current,
+      ...data,
+      endpoint: data.endpoint ?? current.endpoint,
+      api_key: data.api_key ?? "",
+      deployment: data.deployment ?? current.deployment,
+      api_version: data.api_version ?? current.api_version,
+    }));
+  };
   useEffect(() => {
     void loadProjects();
     void api<typeof azure>("/api/config/azure-openai")
-      .then(setAzure)
+      .then(applyAzureConfig)
       .catch((error) => {
         setAzureMessage(
           error instanceof Error ? error.message : "Could not load Azure OpenAI config",
@@ -392,7 +402,7 @@ export function SettingsPage() {
       }),
     });
     setAzureMessage("Saved.");
-    setAzure(await api<typeof azure>("/api/config/azure-openai"));
+    applyAzureConfig(await api<typeof azure>("/api/config/azure-openai"));
   };
   const saveRepos = async () => {
     await api(`/api/projects/${projectId}/repos`, {
@@ -509,7 +519,7 @@ export function SettingsPage() {
               <label>
                 Endpoint
                 <input
-                  value={azure.endpoint}
+                  value={azure.endpoint ?? ""}
                   disabled={!azure.editable}
                   onChange={(event) =>
                     setAzure((current) => ({
@@ -524,7 +534,7 @@ export function SettingsPage() {
                 API key
                 <input
                   type="password"
-                  value={azure.api_key}
+                  value={azure.api_key ?? ""}
                   disabled={!azure.editable}
                   onChange={(event) =>
                     setAzure((current) => ({
@@ -540,7 +550,7 @@ export function SettingsPage() {
               <label>
                 Deployment name
                 <input
-                  value={azure.deployment}
+                  value={azure.deployment ?? ""}
                   disabled={!azure.editable}
                   onChange={(event) =>
                     setAzure((current) => ({
@@ -553,7 +563,7 @@ export function SettingsPage() {
               <label>
                 API version
                 <input
-                  value={azure.api_version}
+                  value={azure.api_version ?? ""}
                   disabled={!azure.editable}
                   onChange={(event) =>
                     setAzure((current) => ({
