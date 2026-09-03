@@ -1,0 +1,146 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: devsecops-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: devsecops
+      POSTGRES_PASSWORD: devsecops
+      POSTGRES_DB: devsecops
+    ports:
+      - "${POSTGRES_HOST_PORT:-5544}:5432"
+    volumes:
+      - devsecops_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devsecops -d devsecops"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: devsecops-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_HOST_PORT:-6399}:6379"
+    volumes:
+      - devsecops_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    profiles: ["container-app"]
+    # Set PIP_TRUSTED_HOSTS only for a workstation whose Docker proxy CA is
+    # not installed. Production builds use normal certificate validation.
+    build:
+      context: .
+      args:
+        PIP_TRUSTED_HOSTS: ${PIP_TRUSTED_HOSTS:-}
+    container_name: devsecops-api
+    restart: unless-stopped
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "${API_HOST_PORT:-8000}:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg2://devsecops:devsecops@postgres:5432/devsecops
+      REDIS_URL: redis://redis:6379/0
+      EXECUTOR_SERVICE_KEY: ${EXECUTOR_SERVICE_KEY:-dev-executor-key}
+      # Bootstrap-only for empty users table; login always checks hashed password in DB.
+      AUTH_USERNAME: ${AUTH_USERNAME:-admin}
+      AUTH_PASSWORD: ${AUTH_PASSWORD:-infralens}
+      AUTH_DISPLAY_NAME: ${AUTH_DISPLAY_NAME:-Admin}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:?set AUTH_JWT_SECRET in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    profiles: ["container-app"]
+    build:
+      context: .
+      args:
+        PIP_TRUSTED_HOSTS: ${PIP_TRUSTED_HOSTS:-}
+    container_name: devsecops-worker
+    restart: unless-stopped
+    command: rq worker intelligence --worker-class app.intelligence.worker.Worker --url redis://redis:6379/0
+    environment:
+      DATABASE_URL: postgresql+psycopg2://devsecops:devsecops@postgres:5432/devsecops
+      REDIS_URL: redis://redis:6379/0
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:?set AUTH_JWT_SECRET in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  azure-executor:
+    profiles: ["container-app"]
+    build:
+      context: .
+      dockerfile: executors/azure/Dockerfile
+      args:
+        PIP_TRUSTED_HOSTS: ${PIP_TRUSTED_HOSTS:-}
+    container_name: devsecops-azure-executor
+    restart: unless-stopped
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      CONTROL_PLANE_URL: http://api:8000
+      EXECUTOR_SERVICE_KEY: dev-executor-key
+      EXECUTOR_PROVIDER: azure
+      EXECUTOR_ORG_ID: ${EXECUTOR_ORG_ID:-00000000-0000-4000-8000-000000000001}
+    depends_on:
+      api:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
+  aws-executor:
+    profiles: ["container-app"]
+    build:
+      context: .
+      dockerfile: executors/aws/Dockerfile
+      args:
+        PIP_TRUSTED_HOSTS: ${PIP_TRUSTED_HOSTS:-}
+    container_name: devsecops-aws-executor
+    restart: unless-stopped
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      CONTROL_PLANE_URL: http://api:8000
+      EXECUTOR_SERVICE_KEY: dev-executor-key
+      EXECUTOR_PROVIDER: aws
+      EXECUTOR_ORG_ID: ${EXECUTOR_ORG_ID:-00000000-0000-4000-8000-000000000001}
+    depends_on:
+      api:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
+  github-executor:
+    profiles: ["container-app"]
+    build:
+      context: .
+      dockerfile: executors/github/Dockerfile
+      args:
+        PIP_TRUSTED_HOSTS: ${PIP_TRUSTED_HOSTS:-}
+    container_name: devsecops-github-executor
+    restart: unless-stopped
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      CONTROL_PLANE_URL: http://api:8000
+      EXECUTOR_SERVICE_KEY: dev-executor-key
+      EXECUTOR_PROVIDER: github
+      EXECUTOR_ORG_ID: ${EXECUTOR_ORG_ID:-00000000-0000-4000-8000-000000000001}
+    depends_on:
+      api:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
+volumes:
+  devsecops_pgdata:
+  devsecops_redisdata:
