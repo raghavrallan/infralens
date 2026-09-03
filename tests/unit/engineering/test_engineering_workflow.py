@@ -246,15 +246,16 @@ def test_get_artifact_full_returns_complete_text():
 
 @pytest.mark.unit
 def test_generated_stubs_are_valid_enough_to_attach():
-    tf = _stub_artifact("terraform", "network.tf", "Create VPC", "")
+    with patch("app.platform.engineering.iac_generate.load_architecture", return_value={}):
+        tf = _stub_artifact("terraform", "network.tf", "Create VPC", "")
+        providers = _stub_artifact("terraform", "providers.tf", "Terraform backend", "")
+        yml = _stub_artifact("yaml", "ci.yml", "CI/CD", "")
+        py = _stub_artifact("python", "test_smoke.py", "Tests", "")
+        md = _stub_artifact("document", "architecture.md", "Docs", "Write the HLD")
     assert "azurerm_virtual_network" in tf
-    providers = _stub_artifact("terraform", "providers.tf", "Terraform backend", "")
     assert "required_providers" in providers
-    yml = _stub_artifact("yaml", "ci.yml", "CI/CD", "")
     assert "jobs:" in yml
-    py = _stub_artifact("python", "test_smoke.py", "Tests", "")
     assert "def test_architecture_contract" in py
-    md = _stub_artifact("document", "architecture.md", "Docs", "Write the HLD")
     assert "Docs" in md
 
 
@@ -417,15 +418,34 @@ def test_build_health_aggregates_mocked_project_state():
             with patch("app.platform.engineering.health.artifact_store.list_artifacts", return_value=[{"kind": "terraform"}]):
                 with patch("app.platform.engineering.health._open_risks", return_value=[]):
                     with patch("app.platform.engineering.health._pending_adrs", return_value=2):
-                        from app.platform.engineering.health import build_health
+                        with patch("app.platform.engineering.health._delivery_architecture_status", return_value=""):
+                            from app.platform.engineering.health import build_health
 
-                        snapshot = build_health("proj-1")
+                            snapshot = build_health("proj-1")
     assert snapshot["bars"]["architecture"]["percent"] == 100
     assert snapshot["bars"]["infrastructure"]["percent"] == 0
     assert snapshot["task_counts"]["total"] == 2
     assert snapshot["pending_adrs"] == 2
     assert snapshot["memory_count"] == 1
     assert "summary" in snapshot
+
+
+@pytest.mark.unit
+def test_delivery_architecture_status_reads_latest_run():
+    from app.platform.engineering.health import _delivery_architecture_status
+
+    class Session:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def scalar(self, *_args, **_kwargs):
+            return SimpleNamespace(artifacts={"architecture_status": "ready"})
+
+    with patch("app.platform.engineering.health.SessionLocal", return_value=Session()):
+        assert _delivery_architecture_status("proj-1") == "ready"
 
 
 @pytest.mark.unit
@@ -537,7 +557,11 @@ def test_generate_missing_for_project_writes_required_files():
             return_value={"validation_status": "passed"},
         ) as save:
             with patch("app.platform.engineering.iac_workspace.sync", return_value={"workspace": "w"}):
-                out = generate_missing_for_project("p1", actor="admin")
+                with patch(
+                    "app.platform.engineering.iac_generate.load_architecture",
+                    return_value={"cloud": "azure"},
+                ):
+                    out = generate_missing_for_project("p1", actor="admin")
     assert out["count"] == 1
     assert save.call_args.kwargs["name"] == "network.tf"
     assert "azurerm_" in save.call_args.kwargs["content_text"]

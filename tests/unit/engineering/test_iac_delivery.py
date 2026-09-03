@@ -42,9 +42,9 @@ def test_workspace_name_and_cloud_env_are_project_scoped(monkeypatch):
         ),
     ):
         env = iac_workspace.project_cloud_env("default")
+        other = iac_workspace.project_cloud_env("other")
     assert env["ARM_CLIENT_SECRET"] == "proj-secret"
     assert env["ARM_SUBSCRIPTION_ID"] == "sub"
-    other = iac_workspace.project_cloud_env("other")
     assert "ARM_CLIENT_SECRET" not in other
     assert other.get("PATH")
 

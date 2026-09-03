@@ -1,6 +1,9 @@
 """Discovery and structured architecture model."""
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import patch
+
 from app.agents.solution_architect.discovery import discover
 from app.agents.solution_architect.model import (
     build_architecture,
@@ -8,7 +11,7 @@ from app.agents.solution_architect.model import (
     mermaid_from_discovery,
 )
 from app.platform.engineering.generate import _select_specs
-from app.platform.engineering.iac_generate import generate_artifact_content
+from app.platform.engineering.iac_generate import generate_artifact_content, load_architecture
 
 
 def test_discover_selects_aws_when_azure_is_absent():
@@ -111,13 +114,36 @@ def test_select_specs_prefers_architecture_components():
     assert any("documentation" in title.lower() for title in titles)
 
 
+def test_load_architecture_reads_checkpoint_without_live_tables():
+    class Session:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def get(self, *_args, **_kwargs):
+            return None
+
+        def scalar(self, *_args, **_kwargs):
+            return SimpleNamespace(
+                checkpoint={"architecture": {"cloud": "azure", "components": [{"name": "VNet"}]}}
+            )
+
+    with patch("app.platform.engineering.iac_generate.SessionLocal", return_value=Session()):
+        model = load_architecture("p1")
+    assert model["cloud"] == "azure"
+    assert model["components"][0]["name"] == "VNet"
+
+
 def test_generate_artifact_content_is_real_azure_hcl():
-    providers = generate_artifact_content(
-        name="providers.tf", kind="terraform", title="providers", description="", project_id=""
-    )
-    network = generate_artifact_content(
-        name="network.tf", kind="terraform", title="network", description="", project_id=""
-    )
+    with patch("app.platform.engineering.iac_generate.load_architecture", return_value={}):
+        providers = generate_artifact_content(
+            name="providers.tf", kind="terraform", title="providers", description="", project_id=""
+        )
+        network = generate_artifact_content(
+            name="network.tf", kind="terraform", title="network", description="", project_id=""
+        )
     assert "hashicorp/azurerm" in providers
     assert "azurerm_resource_group" in providers
     assert "azurerm_virtual_network" in network
