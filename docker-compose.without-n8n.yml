@@ -1,0 +1,19 @@
+# Optional: run the app stack WITHOUT on-prem n8n (forks / laptop only).
+# Our server deploy does NOT use this — gha-deploy.sh always enables profile "n8n".
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.without-n8n.yml --profile container-app up -d --build
+#
+# Or simply omit --profile n8n:
+#   docker compose --profile container-app up -d
+
+services:
+  api:
+    environment:
+      N8N_WEBHOOKS_ENABLED: ${N8N_WEBHOOKS_ENABLED:-false}
+      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-}
+
+  worker:
+    environment:
+      N8N_WEBHOOKS_ENABLED: ${N8N_WEBHOOKS_ENABLED:-false}
+      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-}
