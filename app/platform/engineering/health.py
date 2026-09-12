@@ -9,6 +9,9 @@ from app.core.db import Approval, Finding, ProjectRisk, SessionLocal
 from app.platform.engineering import recommendations as rec_engine
 from app.platform.engineering import sync as eng_sync
 from app.platform.engineering import tasks as task_store
+from app.platform.engineering.recommendations import (
+    heuristic_recommendations as _recommendations,
+)
 
 STAGE_HEALTH = (
     ("architecture", ("architecture", "requirements")),
@@ -224,7 +227,10 @@ def _blockers(
     return out[:12]
 
 
-def _timeline(items: list[dict[str, Any]], delivery: dict[str, Any] | None) -> list[dict[str, Any]]:
+def _timeline(
+    items: list[dict[str, Any]],
+    delivery: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     order = ["requirements", "architecture", "infrastructure", "security", "testing", "cicd", "deployment"]
     out = []
     for stage in order:

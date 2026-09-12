@@ -556,15 +556,20 @@ export function DeliveryChecklist({ projectId }: { projectId: string }) {
               last_error: terraformRepair.last_diagnosis || terraformInit.stderr,
             }}
             onPrimary={() => {
-              if (run.stage === "ingest") void saveDocs().then(() => void advance(nextStage()));
-              else if (run.stage === "architecture") void advance(nextStage(), "architecture_accepted", { accepted: true });
-              else if (run.stage === "terraform") {
+              const next = nextStage();
+              if (run.stage === "ingest") {
+                if (!next) return;
+                void saveDocs().then(() => void advance(next));
+              } else if (run.stage === "architecture") {
+                if (!next) return;
+                void advance(next, "architecture_accepted", { accepted: true });
+              } else if (run.stage === "terraform") {
                 const first = tasks.find((t) => (t.missing_artifacts || []).length || t.status !== "completed");
                 if (first) void generateForTask(first).then(() => void runIsolated("terraform/init"));
                 else void runIsolated("terraform/init");
               } else if (run.stage === "plan") void runIsolated("terraform/plan");
               else if (run.stage === "apply") void runIsolated("terraform/apply");
-              else void advance(nextStage());
+              else if (next) void advance(next);
             }}
             onUpload={(file) => {
               if (run.stage === "ingest") void uploadIngest(file);
