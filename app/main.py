@@ -980,8 +980,16 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
             yield sse({"type": "chat", "chat_id": chat_id})
             yield sse({"type": "status", "text": "Working on it"})
 
+            resolved_skill = orchestrator.resolve_forced_skill(request.skill, request.message)
+
             special_action: Optional[dict[str, Any]] = None
-            if request.mode == "agent" and request.skill != "solution_architect":
+            # Skip action routing when a specialist skill is already forced (keeps replies fast).
+            if (
+                request.mode == "agent"
+                and resolved_skill != "solution_architect"
+                and not resolved_skill
+                and not orchestrator._has_inline_artifact(request.message)
+            ):
                 yield sse({"type": "status", "text": "Checking for a live action"})
                 try:
                     special_action = chat_actions.handle_turn(
@@ -1055,7 +1063,7 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
                     history,
                     request.project_id,
                     mode=request.mode,
-                    skill=request.skill,
+                    skill=resolved_skill,
                     action_scope=request.action_scope,
                     access_level=request.access_level,
                     chat_id=chat_id,

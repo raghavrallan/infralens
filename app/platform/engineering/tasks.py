@@ -195,6 +195,13 @@ def transition(task_id: str, target: str, *, actor: str = "", comment: str = "")
         row.status = target
         row.updated_at = _now()
         session.commit()
+        _run_id = str(getattr(row, "delivery_run_id", "") or "")
+        if _run_id:
+            try:
+                from app.platform.engineering.sync import stamp_delivery_sync
+                stamp_delivery_sync(_run_id, note=f"task:{task_id}:{target}")
+            except Exception:
+                pass
         session.refresh(row)
         payload = _dict(row, attached=attached)
     activity.record(

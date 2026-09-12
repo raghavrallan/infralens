@@ -229,6 +229,7 @@ def transition(
             payload = _dict(row)
             _enqueue_architecture_job(run_id)
             _emit_stage_webhook(run_id, project_id, from_stage, to_stage, approved_by)
+            _stamp_sync(run_id, note=f"stage:{from_stage}->{to_stage}")
             return payload
         if to_stage == "terraform" and "terraform_pr" not in artifacts:
             model = (artifacts.get("architecture_proposal") or {}).get("architecture") or {}
@@ -277,7 +278,17 @@ def transition(
         session.refresh(row)
         payload = _dict(row)
     _emit_stage_webhook(run_id, project_id, from_stage, to_stage, approved_by)
+    _stamp_sync(run_id, note=f"stage:{from_stage}->{to_stage}")
     return payload
+
+
+def _stamp_sync(run_id: str, note: str = "") -> None:
+    try:
+        from app.platform.engineering.sync import stamp_delivery_sync
+
+        stamp_delivery_sync(run_id, note=note)
+    except Exception:
+        pass
 
 
 def _emit_stage_webhook(

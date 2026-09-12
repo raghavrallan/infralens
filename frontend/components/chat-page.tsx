@@ -24,11 +24,79 @@ function capitalize(value: string) {
   return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
 }
 
-function scoreSkill(item: Skill, text: string) {
-  const terms = [item.name.replaceAll("_", " "), ...(item.triggers || []), item.category || ""];
-  const haystack = text.toLowerCase();
-  return terms.reduce((score, term) => score + term.toLowerCase().split(/[\s,]+/).filter((word) => word.length > 3 && haystack.includes(word)).length, 0);
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+function wordMatches(haystack: string, word: string) {
+  const token = word.trim().toLowerCase();
+  if (token.length < 3) return false;
+  // Require word boundaries so "find" does not match "finding".
+  return new RegExp(`(?:^|[^a-z0-9_])${escapeRegExp(token)}(?:$|[^a-z0-9_])`, "i").test(haystack);
+}
+
+/** Prefer an explicit `Skill: IaC Reviewer` line over fuzzy keyword scoring. */
+function explicitSkillFromText(text: string, catalog: Skill[]): Skill | null {
+  const match = text.match(/(?:^|\n)\s*skill\s*:\s*([^\n]+)/i);
+  if (!match) return null;
+  const raw = match[1].trim().toLowerCase().replace(/[`"']/g, "");
+  const slug = raw.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  const aliases: Record<string, string> = {
+    iac: "iac_reviewer",
+    iac_review: "iac_reviewer",
+    iacreviewer: "iac_reviewer",
+    code: "code_reviewer",
+    code_review: "code_reviewer",
+    codereviewer: "code_reviewer",
+  };
+  const wanted = aliases[slug] || slug;
+  return (
+    catalog.find((item) => item.name === wanted) ||
+    catalog.find((item) => item.name.replaceAll("_", " ") === raw) ||
+    catalog.find((item) => prettyName(item.name).toLowerCase() === raw) ||
+    catalog.find((item) => raw.includes(item.name.replaceAll("_", " ")) && item.name.replaceAll("_", " ").length >= 3) ||
+    null
+  );
+}
+
+function scoreSkill(item: Skill, text: string) {
+  const haystack = text.toLowerCase();
+  const pretty = item.name.replaceAll("_", " ");
+  let score = 0;
+  // Strong boost when the skill name itself appears (including short tokens like "iac").
+  if (haystack.includes(item.name.toLowerCase()) || haystack.includes(pretty)) score += 12;
+  item.name.split("_").forEach((part) => {
+    if (part.length >= 3 && wordMatches(haystack, part)) score += part === "iac" || part === "code" ? 8 : 3;
+  });
+  (item.triggers || []).forEach((trigger) => {
+    const lowered = trigger.toLowerCase();
+    if (lowered.length > 12 && haystack.includes(lowered)) {
+      score += 6;
+      return;
+    }
+    lowered.split(/[\s,]+/).forEach((word) => {
+      if (word.length >= 4 && wordMatches(haystack, word)) score += 1;
+    });
+  });
+  if (item.category && wordMatches(haystack, item.category.split(/\s+/)[0] || "")) score += 1;
+  // Prefer IaC Reviewer for cloud / finding explain prompts; stop Code Reviewer stealing "finding".
+  if (item.name === "iac_reviewer" && /\b(rds|postgresql|terraform|cloudformation|helm|kubernetes|publiclyaccessible|severity|evidence)\b/i.test(haystack)) {
+    score += 10;
+  }
+  if (item.name === "code_reviewer" && /\b(severity|evidence|publiclyaccessible|rds|postgresql|terraform)\b/i.test(haystack)) {
+    score -= 8;
+  }
+  return score;
+}
+
+const THINKING_STATUSES = [
+  "Thinking…",
+  "Reading your request…",
+  "Routing to the right skill…",
+  "Gathering context…",
+  "Working on a reply…",
+  "Still thinking…",
+];
 
 function messageMeta(message: ChatMessage) {
   return message.metadata || message.meta || {};
@@ -85,6 +153,7 @@ export function ChatPage() {
   const [accessLevel, setAccessLevel] = useState<"ask_approval" | "auto_approve" | "full_access">("ask_approval");
   const [providerConnections, setProviderConnections] = useState<ConnectionStatus[]>([]);
   const [status, setStatus] = useState("Checking…");
+  const [statusLive, setStatusLive] = useState(false);
   const [configured, setConfigured] = useState(false);
   const [sending, setSending] = useState(false);
   const [slashOpen, setSlashOpen] = useState(false);
@@ -308,13 +377,39 @@ export function ChatPage() {
         setStatus("Connected");
       }
     };
-    setStatus("Waiting for reply…");
+    setStatusLive(true);
+    setStatus(THINKING_STATUSES[0]);
+    let tick = 0;
+    const pulse = window.setInterval(() => {
+      tick += 1;
+      setStatus(THINKING_STATUSES[tick % THINKING_STATUSES.length]);
+    }, 2200);
     timer = window.setTimeout(() => void poll(), 800);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
+      window.clearInterval(pulse);
+      setStatusLive(false);
     };
   }, [chatId, chatLoading, sending, messages, loadChats, projectId]);
+
+  useEffect(() => {
+    if (!sending) return;
+    setStatusLive(true);
+    setStatus(THINKING_STATUSES[0]);
+    let tick = 0;
+    const pulse = window.setInterval(() => {
+      tick += 1;
+      setStatus((current) => {
+        // Keep server-provided status if it is already more specific than the default pulse.
+        if (current && !THINKING_STATUSES.includes(current) && current !== "Waiting for reply…") return current;
+        return THINKING_STATUSES[tick % THINKING_STATUSES.length];
+      });
+    }, 1800);
+    return () => {
+      window.clearInterval(pulse);
+    };
+  }, [sending]);
 
   useEffect(() => {
     if (projectId) void loadProviderStatus(projectId, actionScope);
@@ -364,6 +459,8 @@ export function ChatPage() {
   const suggestedSkill = useMemo<Skill | null>(() => {
     const text = input.trim();
     if (skill || slashOpen || text.startsWith("/") || text.length < 8) return null;
+    const explicit = explicitSkillFromText(text, skills);
+    if (explicit) return explicit;
     let best: Skill | null = null;
     let bestScore = 0;
     skills.forEach((item) => {
@@ -373,7 +470,7 @@ export function ChatPage() {
         bestScore = score;
       }
     });
-    return bestScore > 0 ? best : null;
+    return bestScore >= 3 ? best : null;
   }, [input, skill, slashOpen, skills]);
 
   const emptyStateSuggestions = useMemo(() => skills.map((item) => capitalize(item.triggers?.[0] || item.description)).slice(0, 4), [skills]);
@@ -556,9 +653,14 @@ export function ChatPage() {
           if (event.type === "action_planned" || event.type === "approval_required" || event.type === "action_queued" || event.type === "action_started" || event.type === "action_output" || event.type === "action_verified" || event.type === "action_succeeded" || event.type === "action_failed") {
             setActiveAction((current) => current ? { ...current, status: String(event.type || "planned").replace("action_", "") } : current);
           }
-          if (event.type === "status") setStatus(String(event.text || "Working…"));
+          if (event.type === "status") {
+            setStatusLive(true);
+            setStatus(String(event.text || "Working…"));
+          }
           if (event.type === "delta") {
             accumulated = accumulated + String(event.text || "");
+            setStatusLive(true);
+            if (!accumulated.trim()) setStatus("Writing reply…");
             setMessages((current) => current.map((message) => message.id === messageId ? { ...message, content: accumulated, streaming: true } : message));
           }
           if (event.type === "final") {
@@ -574,11 +676,12 @@ export function ChatPage() {
             setMessages((current) => current.map((message) => message.id === messageId ? { ...message, content: accumulated, streaming: false, displayMode: responseMode, plan, charts, architectTier: typeof event.tier === "string" ? event.tier : undefined, architectMode: typeof event.architect_mode === "string" ? event.architect_mode : undefined } : message));
             if (responseMode === "plan" && plan?.length) setPendingPlan({ messageId, steps: plan });
             else setPendingPlan(null);
+            setStatusLive(false);
             setStatus(configured ? "Connected" : "Not configured");
           }
         },
         {
-          idleMs: 60000,
+          idleMs: 120000,
           signal: controller.signal,
           onIdle: () => controller.abort(),
         },
@@ -641,8 +744,14 @@ export function ChatPage() {
       return [...current.slice(0, index), { ...current[index], content: text }, { id: assistantId, role: "assistant", content: "", streaming: true }];
     });
     const started = Date.now();
+    const resolvedSkill =
+      skill ||
+      explicitSkillFromText(text, skills)?.name ||
+      suggestedSkill?.name ||
+      null;
+    if (resolvedSkill && !skill) setSkill(resolvedSkill);
     try {
-      await runStream("/api/chat/stream", { chat_id: activeChatId, project_id: projectId, message: text, edit_message_id: editId, mode, skill: skill || null, action_scope: actionScope, access_level: accessLevel }, assistantId);
+      await runStream("/api/chat/stream", { chat_id: activeChatId, project_id: projectId, message: text, edit_message_id: editId, mode, skill: resolvedSkill, action_scope: actionScope, access_level: accessLevel }, assistantId);
     } catch (error) {
       if (selectGenerationRef.current !== generation) return;
       if (isAbortError(error) && stopRequestedRef.current) {
@@ -808,7 +917,7 @@ export function ChatPage() {
               <button className={`mode-btn${mode === "agent" ? " active" : ""}`} onClick={() => selectMode("agent")}>Agent</button>
               <button className={`mode-btn${mode === "plan" ? " active" : ""}`} onClick={() => selectMode("plan")}>Plan</button>
             </div>
-            <div className="toolbar-right"><div className="status"><span className={`dot${configured ? " ok" : ""}`} /><span>{status}</span></div>
+            <div className="toolbar-right"><div className={`status${statusLive || sending ? " live" : ""}`}><span className={`dot${configured ? " ok" : ""}${statusLive || sending ? " pulse" : ""}`} /><span>{status}</span></div>
               <div className="provider-statuses" aria-label="Project provider connections">
                 {providerConnections.map((connection) => <span className={`provider-status ${connection.connected ? "connected" : "disconnected"}`} key={connection.provider} title={connection.connected ? `${providerLabel(connection.provider)} is connected for this project` : `${providerLabel(connection.provider)} is not connected for this project`}><span className="provider-status-dot" />{providerLabel(connection.provider)} {connection.connected ? "connected" : "not connected"}</span>)}
               </div>
