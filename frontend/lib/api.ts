@@ -52,7 +52,7 @@ export async function api<T>(url: string, options?: RequestInit): Promise<T> {
   if (response.status === 401 && !url.includes("/api/auth/login")) {
     clearAuthStorage();
     if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
-      window.location.replace("/login");
+      window.location.replace("/login/");
     }
     throw new Error("Not authenticated");
   }

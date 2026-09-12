@@ -17,6 +17,12 @@ type RevertRequest = {
   requested_by_name?: string;
   created_at?: string;
 };
+type ChecklistItem = {
+  stage: string;
+  label: string;
+  status: string;
+  min_role?: string;
+};
 type DeliveryRun = {
   id: string;
   stage: string;

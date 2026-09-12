@@ -28,7 +28,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
         const token = getToken();
         if (!token) {
-          window.location.replace("/login");
+          window.location.replace("/login/");
           return;
         }
         const current = await fetchCurrentUser();
@@ -36,7 +36,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
         if (!current) {
           // Token present but /me failed — only bounce when session was cleared (401).
           if (!getToken()) {
-            window.location.replace("/login");
+            window.location.replace("/login/");
           } else if (!cancelled) {
             setReady(true);
           }

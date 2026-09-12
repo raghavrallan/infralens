@@ -534,7 +534,7 @@ export function ChatPage() {
       });
       if (response.status === 401) {
         clearSession();
-        window.location.replace("/login");
+        window.location.replace("/login/");
         throw new Error("Not authenticated");
       }
       if (!response.ok) throw new Error("The stream failed to start.");

@@ -86,5 +86,5 @@ export async function fetchCurrentUser(): Promise<AuthUser | null> {
 
 export function logout(): void {
   clearSession();
-  window.location.href = "/login";
+  window.location.href = "/login/";
 }

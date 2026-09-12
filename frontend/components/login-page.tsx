@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import Image from "next/image";
 import loginImage from "../public/assets/images/login.png";
-import { getStoredUser, getToken, login as doLogin } from "../lib/auth";
+import { fetchCurrentUser, getToken, login as doLogin } from "../lib/auth";
 import { ThemeToggle } from "./theme-toggle";
 
 export function LoginPage() {
@@ -14,12 +14,26 @@ export function LoginPage() {
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    if (getToken() && getStoredUser()) {
-      // AuthGate on destination will send incomplete users to /onboarding.
-      window.location.replace("/dashboard");
-      return;
+    let cancelled = false;
+    async function boot() {
+      // Only bounce away when the stored session still validates. A stale token
+      // used to send /login -> /dashboard -> /login in a hard navigation loop.
+      if (!getToken()) {
+        if (!cancelled) setChecking(false);
+        return;
+      }
+      const current = await fetchCurrentUser();
+      if (cancelled) return;
+      if (current) {
+        window.location.replace("/dashboard/");
+        return;
+      }
+      setChecking(false);
     }
-    setChecking(false);
+    void boot();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   async function onSubmit(event: FormEvent) {
@@ -29,7 +43,7 @@ export function LoginPage() {
     try {
       await doLogin(username.trim(), password);
       // Landing on dashboard; AuthGate redirects to /onboarding when needed.
-      window.location.href = "/dashboard";
+      window.location.href = "/dashboard/";
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign-in failed");
       setBusy(false);
