@@ -114,6 +114,8 @@ services:
       # Do not use ${VAR:?} — Compose interpolates all services and broke deploy when .env lacked the key.
       # Prefer a real key in .env; gha-deploy.sh auto-generates one when missing.
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-infralens-onprem-n8n-change-me}
+      # false until TLS is terminated in front of n8n (HTTP host:port access).
+      N8N_SECURE_COOKIE: ${N8N_SECURE_COOKIE:-false}
       N8N_DIAGNOSTICS_ENABLED: "false"
       N8N_PERSONALIZATION_ENABLED: "false"
       N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
