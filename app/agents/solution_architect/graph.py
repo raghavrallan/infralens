@@ -82,14 +82,16 @@ def explore(state: ArchitectState, emit: Emit) -> ArchitectState:
     state["mode"] = "greenfield" if empty else "brownfield"
     emit({"type": "status", "text": "Reading mapped repository and live inventory"})
     code = tools.get_code_artifacts(project_id)
-    from app.agents.solution_architect.discovery import discover
+    from app.agents.solution_architect.discovery import detect_connected_clouds, discover
 
+    connected = detect_connected_clouds(project_id)
     state["discovery"] = discover(
         project_id=project_id,
         inventory=inventory,
         code=code,
         objective=state.get("objective") or "",
         seed=state.get("seed_context") or "",
+        connected=connected,
     )
     evidence = [inventory, code, tools.search_precedent(project_id)]
     if state.get("seed_context"):

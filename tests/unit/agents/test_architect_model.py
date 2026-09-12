@@ -21,6 +21,46 @@ def test_discover_selects_aws_when_azure_is_absent():
         code="terraform aws_vpc",
         objective="Keep the existing EKS platform",
         seed="",
+        connected=["aws"],
+    )
+    assert found["cloud"] == "aws"
+
+
+def test_discover_ignores_azure_not_connected_when_aws_linked():
+    """Regression: 'azure: not connected' must not force Azure when AWS is connected."""
+    found = discover(
+        project_id="p1",
+        inventory="azure: not connected\n\naws: 3 ecs services, 1 rds",
+        code="provider \"aws\"\nresource \"aws_ecs_service\" \"api\" {}",
+        objective="",
+        seed="",
+        connected=["aws"],
+    )
+    assert found["cloud"] == "aws"
+    assert "aws" in found["connected_clouds"]
+    assert found["source_of_truth"] == "connected_cloud_and_repo"
+
+
+def test_discover_follows_azure_when_only_azure_connected():
+    found = discover(
+        project_id="p1",
+        inventory="azure: 2 container apps",
+        code="",
+        objective="",
+        seed="",
+        connected=["azure"],
+    )
+    assert found["cloud"] == "azure"
+
+
+def test_discover_both_connected_follows_stronger_repo_signal():
+    found = discover(
+        project_id="p1",
+        inventory="azure: not connected\n\naws ENVIRONMENT DATA\nvpc vpc-1",
+        code='provider "aws"\nresource "aws_vpc" "main" {}',
+        objective="",
+        seed="",
+        connected=["aws", "azure"],
     )
     assert found["cloud"] == "aws"
 
@@ -32,6 +72,7 @@ def test_discover_does_not_treat_always_as_aws():
         code="",
         objective="Always keep the existing Azure estate",
         seed="",
+        connected=["azure"],
     )
     assert found["cloud"] == "azure"
 
@@ -43,6 +84,7 @@ def test_discover_infers_saas_stack_from_repo_and_ask():
         code="requirements.txt fastapi redis frontend/package.json next.js Dockerfile .github/workflows/ci.yml",
         objective="InfraLens FastAPI + Next + Postgres + Redis worker",
         seed="",
+        connected=["azure"],
     )
     assert found["cloud"] == "azure"
     assert "fastapi" in found["signals"]

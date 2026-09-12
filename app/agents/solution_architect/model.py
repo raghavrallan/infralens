@@ -71,7 +71,10 @@ def fallback_candidates(state: dict[str, Any]) -> list[dict[str, Any]]:
             "pillar": "data_architecture",
             "title": f"Private {data} plus cache",
             "recommended": True,
-            "change": f"Provision private {data} and Redis in a dedicated resource group.",
+            "change": (
+                f"Provision private {data} and Redis in a dedicated "
+                f"{'resource group' if cloud == 'azure' else 'account/VPC boundary'}."
+            ),
             "risk_class": "config_code_change",
             "blast_radius": "medium",
             "options_considered": [
@@ -189,9 +192,9 @@ def _components_from_state(
             "monitoring",
             "infrastructure",
             "Monitoring and alerting",
-            "Logs, metrics, and an action group for incidents.",
+            "Logs, metrics, and alerts for incidents.",
             cloud,
-            "monitor",
+            "cloudwatch" if cloud == "aws" else "monitor",
             "monitoring.tf",
             "terraform",
             "",
@@ -299,9 +302,9 @@ def _analysis(cloud: str, discovery: dict[str, Any], state: dict[str, Any]) -> d
             "Revision-based deploys so a bad image can be rolled back without a cluster rebuild.",
         ],
         "brownfield": (
-            "Extend the existing estate with a dedicated resource group; do not replace live apps."
+            "Extend the existing estate with a dedicated landing zone; do not replace live apps."
             if state.get("mode") == "brownfield"
-            else "Greenfield: provision a dedicated resource group and new data plane."
+            else "Greenfield: provision a dedicated landing zone and new data plane."
         ),
         "stack": sorted(signals),
     }
@@ -389,5 +392,5 @@ def _component_cost(ident: str) -> str:
         "compute": "Lower ops cost than AKS/EKS for a single product.",
         "database": "Burstable SKU until utilization is measured.",
         "cache": "Basic C0 until session/job volume requires more.",
-        "monitoring": "30-day Log Analytics; cap daily ingest in prod.",
+        "monitoring": "Retain logs ~30 days; cap daily ingest in prod.",
     }.get(ident, "Review after the first plan.")
