@@ -9,6 +9,85 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  compose-onprem:
+    name: Compose On-Prem (n8n required)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate container-app + n8n profiles
+        env:
+          AUTH_JWT_SECRET: ci-jwt-secret-not-for-production
+          N8N_ENCRYPTION_KEY: ci-n8n-encryption-key-32chars!!
+        run: |
+          set -euo pipefail
+          docker compose --profile container-app --profile n8n config > /tmp/compose.yml
+          docker compose --profile container-app --profile n8n config --services | tee /tmp/services.txt
+          grep -qx n8n /tmp/services.txt
+          grep -qx api /tmp/services.txt
+          grep -qx worker /tmp/services.txt
+          grep -q 'N8N_WEBHOOKS_ENABLED' /tmp/compose.yml
+          grep -q 'n8nio/n8n' /tmp/compose.yml
+          echo "On-prem compose OK (n8n mandatory with --profile n8n)"
+      - name: Validate container-app without n8n profile (optional path)
+        env:
+          AUTH_JWT_SECRET: ci-jwt-secret-not-for-production
+          N8N_ENCRYPTION_KEY: ci-n8n-encryption-key-32chars!!
+        run: |
+          set -euo pipefail
+          docker compose --profile container-app config --services | tee /tmp/optional.txt
+          if grep -qx n8n /tmp/optional.txt; then
+            echo "ERROR: n8n must not start without --profile n8n" >&2
+            exit 1
+          fi
+          echo "Optional without-n8n path OK"
+
+  frontend-typecheck:
+    name: Frontend Typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install and typecheck
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run typecheck
+
+  agent-runtime:
+    name: Agent Runtime Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      AUTH_JWT_SECRET: test-jwt-secret-not-for-production
+      LANGFUSE_TRACING_ENABLED: "false"
+      CI: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - name: Run agent runtime / LangGraph / webhook tests
+        run: |
+          pytest tests/test_agent_runtime.py tests/unit/agents -vv --tb=short \
+            --junitxml=junit-agent-runtime.xml
+      - name: Upload agent runtime JUnit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-agent-runtime
+          path: junit-agent-runtime.xml
+
   pylint:
     name: Pylint
     runs-on: ubuntu-latest
@@ -73,7 +152,7 @@ jobs:
       - name: Run unit tests
         run: |
           FAIL_UNDER=0
-          pytest tests/unit -vv --tb=short \
+          pytest tests/unit tests/test_agent_runtime.py -vv --tb=short \
             --cov=app --cov=executors --cov-branch \
             --cov-report=term-missing \
             --cov-report=xml:coverage-unit.xml \
@@ -171,21 +250,32 @@ jobs:
   quality-gate:
     name: Quality Gates
     runs-on: ubuntu-latest
-    needs: [pylint, unit-tests, integration-coverage]
+    needs:
+      [
+        compose-onprem,
+        frontend-typecheck,
+        agent-runtime,
+        pylint,
+        unit-tests,
+        integration-coverage,
+      ]
     if: always()
     steps:
       - name: Enforce all required checks
         run: |
+          echo "Compose on-prem: ${{ needs.compose-onprem.result }}"
+          echo "Frontend typecheck: ${{ needs.frontend-typecheck.result }}"
+          echo "Agent runtime: ${{ needs.agent-runtime.result }}"
           echo "Pylint: ${{ needs.pylint.result }}"
           echo "Unit tests: ${{ needs.unit-tests.result }}"
           echo "Integration + coverage: ${{ needs.integration-coverage.result }}"
-          if [ "${{ needs.pylint.result }}" != "success" ] || \
+          if [ "${{ needs.compose-onprem.result }}" != "success" ] || \
+             [ "${{ needs.frontend-typecheck.result }}" != "success" ] || \
+             [ "${{ needs.agent-runtime.result }}" != "success" ] || \
+             [ "${{ needs.pylint.result }}" != "success" ] || \
              [ "${{ needs.unit-tests.result }}" != "success" ] || \
              [ "${{ needs.integration-coverage.result }}" != "success" ]; then
             echo "Quality gates FAILED — merge blocked"
             exit 1
           fi
-          echo "Pylint"
-          echo "Unit Tests"
-          echo "Integration Tests + Coverage"
           echo "Quality Gates Passed"

@@ -53,6 +53,16 @@ services:
       AUTH_PASSWORD: ${AUTH_PASSWORD:-infralens}
       AUTH_DISPLAY_NAME: ${AUTH_DISPLAY_NAME:-Admin}
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:?set AUTH_JWT_SECRET in .env}
+      # Agent runtime + on-prem n8n (n8n is part of container-app stack)
+      ARCHITECT_LANGGRAPH: ${ARCHITECT_LANGGRAPH:-false}
+      DEBUG_REACT_ENABLED: ${DEBUG_REACT_ENABLED:-false}
+      CHAT_LANGGRAPH: ${CHAT_LANGGRAPH:-false}
+      N8N_WEBHOOKS_ENABLED: ${N8N_WEBHOOKS_ENABLED:-true}
+      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://n8n:5678/webhook/infralens}
+      WEBHOOK_HMAC_SECRET: ${WEBHOOK_HMAC_SECRET:-}
+      INTEGRATIONS_API_KEY: ${INTEGRATIONS_API_KEY:-}
+      INTEGRATIONS_API_ROLE: ${INTEGRATIONS_API_ROLE:-devops_lead}
+      LANGFUSE_TRACING_ENABLED: ${LANGFUSE_TRACING_ENABLED:-false}
     depends_on:
       postgres:
         condition: service_healthy
@@ -72,11 +82,52 @@ services:
       DATABASE_URL: postgresql+psycopg2://devsecops:devsecops@postgres:5432/devsecops
       REDIS_URL: redis://redis:6379/0
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:?set AUTH_JWT_SECRET in .env}
+      ARCHITECT_LANGGRAPH: ${ARCHITECT_LANGGRAPH:-false}
+      DEBUG_REACT_ENABLED: ${DEBUG_REACT_ENABLED:-false}
+      N8N_WEBHOOKS_ENABLED: ${N8N_WEBHOOKS_ENABLED:-true}
+      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://n8n:5678/webhook/infralens}
+      WEBHOOK_HMAC_SECRET: ${WEBHOOK_HMAC_SECRET:-}
+      LANGFUSE_TRACING_ENABLED: ${LANGFUSE_TRACING_ENABLED:-false}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+  # On-prem n8n is mandatory for our server deploy (gha-deploy enables profile "n8n").
+  # Local/full stack: docker compose --profile container-app --profile n8n up -d
+  # Optional skip: omit --profile n8n (or set REQUIRE_N8N=false on a fork deploy).
+  n8n:
+    profiles: ["n8n"]
+    image: n8nio/n8n:1.82.3
+    container_name: devsecops-n8n
+    restart: unless-stopped
+    ports:
+      - "${N8N_HOST_PORT:-5678}:5678"
+    environment:
+      N8N_HOST: ${N8N_HOST:-0.0.0.0}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      N8N_EDITOR_BASE_URL: ${N8N_EDITOR_BASE_URL:-http://127.0.0.1:5678/}
+      WEBHOOK_URL: ${N8N_PUBLIC_WEBHOOK_URL:-http://127.0.0.1:5678/}
+      GENERIC_TIMEZONE: ${GENERIC_TIMEZONE:-Asia/Kolkata}
+      TZ: ${GENERIC_TIMEZONE:-Asia/Kolkata}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY in .env}
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"require('http').get('http://127.0.0.1:5678/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
 
   azure-executor:
     profiles: ["container-app"]
@@ -144,3 +195,4 @@ services:
 volumes:
   devsecops_pgdata:
   devsecops_redisdata:
+  n8n_data:

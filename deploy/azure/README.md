@@ -67,7 +67,7 @@ the seeded InfraLens org is `00000000-0000-4000-8000-000000000001`:
 
 ```powershell
 $env:EXECUTOR_ORG_ID = "00000000-0000-4000-8000-000000000001"
-docker compose --profile container-app up --build
+docker compose --profile container-app --profile n8n up --build
 ```
 
 Inspect provider startup and queue activity with, for example,

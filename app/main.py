@@ -133,12 +133,23 @@ class JwtAuthMiddleware:
             return
         path = request.url.path.rstrip("/") or "/"
         if path.startswith("/api") and path not in _PUBLIC_API_PATHS:
-            try:
-                user = auth.verify_token(
-                    auth.bearer_token(request.headers.get("Authorization"))
-                )
-            except Exception:
-                user = None
+            token = auth.bearer_token(request.headers.get("Authorization"))
+            integrations_key = (os.environ.get("INTEGRATIONS_API_KEY") or "").strip()
+            user: Optional[dict[str, Any]] = None
+            if (
+                integrations_key
+                and token
+                and token == integrations_key
+                and path.startswith("/api/integrations")
+            ):
+                user = {
+                    "id": "integration:n8n",
+                    "username": "n8n",
+                    "display_name": "n8n integration",
+                    "role": os.environ.get("INTEGRATIONS_API_ROLE", "devops_lead"),
+                }
+            else:
+                user = auth.verify_token(token)
             if user is None:
                 response = JSONResponse({"detail": "Not authenticated"}, status_code=401)
                 await response(scope, receive, send)
@@ -174,9 +185,11 @@ app.add_middleware(
 
 from app.api.routes_mvp import router as mvp_router
 from app.api.routes_engineering import router as engineering_router
+from app.api.routes_integrations import router as integrations_router
 
 app.include_router(mvp_router)
 app.include_router(engineering_router)
+app.include_router(integrations_router)
 
 
 def _refresh_chat_memory(chat_id: str) -> None:

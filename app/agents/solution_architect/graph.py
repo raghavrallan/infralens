@@ -198,7 +198,9 @@ def critique(state: ArchitectState, emit: Emit) -> ArchitectState:
                 item["change"] = f"Staged alternative: {item.get('change')}"
                 item["justified"] = True
         emit({"type": "status", "text": "Revising toward a reversible design"})
-        return design(state, emit)
+        state["needs_revision"] = True
+        return state
+    state["needs_revision"] = False
     return state
 
 
@@ -301,6 +303,19 @@ def finalize(state: ArchitectState, emit: Emit) -> ArchitectState:
         state["hld"] = _render_hld(state, gated)
         state["reply"] = state["hld"]
         governance.upsert_run(status="succeeded", **{**run_kwargs, "checkpoint": dict(state)})
+        try:
+            from app.integrations import n8n_schemas, webhooks
+
+            webhooks.emit_event_async(
+                n8n_schemas.architecture_ready(
+                    run_id=run_id,
+                    project_id=state.get("project_id") or "",
+                    objective=state.get("objective") or "",
+                    tier=state.get("tier") or "",
+                )
+            )
+        except Exception:
+            pass
         return state
     except Exception:
         try:
@@ -382,6 +397,15 @@ def _render_hld(state: ArchitectState, gated: list[dict[str, Any]]) -> str:
 
 def run_pipeline(state: ArchitectState, emit: Optional[Emit] = None) -> ArchitectState:
     sink: Emit = emit or (lambda _event: None)
+    try:
+        from app.agents.solution_architect.lg_graph import langgraph_enabled, run_langgraph_pipeline
+
+        if langgraph_enabled():
+            return run_langgraph_pipeline(state, sink)
+    except Exception:
+        # Fall back to sequential pipeline if LangGraph path fails to import/run.
+        pass
+
     paused = governance.load_paused(state.get("thread_id") or "")
     if paused and not state.get("plan_only"):
         answer = state.get("objective") or ""
@@ -392,29 +416,41 @@ def run_pipeline(state: ArchitectState, emit: Optional[Emit] = None) -> Architec
         state["awaiting_input"] = False
         state["pending_question"] = ""
         state = explore(state, sink)
-        steps = (design, critique, verify, finalize)
-    else:
-        state = clarify(state, sink)
-        if state.get("awaiting_input"):
-            governance.upsert_run(
-                thread_id=state.get("thread_id") or "",
-                project_id=state.get("project_id") or "",
-                user_id=state.get("user") or "",
-                objective=state.get("objective") or "",
-                source=state.get("source") or "chat",
-                tier=state.get("tier") or "T1",
-                mode=state.get("mode") or "greenfield",
-                status="awaiting_input",
-                pending_question=state.get("pending_question") or "",
-                checkpoint=dict(state),
-            )
-            return state
-        steps = (explore, design, critique, verify, finalize)
-    for step in steps:
-        state = step(state, sink)
-        if state.get("awaiting_input"):
-            return state
-    return state
+        state = design(state, sink)
+        while True:
+            state = critique(state, sink)
+            if state.get("needs_revision"):
+                state = design(state, sink)
+                continue
+            break
+        state = verify(state, sink)
+        return finalize(state, sink)
+
+    state = clarify(state, sink)
+    if state.get("awaiting_input"):
+        governance.upsert_run(
+            thread_id=state.get("thread_id") or "",
+            project_id=state.get("project_id") or "",
+            user_id=state.get("user") or "",
+            objective=state.get("objective") or "",
+            source=state.get("source") or "chat",
+            tier=state.get("tier") or "T1",
+            mode=state.get("mode") or "greenfield",
+            status="awaiting_input",
+            pending_question=state.get("pending_question") or "",
+            checkpoint=dict(state),
+        )
+        return state
+    state = explore(state, sink)
+    state = design(state, sink)
+    while True:
+        state = critique(state, sink)
+        if state.get("needs_revision"):
+            state = design(state, sink)
+            continue
+        break
+    state = verify(state, sink)
+    return finalize(state, sink)
 
 
 def _initial_state(args: dict[str, Any], chat_id: str) -> ArchitectState:

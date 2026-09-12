@@ -13,7 +13,7 @@ fi
 grep -q '^EXECUTOR_SERVICE_KEY=' "$ENV" || echo 'EXECUTOR_SERVICE_KEY=dev-executor-key' >> "$ENV"
 
 cd "$APP"
-docker compose --profile container-app up -d api worker
+docker compose --profile container-app --profile n8n up -d api worker
 sleep 4
 curl -fsS http://127.0.0.1:62678/api/health
 echo

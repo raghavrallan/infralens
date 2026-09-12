@@ -1,0 +1,62 @@
+{
+  "name": "InfraLens approval created → Slack notify",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "infralens",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.event}}",
+              "value2": "approval.created"
+            }
+          ]
+        }
+      },
+      "name": "Is approval.created",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [260, 0]
+    },
+    {
+      "parameters": {
+        "text": "=InfraLens approval pending\nGate: {{$json.data.gate}}\nSeverity: {{$json.data.severity}}\n{{$json.data.title}}\nOpen: {{$json.data.deep_link}}"
+      },
+      "name": "Slack notify",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [520, -40],
+      "notes": "Configure Slack credentials in n8n. Optional follow-up HTTP Request node can POST to /api/integrations/approvals/{id}/decide with Bearer INTEGRATIONS_API_KEY."
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Is approval.created", "type": "main", "index": 0 }]]
+    },
+    "Is approval.created": {
+      "main": [[{ "node": "Slack notify", "type": "main", "index": 0 }], []]
+    }
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "infralens": {
+      "events": ["approval.created", "approval.decided", "delivery.stage_changed", "architecture.ready_for_accept"],
+      "inbound": {
+        "decide": "POST /api/integrations/approvals/{approval_id}/decide",
+        "run_workflow": "POST /api/integrations/workflows/{workflow_id}/run",
+        "auth": "Authorization: Bearer $INTEGRATIONS_API_KEY"
+      }
+    }
+  }
+}
