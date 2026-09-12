@@ -1,0 +1,262 @@
+---
+description: "# Persistent Project Context Rule
+
+For every project, maintain a persistent AI-readable project context inside the repository.
+
+## Required Context
+
+Maintain these files:
+
+.ai/
+├── PROJECT_CONTEXT.md
+├── ARCHITECTURE.md
+├── CURRENT_STATE.md
+├── DECISIONS.md
+├── TODO.md
+├── BUGS.md
+├── CHANGELOG.md
+└── SESSION.md
+
+Also maintain:
+
+AGENTS.md
+
+## Before Working
+
+Before making significant changes:
+
+1. Read `AGENTS.md`.
+2. Read the relevant `.ai/` context files.
+3. Inspect the existing code and architecture.
+4. Check the current Git status.
+5. Understand existing implementation before proposing replacements or major refactoring.
+
+Never assume that previous chat history is available.
+
+## During Work
+
+Keep the project context synchronized with the actual repository.
+
+When you discover important information, update the appropriate context file.
+
+Examples:
+
+* Architecture change → `ARCHITECTURE.md`
+* Important technical decision → `DECISIONS.md`
+* Current progress → `CURRENT_STATE.md`
+* New task → `TODO.md`
+* Bug discovered → `BUGS.md`
+* Completed change → `CHANGELOG.md`
+* Session progress and next steps → `SESSION.md`
+
+## After Significant Work
+
+Before finishing a substantial task:
+
+1. Update `CURRENT_STATE.md`.
+2. Update `SESSION.md`.
+3. Update `TODO.md`.
+4. Update `CHANGELOG.md` when applicable.
+5. Update `DECISIONS.md` when an architectural or technical decision was made.
+6. Update `BUGS.md` when bugs are discovered or fixed.
+
+Keep these files concise and factual.
+
+## New Project
+
+If the required files do not exist:
+
+* Create them.
+* First inspect the repository to understand the actual project.
+* Do not fill them with assumptions or generic placeholder information.
+* Populate them with useful project-specific information.
+
+## Existing Project
+
+If the files already exist:
+
+* Read them before modifying them.
+* Preserve useful existing information.
+* Correct outdated information.
+* Add newly discovered information.
+* Remove information that is proven to be obsolete.
+
+## Source of Truth
+
+The repository is the primary source of truth.
+
+Do not blindly trust the AI context files if they conflict with the actual code.
+
+When documentation and implementation disagree:
+
+1. Inspect the code.
+2. Determine the actual current behavior.
+3. Update the documentation to match reality.
+
+## Context Quality
+
+The goal is that a completely new AI chat should be able to enter the repository and understand:
+
+* What the project does
+* Why it exists
+* Technology stack
+* Architecture
+* Important components
+* How components interact
+* How to run the project
+* How to test it
+* How to deploy it
+* Current implementation status
+* What has already been completed
+* What is currently being worked on
+* Known bugs
+* Important technical decisions
+* What should be done next
+
+Do not create unnecessarily large documentation.
+
+Prefer concise, structured, accurate information.
+
+## Chat Independence
+
+Never rely on previous chat history for essential project context.
+
+The repository must contain enough information for a new AI session to continue the work safely.
+
+At the beginning of a new session, read the project context before starting development.
+
+At the end of a significant session, update the project context so the next session can continue from the current state.
+"
+alwaysApply: false
+---
+
+# Persistent Project Context
+
+# Persistent Project Context Rule
+
+For every project, maintain a persistent AI-readable project context inside the repository.
+
+## Required Context
+
+Maintain these files:
+
+.ai/
+├── PROJECT_CONTEXT.md
+├── ARCHITECTURE.md
+├── CURRENT_STATE.md
+├── DECISIONS.md
+├── TODO.md
+├── BUGS.md
+├── CHANGELOG.md
+└── SESSION.md
+
+Also maintain:
+
+AGENTS.md
+
+## Before Working
+
+Before making significant changes:
+
+1. Read `AGENTS.md`.
+2. Read the relevant `.ai/` context files.
+3. Inspect the existing code and architecture.
+4. Check the current Git status.
+5. Understand existing implementation before proposing replacements or major refactoring.
+
+Never assume that previous chat history is available.
+
+## During Work
+
+Keep the project context synchronized with the actual repository.
+
+When you discover important information, update the appropriate context file.
+
+Examples:
+
+* Architecture change → `ARCHITECTURE.md`
+* Important technical decision → `DECISIONS.md`
+* Current progress → `CURRENT_STATE.md`
+* New task → `TODO.md`
+* Bug discovered → `BUGS.md`
+* Completed change → `CHANGELOG.md`
+* Session progress and next steps → `SESSION.md`
+
+## After Significant Work
+
+Before finishing a substantial task:
+
+1. Update `CURRENT_STATE.md`.
+2. Update `SESSION.md`.
+3. Update `TODO.md`.
+4. Update `CHANGELOG.md` when applicable.
+5. Update `DECISIONS.md` when an architectural or technical decision was made.
+6. Update `BUGS.md` when bugs are discovered or fixed.
+
+Keep these files concise and factual.
+
+## New Project
+
+If the required files do not exist:
+
+* Create them.
+* First inspect the repository to understand the actual project.
+* Do not fill them with assumptions or generic placeholder information.
+* Populate them with useful project-specific information.
+
+## Existing Project
+
+If the files already exist:
+
+* Read them before modifying them.
+* Preserve useful existing information.
+* Correct outdated information.
+* Add newly discovered information.
+* Remove information that is proven to be obsolete.
+
+## Source of Truth
+
+The repository is the primary source of truth.
+
+Do not blindly trust the AI context files if they conflict with the actual code.
+
+When documentation and implementation disagree:
+
+1. Inspect the code.
+2. Determine the actual current behavior.
+3. Update the documentation to match reality.
+
+## Context Quality
+
+The goal is that a completely new AI chat should be able to enter the repository and understand:
+
+* What the project does
+* Why it exists
+* Technology stack
+* Architecture
+* Important components
+* How components interact
+* How to run the project
+* How to test it
+* How to deploy it
+* Current implementation status
+* What has already been completed
+* What is currently being worked on
+* Known bugs
+* Important technical decisions
+* What should be done next
+
+Do not create unnecessarily large documentation.
+
+Prefer concise, structured, accurate information.
+
+## Chat Independence
+
+Never rely on previous chat history for essential project context.
+
+The repository must contain enough information for a new AI session to continue the work safely.
+
+At the beginning of a new session, read the project context before starting development.
+
+At the end of a significant session, update the project context so the next session can continue from the current state.
+

@@ -1,0 +1,64 @@
+---
+description: "# Testing Rules
+
+Every significant code change must be validated.
+
+Before changing code:
+
+* Understand existing tests.
+* Identify affected functionality.
+
+After changing code:
+
+* Run the most relevant tests.
+* Add or update tests for new behavior.
+* Test important edge cases.
+* Fix failures caused by the implementation before considering the task complete.
+
+Do not remove or weaken tests simply to make them pass.
+
+Do not claim something works without validating it when validation is possible.
+
+For bug fixes:
+
+1. Reproduce or understand the failure.
+2. Fix the root cause.
+3. Add a regression test when practical.
+4. Verify the fix.
+
+If tests cannot be executed, clearly document why.
+"
+alwaysApply: false
+---
+
+# Testing Rules Every
+
+# Testing Rules
+
+Every significant code change must be validated.
+
+Before changing code:
+
+* Understand existing tests.
+* Identify affected functionality.
+
+After changing code:
+
+* Run the most relevant tests.
+* Add or update tests for new behavior.
+* Test important edge cases.
+* Fix failures caused by the implementation before considering the task complete.
+
+Do not remove or weaken tests simply to make them pass.
+
+Do not claim something works without validating it when validation is possible.
+
+For bug fixes:
+
+1. Reproduce or understand the failure.
+2. Fix the root cause.
+3. Add a regression test when practical.
+4. Verify the fix.
+
+If tests cannot be executed, clearly document why.
+

@@ -1,0 +1,56 @@
+---
+description: "# Performance Rules
+
+Do not optimize blindly.
+
+Before optimizing:
+
+* Identify the actual bottleneck.
+* Understand the current behavior.
+* Prefer measurement over assumptions.
+
+Consider:
+
+* CPU
+* Memory
+* Database queries
+* Network calls
+* API latency
+* LLM token usage
+* Cloud resource consumption
+* Docker/container resources
+
+Avoid premature optimization, but do not ignore obvious performance problems.
+
+Document meaningful performance-related decisions.
+"
+alwaysApply: false
+---
+
+# Performance Rules Do
+
+# Performance Rules
+
+Do not optimize blindly.
+
+Before optimizing:
+
+* Identify the actual bottleneck.
+* Understand the current behavior.
+* Prefer measurement over assumptions.
+
+Consider:
+
+* CPU
+* Memory
+* Database queries
+* Network calls
+* API latency
+* LLM token usage
+* Cloud resource consumption
+* Docker/container resources
+
+Avoid premature optimization, but do not ignore obvious performance problems.
+
+Document meaningful performance-related decisions.
+

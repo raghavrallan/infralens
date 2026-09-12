@@ -1,0 +1,56 @@
+---
+description: "# Security Rules
+
+Security must be considered for every implementation.
+
+Never:
+
+* Hardcode passwords, API keys, tokens, certificates, private keys, or credentials.
+* Commit secrets to Git.
+* Print secrets in logs.
+* Expose internal infrastructure unnecessarily.
+* Disable authentication or authorization just to make development easier.
+* Bypass security controls without explicit requirements.
+
+Prefer:
+
+* Environment variables.
+* Managed identities.
+* Secret managers.
+* Least-privilege permissions.
+* Private networking where appropriate.
+* Input validation.
+* Secure defaults.
+
+If a secret is accidentally discovered, do not reproduce it in documentation or responses. Flag it for rotation/removal.
+"
+alwaysApply: false
+---
+
+# Security Rules Security
+
+# Security Rules
+
+Security must be considered for every implementation.
+
+Never:
+
+* Hardcode passwords, API keys, tokens, certificates, private keys, or credentials.
+* Commit secrets to Git.
+* Print secrets in logs.
+* Expose internal infrastructure unnecessarily.
+* Disable authentication or authorization just to make development easier.
+* Bypass security controls without explicit requirements.
+
+Prefer:
+
+* Environment variables.
+* Managed identities.
+* Secret managers.
+* Least-privilege permissions.
+* Private networking where appropriate.
+* Input validation.
+* Secure defaults.
+
+If a secret is accidentally discovered, do not reproduce it in documentation or responses. Flag it for rotation/removal.
+

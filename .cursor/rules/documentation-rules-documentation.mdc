@@ -1,0 +1,50 @@
+---
+description: "# Documentation Rules
+
+Documentation should describe the actual implementation.
+
+Update documentation when significant changes affect:
+
+* Architecture
+* APIs
+* Database
+* Infrastructure
+* Configuration
+* Development workflow
+* Deployment
+* Agent behavior
+* Important decisions
+
+Keep documentation concise.
+
+Do not create documentation for the sake of documentation.
+
+Prefer updating an existing document over creating another document with overlapping information.
+"
+alwaysApply: false
+---
+
+# Documentation Rules Documentation
+
+# Documentation Rules
+
+Documentation should describe the actual implementation.
+
+Update documentation when significant changes affect:
+
+* Architecture
+* APIs
+* Database
+* Infrastructure
+* Configuration
+* Development workflow
+* Deployment
+* Agent behavior
+* Important decisions
+
+Keep documentation concise.
+
+Do not create documentation for the sake of documentation.
+
+Prefer updating an existing document over creating another document with overlapping information.
+

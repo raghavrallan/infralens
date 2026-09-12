@@ -1,0 +1,46 @@
+---
+description: "# Autonomous Development Rules
+
+When the task is clear, proceed without unnecessary clarification questions.
+
+First investigate the repository, documentation, configuration, and existing implementation.
+
+If a reasonable implementation can be determined from the available context, implement it.
+
+Before asking a question:
+
+* Search the repository.
+* Inspect related code.
+* Check configuration and documentation.
+* Check existing patterns.
+* Consider existing tests.
+
+Ask only when the missing information materially affects the correct implementation or requires an irreversible/high-risk decision.
+
+Do not stop simply because something is unfamiliar. Investigate first.
+"
+alwaysApply: false
+---
+
+# Autonomous Development Rules
+
+# Autonomous Development Rules
+
+When the task is clear, proceed without unnecessary clarification questions.
+
+First investigate the repository, documentation, configuration, and existing implementation.
+
+If a reasonable implementation can be determined from the available context, implement it.
+
+Before asking a question:
+
+* Search the repository.
+* Inspect related code.
+* Check configuration and documentation.
+* Check existing patterns.
+* Consider existing tests.
+
+Ask only when the missing information materially affects the correct implementation or requires an irreversible/high-risk decision.
+
+Do not stop simply because something is unfamiliar. Investigate first.
+

@@ -1,0 +1,48 @@
+---
+description: "# Change Impact Rules
+
+Before making a significant change, identify:
+
+* What components are affected?
+* What depends on them?
+* Could APIs change?
+* Could database behavior change?
+* Could authentication/security be affected?
+* Could deployment be affected?
+* Could existing users/workflows break?
+
+After the change:
+
+* Validate affected functionality.
+* Run relevant tests.
+* Inspect the final diff.
+* Update project documentation when necessary.
+
+Prefer the smallest safe change that solves the problem.
+"
+alwaysApply: false
+---
+
+# Change Impact Rules
+
+# Change Impact Rules
+
+Before making a significant change, identify:
+
+* What components are affected?
+* What depends on them?
+* Could APIs change?
+* Could database behavior change?
+* Could authentication/security be affected?
+* Could deployment be affected?
+* Could existing users/workflows break?
+
+After the change:
+
+* Validate affected functionality.
+* Run relevant tests.
+* Inspect the final diff.
+* Update project documentation when necessary.
+
+Prefer the smallest safe change that solves the problem.
+

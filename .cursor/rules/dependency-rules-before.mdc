@@ -1,0 +1,36 @@
+---
+description: "# Dependency Rules
+
+Before adding a dependency:
+
+1. Check whether the project already has an equivalent dependency.
+2. Check whether existing functionality can solve the problem.
+3. Consider maintenance, security, compatibility, and project complexity.
+4. Add the dependency only when justified.
+
+Keep dependency versions consistent with the project's existing strategy.
+
+Do not upgrade unrelated dependencies during a focused task.
+
+After adding or upgrading dependencies, run the relevant tests/build.
+"
+alwaysApply: false
+---
+
+# Dependency Rules Before
+
+# Dependency Rules
+
+Before adding a dependency:
+
+1. Check whether the project already has an equivalent dependency.
+2. Check whether existing functionality can solve the problem.
+3. Consider maintenance, security, compatibility, and project complexity.
+4. Add the dependency only when justified.
+
+Keep dependency versions consistent with the project's existing strategy.
+
+Do not upgrade unrelated dependencies during a focused task.
+
+After adding or upgrading dependencies, run the relevant tests/build.
+

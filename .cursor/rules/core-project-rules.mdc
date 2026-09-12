@@ -1,0 +1,36 @@
+---
+description: "# Core Project Rules
+
+* Treat the repository as the primary source of truth.
+* Understand existing code before making changes.
+* Never assume previous chat history is available.
+* Read relevant project documentation before starting significant work.
+* Prefer modifying existing functionality over creating duplicate implementations.
+* Preserve working behavior unless the task explicitly requires changing it.
+* Follow the existing project architecture and conventions.
+* Keep changes focused on the requested task.
+* Avoid unnecessary refactoring.
+* Do not introduce dependencies unless they provide clear value.
+* Never invent APIs, configuration, infrastructure, credentials, or project requirements.
+* If something is unclear, inspect the repository and configuration before making assumptions.
+"
+alwaysApply: false
+---
+
+# Core Project Rules
+
+# Core Project Rules
+
+* Treat the repository as the primary source of truth.
+* Understand existing code before making changes.
+* Never assume previous chat history is available.
+* Read relevant project documentation before starting significant work.
+* Prefer modifying existing functionality over creating duplicate implementations.
+* Preserve working behavior unless the task explicitly requires changing it.
+* Follow the existing project architecture and conventions.
+* Keep changes focused on the requested task.
+* Avoid unnecessary refactoring.
+* Do not introduce dependencies unless they provide clear value.
+* Never invent APIs, configuration, infrastructure, credentials, or project requirements.
+* If something is unclear, inspect the repository and configuration before making assumptions.
+
