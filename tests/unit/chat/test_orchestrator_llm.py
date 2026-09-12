@@ -144,32 +144,34 @@ def test_gather_code_cost_metrics_logs_and_security():
             failed = _gather_code_context("show terraform", "p1")
             assert failed and "FETCH FAILED" in failed
     with patch("app.chat.orchestrator.azure_infra.is_connected", return_value=False):
-        assert _gather_cost_context("billing last month", "p1") is None
-        assert _gather_metrics_context("cpu last 24 hours", "p1") == (None, [])
-        assert _gather_logs_context("show 500 errors", "p1") == (None, [])
+        with patch("app.chat.orchestrator.aws_infra.is_connected", return_value=False):
+            assert _gather_cost_context("billing last month", "p1") is None
+            assert _gather_metrics_context("cpu last 24 hours", "p1") == (None, [])
+            assert _gather_logs_context("show 500 errors", "p1") == (None, [])
     with patch("app.chat.orchestrator.azure_infra.is_connected", return_value=True):
-        with patch(
-            "app.chat.orchestrator.azure_infra.build_cost_report",
-            return_value={"text": "$12"},
-        ):
-            text = _gather_cost_context("what did we spend last month", "p1")
-            assert text and "LIVE AZURE BILLING" in text
-        with patch(
-            "app.chat.orchestrator.azure_infra.build_metrics_report",
-            return_value={"text": "cpu 2%", "charts": [{"id": "c"}]},
-        ):
-            text, charts = _gather_metrics_context("cpu last 24 hours", "p1")
-            assert text and charts
-        with patch(
-            "app.chat.orchestrator.azure_infra.build_status_report",
-            return_value={"text": "500=2", "charts": []},
-        ):
+        with patch("app.chat.orchestrator.aws_infra.is_connected", return_value=False):
             with patch(
-                "app.chat.orchestrator.azure_infra.build_logs_report",
-                return_value={"text": "boom"},
+                "app.chat.orchestrator.azure_infra.build_cost_report",
+                return_value={"text": "$12"},
             ):
-                text, _charts = _gather_logs_context("show me the errors and logs", "p1")
-                assert text and "TELEMETRY" in text
+                text = _gather_cost_context("what did we spend last month", "p1")
+                assert text and "LIVE AZURE BILLING" in text
+            with patch(
+                "app.chat.orchestrator.azure_infra.build_metrics_report",
+                return_value={"text": "cpu 2%", "charts": [{"id": "c"}]},
+            ):
+                text, charts = _gather_metrics_context("cpu last 24 hours", "p1")
+                assert text and charts
+            with patch(
+                "app.chat.orchestrator.azure_infra.build_status_report",
+                return_value={"text": "500=2", "charts": []},
+            ):
+                with patch(
+                    "app.chat.orchestrator.azure_infra.build_logs_report",
+                    return_value={"text": "boom"},
+                ):
+                    text, _charts = _gather_logs_context("show me the errors and logs", "p1")
+                    assert text and "TELEMETRY" in text
     with patch("app.chat.orchestrator._provider_block", return_value="AZURE LIVE"):
         with patch("app.chat.orchestrator.github_infra.is_connected", return_value=False):
             sec = _gather_security_context("find vulnerabilities", "p1")

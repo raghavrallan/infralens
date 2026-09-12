@@ -86,60 +86,67 @@ def test_correct_misrouted_steps_for_structural_and_security():
 def test_gather_metrics_logs_cost_and_code_paths():
     assert _gather_metrics_context("hello", "p1") == (None, [])
     with patch("app.chat.orchestrator.azure_infra.is_connected", return_value=False):
-        assert _gather_metrics_context("cpu last hour", "p1")[0] is None
+        with patch("app.chat.orchestrator.aws_infra.is_connected", return_value=False):
+            assert _gather_metrics_context("cpu last hour", "p1")[0] is None
     with patch("app.chat.orchestrator.azure_infra.is_connected", return_value=True):
-        with patch("app.chat.orchestrator._parse_metric_intent", return_value=(["container_app"], None, ["cpu"])):
-            with patch(
-                "app.chat.orchestrator.azure_infra.build_metrics_report",
-                return_value={"text": "cpu=1", "charts": [{"t": 1}]},
-            ):
-                text, charts = _gather_metrics_context("cpu for all apps", "p1")
+        with patch("app.chat.orchestrator.aws_infra.is_connected", return_value=False):
+            with patch("app.chat.orchestrator._parse_metric_intent", return_value=(["container_app"], None, ["cpu"])):
+                with patch(
+                    "app.chat.orchestrator.azure_infra.build_metrics_report",
+                    return_value={"text": "cpu=1", "charts": [{"t": 1}]},
+                ):
+                    text, charts = _gather_metrics_context("cpu for all apps", "p1")
     assert "LIVE AZURE METRICS" in (text or "")
     assert charts
     with patch("app.chat.orchestrator.azure_infra.is_connected", return_value=True):
-        with patch("app.chat.orchestrator._parse_metric_intent", return_value=(None, None, None)):
-            with patch(
-                "app.chat.orchestrator.azure_infra.build_metrics_report",
-                side_effect=azure_infra.AzureApiError("no reader"),
-            ):
-                failed, _c = _gather_metrics_context("cpu", "p1", force=True)
+        with patch("app.chat.orchestrator.aws_infra.is_connected", return_value=False):
+            with patch("app.chat.orchestrator._parse_metric_intent", return_value=(None, None, None)):
+                with patch(
+                    "app.chat.orchestrator.azure_infra.build_metrics_report",
+                    side_effect=azure_infra.AzureApiError("no reader"),
+                ):
+                    failed, _c = _gather_metrics_context("cpu", "p1", force=True)
     assert "FETCH FAILED" in (failed or "")
     with patch("app.chat.orchestrator.azure_infra.is_connected", return_value=True):
-        with patch(
-            "app.chat.orchestrator.azure_infra.build_status_report",
-            return_value={"text": "4xx=2", "charts": [{"t": 2}]},
-        ):
+        with patch("app.chat.orchestrator.aws_infra.is_connected", return_value=False):
             with patch(
-                "app.chat.orchestrator.azure_infra.build_logs_report",
-                return_value={"text": "boom"},
+                "app.chat.orchestrator.azure_infra.build_status_report",
+                return_value={"text": "4xx=2", "charts": [{"t": 2}]},
             ):
-                logs, log_charts = _gather_logs_context("show 500 errors and logs", "p1")
+                with patch(
+                    "app.chat.orchestrator.azure_infra.build_logs_report",
+                    return_value={"text": "boom"},
+                ):
+                    logs, log_charts = _gather_logs_context("show 500 errors and logs", "p1")
     assert "TELEMETRY" in (logs or "")
     assert log_charts
     with patch("app.chat.orchestrator.azure_infra.is_connected", return_value=True):
-        with patch(
-            "app.chat.orchestrator.azure_infra.build_status_report",
-            side_effect=azure_infra.AzureApiError("no traffic"),
-        ):
+        with patch("app.chat.orchestrator.aws_infra.is_connected", return_value=False):
             with patch(
-                "app.chat.orchestrator.azure_infra.build_logs_report",
-                side_effect=azure_infra.AzureApiError("no workspace"),
+                "app.chat.orchestrator.azure_infra.build_status_report",
+                side_effect=azure_infra.AzureApiError("no traffic"),
             ):
-                failed_logs, _ = _gather_logs_context("500 errors in the logs", "p1")
+                with patch(
+                    "app.chat.orchestrator.azure_infra.build_logs_report",
+                    side_effect=azure_infra.AzureApiError("no workspace"),
+                ):
+                    failed_logs, _ = _gather_logs_context("500 errors in the logs", "p1")
     assert "unavailable" in (failed_logs or "").lower() or "FAILED" in (failed_logs or "")
     with patch("app.chat.orchestrator.azure_infra.is_connected", return_value=True):
-        with patch(
-            "app.chat.orchestrator.azure_infra.build_cost_report",
-            return_value={"text": "$12"},
-        ):
-            cost = _gather_cost_context("how much did azure cost last month", "p1")
+        with patch("app.chat.orchestrator.aws_infra.is_connected", return_value=False):
+            with patch(
+                "app.chat.orchestrator.azure_infra.build_cost_report",
+                return_value={"text": "$12"},
+            ):
+                cost = _gather_cost_context("how much did azure cost last month", "p1")
     assert "BILLING" in (cost or "")
     with patch("app.chat.orchestrator.azure_infra.is_connected", return_value=True):
-        with patch(
-            "app.chat.orchestrator.azure_infra.build_cost_report",
-            side_effect=azure_infra.AzureApiError("no cm reader"),
-        ):
-            cost_fail = _gather_cost_context("billing", "p1", force=True)
+        with patch("app.chat.orchestrator.aws_infra.is_connected", return_value=False):
+            with patch(
+                "app.chat.orchestrator.azure_infra.build_cost_report",
+                side_effect=azure_infra.AzureApiError("no cm reader"),
+            ):
+                cost_fail = _gather_cost_context("billing", "p1", force=True)
     assert "FETCH FAILED" in (cost_fail or "")
     with patch("app.chat.orchestrator.github_infra.is_connected", return_value=True):
         with patch(
@@ -160,21 +167,22 @@ def test_gather_metrics_logs_cost_and_code_paths():
 @pytest.mark.unit
 def test_gather_live_context_and_plan_mode():
     with patch("app.chat.orchestrator.azure_infra.is_connected", return_value=True):
-        with patch("app.chat.orchestrator.github_infra.is_connected", return_value=False):
-            with patch("app.chat.orchestrator._gather_metrics_context", return_value=("METRICS", [{"c": 1}])):
-                with patch("app.chat.orchestrator._gather_logs_context", return_value=("LOGS", [])):
-                    with patch("app.chat.orchestrator._gather_cost_context", return_value="COST"):
-                        with patch("app.chat.orchestrator._gather_code_context", return_value=None):
-                            with patch("app.chat.orchestrator._gather_security_context", return_value=None):
-                                with patch("app.chat.orchestrator._provider_block", return_value="ENV"):
-                                    live, charts = _gather_live_context(
-                                        "cpu cost and logs",
-                                        "p1",
-                                        force=True,
-                                        force_cost=True,
-                                        force_metrics=True,
-                                        force_logs=True,
-                                    )
+        with patch("app.chat.orchestrator.aws_infra.is_connected", return_value=False):
+            with patch("app.chat.orchestrator.github_infra.is_connected", return_value=False):
+                with patch("app.chat.orchestrator._gather_metrics_context", return_value=("METRICS", [{"c": 1}])):
+                    with patch("app.chat.orchestrator._gather_logs_context", return_value=("LOGS", [])):
+                        with patch("app.chat.orchestrator._gather_cost_context", return_value="COST"):
+                            with patch("app.chat.orchestrator._gather_code_context", return_value=None):
+                                with patch("app.chat.orchestrator._gather_security_context", return_value=None):
+                                    with patch("app.chat.orchestrator._provider_block", return_value="ENV"):
+                                        live, charts = _gather_live_context(
+                                            "cpu cost and logs",
+                                            "p1",
+                                            force=True,
+                                            force_cost=True,
+                                            force_metrics=True,
+                                            force_logs=True,
+                                        )
     assert live
     assert charts or live
     parsed = {

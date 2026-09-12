@@ -1200,6 +1200,57 @@ def _gather_metrics_context(
     return "\n\n---\n\n".join(blocks), charts
 
 
+_LOG_TRIGGERS = (
+    "log",
+    "logs",
+    "error",
+    "errors",
+    "4xx",
+    "5xx",
+    "400",
+    "401",
+    "403",
+    "404",
+    "429",
+    "500",
+    "502",
+    "503",
+    "504",
+    "status code",
+    "status codes",
+    "failed request",
+    "failing",
+    "error rate",
+)
+
+
+# Phrasing that means "read the actual log lines / diagnose a failure".
+_LOG_CONTENT_TRIGGERS = (
+    "log",
+    "logs",
+    "revision",
+    "crash",
+    "crashed",
+    "restart",
+    "exception",
+    "traceback",
+    "stack trace",
+    "stacktrace",
+    "failed",
+    "failing",
+    "failure",
+    "provision",
+    "deploy",
+    "deployment",
+    "why is",
+    "what happened",
+    "root cause",
+    "diagnose",
+    "not starting",
+    "won't start",
+)
+
+
 def _gather_logs_context(
     task: str, project_id: str, force: bool = False
 ) -> tuple[Optional[str], list[dict[str, Any]]]:
