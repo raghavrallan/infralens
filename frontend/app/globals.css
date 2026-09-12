@@ -7794,3 +7794,15 @@ html[data-theme="dark"] .platform-role-badge.platform-dev {
 .arch-analysis { display: grid; gap: 8px; margin: 8px 0 0; }
 .arch-analysis h5 { margin: 0; font-size: 12px; text-transform: uppercase; color: var(--muted); }
 .arch-analysis ul { margin: 0; padding-left: 18px; font-size: 13px; }
+
+a.tile-link { text-decoration: none; color: inherit; display: block; }
+a.tile-link:hover { border-color: var(--accent, var(--border)); }
+.dash-overview-main { display: flex; flex-direction: column; gap: 20px; min-height: 0; flex: 1; overflow: auto; }
+a.module-tab {
+  text-decoration: none;
+  color: inherit;
+  box-sizing: border-box;
+}
+.dash-subnav a.module-tab {
+  width: 100%;
+}

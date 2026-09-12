@@ -1664,6 +1664,42 @@ def dashboard_page() -> FileResponse:
     return _frontend_page("dashboard")
 
 
+@app.get("/dashboard/findings")
+@app.get("/dashboard/findings/")
+def dashboard_findings_page() -> FileResponse:
+    return FileResponse(_FRONTEND_DIR / "dashboard" / "findings" / "index.html")
+
+
+@app.get("/dashboard/approvals")
+@app.get("/dashboard/approvals/")
+def dashboard_approvals_page() -> FileResponse:
+    return FileResponse(_FRONTEND_DIR / "dashboard" / "approvals" / "index.html")
+
+
+@app.get("/dashboard/workflows")
+@app.get("/dashboard/workflows/")
+def dashboard_workflows_page() -> FileResponse:
+    return FileResponse(_FRONTEND_DIR / "dashboard" / "workflows" / "index.html")
+
+
+@app.get("/dashboard/architecture")
+@app.get("/dashboard/architecture/")
+def dashboard_architecture_page() -> FileResponse:
+    return FileResponse(_FRONTEND_DIR / "dashboard" / "architecture" / "index.html")
+
+
+@app.get("/dashboard/engineering")
+@app.get("/dashboard/engineering/")
+def dashboard_engineering_page() -> FileResponse:
+    return FileResponse(_FRONTEND_DIR / "dashboard" / "engineering" / "index.html")
+
+
+@app.get("/dashboard/break-glass")
+@app.get("/dashboard/break-glass/")
+def dashboard_break_glass_page() -> FileResponse:
+    return FileResponse(_FRONTEND_DIR / "dashboard" / "break-glass" / "index.html")
+
+
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(_FRONTEND_DIR / "index.html")

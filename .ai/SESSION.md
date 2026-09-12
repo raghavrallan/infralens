@@ -1,37 +1,20 @@
 # SESSION.md
 
 Last session: 2026-09-12  
-Branch: `master` @ `87b9c60` (synced with `origin/master`)
+Branch: `feature/dashboard-declutter`
 
-## Purpose of this session
+## Purpose
 
-1. Checkout `master` and pull latest.
-2. Fully inspect the repository before further development.
-3. Create persistent project-memory: `.ai/*` + root `AGENTS.md`.
+Implement dashboard declutter: overview + Delivery on hub; move major surfaces to subroutes with sidebar sub-nav.
 
-## What was done
+## Done
 
-- Fast-forwarded local `master` from `185ffaf` → `87b9c60` (includes PR #33).
-- Read `README.md`, `.env.example`, `docs/solution-architect.md`, intelligence status/plan, skill registry, frontend config, CI workflows, `start-local.ps1`/Makefile conventions.
-- Confirmed no prior `.ai/` or `AGENTS.md` existed; created them from repository evidence only.
-- Did **not** change application code for this task.
+- `DashboardShell` + `lib/dashboard.ts` shared chrome/context
+- Overview hub with clickable metric tiles + DeliveryChecklist + MemoryStrip
+- Subroutes: findings, approvals, workflows, architecture, engineering, break-glass
+- FastAPI routes for nested dashboard HTML
+- `npm run typecheck` and `npm run build` green (static export includes all dashboard pages)
 
-## Working tree noise (left alone)
+## Handoff
 
-- `M frontend/next-env.d.ts` — Next auto-generated path noise
-- `?? _/` — untracked local directory
-
-## Handoff for the next agent
-
-1. Read `AGENTS.md` then `.ai/PROJECT_CONTEXT.md` + this file.
-2. Confirm git: `git status -sb` on `master`; pull if behind.
-3. For local UI: use `.\start-local.ps1 start` (webpack). If Turbopack panics return, see `BUGS.md` B-001.
-4. Product next work is roadmap items in `TODO.md` (actuation, approvals UX, memory→risk feedback, SSO, MCP) unless humans specify otherwise.
-5. After your session, update this `SESSION.md` and bump relevant `.ai` files.
-
-## Do not
-
-- Invent architecture facts without reading code/docs
-- Commit `.env` or secrets
-- Force-push `master`
-- Re-enable default Turbopack locally without addressing parent lockfile root detection
+Restart frontend (`start-local.ps1` or next dev) and open `/dashboard/`. Use left sub-nav for other areas.
