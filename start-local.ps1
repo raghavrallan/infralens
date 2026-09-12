@@ -833,7 +833,7 @@ function Write-ChildScripts {
         "  pause"
         "  exit /b 1"
         ")"
-        "`"$nodeExe`" `"$nextCli`" dev --hostname $FrontendHost --port $FrontendPort"
+        "`"$nodeExe`" `"$nextCli`" dev --webpack --hostname $FrontendHost --port $FrontendPort"
         "echo."
         "echo Frontend exited. If this failed, check Node/Next install and re-run setup."
         "echo Press any key to close this window."
