@@ -12,6 +12,18 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# Local/isolated delivery plan+init run on the API host (not silent apply).
+ARG TERRAFORM_VERSION=1.11.4
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl unzip ca-certificates \
+    && curl -fsSL "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip" -o /tmp/terraform.zip \
+    && unzip /tmp/terraform.zip -d /usr/local/bin \
+    && chmod +x /usr/local/bin/terraform \
+    && rm -f /tmp/terraform.zip \
+    && apt-get purge -y curl unzip \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 ARG PIP_TRUSTED_HOSTS=""
 RUN if [ -n "$PIP_TRUSTED_HOSTS" ]; then \
