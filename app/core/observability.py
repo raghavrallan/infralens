@@ -2,13 +2,20 @@
 
 Chat turns use chat_id as session_id so Langfuse Sessions group a conversation.
 Authenticated username/id is attached as user_id for per-user cost and quality.
+
+Langfuse is optional: when the host (e.g. aigovernance.mooglelabs.com) is down or
+unreachable, the app continues with in-code prompt fallbacks and no tracing.
 """
 from __future__ import annotations
 
+import logging
 import os
+import threading
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, Iterator, Optional
+
+logger = logging.getLogger(__name__)
 
 _session_id: ContextVar[Optional[str]] = ContextVar("langfuse_session_id", default=None)
 _user_id: ContextVar[Optional[str]] = ContextVar("langfuse_user_id", default=None)
@@ -19,6 +26,14 @@ _generation_name: ContextVar[Optional[str]] = ContextVar(
 )
 # Most recently fetched Langfuse prompt object (linked on the next generation).
 _active_prompt: ContextVar[Any] = ContextVar("langfuse_active_prompt", default=None)
+
+# Process-wide circuit breaker: once Langfuse times out, skip further remote calls
+# for this process so startup / chat do not stall on a dead host.
+_unreachable_lock = threading.Lock()
+_unreachable = False
+_unreachable_reason = ""
+_client_lock = threading.Lock()
+_client: Any = None
 
 
 def tracing_enabled() -> bool:
@@ -34,12 +49,99 @@ def tracing_enabled() -> bool:
     )
 
 
+def client_timeout_seconds() -> int:
+    """HTTP timeout for Langfuse SDK calls. Keep short so a dead host cannot stall boot."""
+    raw = os.environ.get("LANGFUSE_TIMEOUT", "3")
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 3
+
+
+def prompt_fetch_timeout_seconds() -> int:
+    raw = os.environ.get("LANGFUSE_PROMPT_FETCH_TIMEOUT", str(client_timeout_seconds()))
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return client_timeout_seconds()
+
+
 def ensure_host_alias() -> None:
     """Langfuse accepts BASE_URL; some SDK paths still read HOST."""
     base = os.environ.get("LANGFUSE_BASE_URL") or os.environ.get("LANGFUSE_HOST")
     if base:
         os.environ.setdefault("LANGFUSE_BASE_URL", base)
         os.environ.setdefault("LANGFUSE_HOST", base)
+
+
+def langfuse_unreachable() -> bool:
+    return _unreachable
+
+
+def mark_langfuse_unreachable(reason: str) -> None:
+    """Trip the circuit breaker after a timeout / connection failure."""
+    global _unreachable, _unreachable_reason
+    with _unreachable_lock:
+        if _unreachable:
+            return
+        _unreachable = True
+        _unreachable_reason = (reason or "unreachable").strip() or "unreachable"
+        logger.warning(
+            "Langfuse unavailable (%s); continuing without remote prompts/tracing for this process",
+            _unreachable_reason,
+        )
+
+
+def reset_langfuse_circuit_for_tests() -> None:
+    """Test helper only — clear circuit breaker and cached client."""
+    global _unreachable, _unreachable_reason, _client
+    with _unreachable_lock:
+        _unreachable = False
+        _unreachable_reason = ""
+    with _client_lock:
+        _client = None
+
+
+def get_langfuse_client() -> Any:
+    """Return a Langfuse client with a short timeout, or raise if tracing is off."""
+    if not tracing_enabled():
+        raise RuntimeError("Langfuse tracing is disabled")
+    if _unreachable:
+        raise RuntimeError(f"Langfuse unreachable: {_unreachable_reason or 'skipped'}")
+    ensure_host_alias()
+    global _client
+    with _client_lock:
+        if _client is None:
+            from langfuse import Langfuse
+
+            _client = Langfuse(timeout=client_timeout_seconds())
+        return _client
+
+
+def probe_langfuse() -> bool:
+    """Fast reachability check. False means callers should use local fallbacks only."""
+    if not tracing_enabled() or _unreachable:
+        return False
+    ensure_host_alias()
+    base = (
+        os.environ.get("LANGFUSE_BASE_URL")
+        or os.environ.get("LANGFUSE_HOST")
+        or "https://cloud.langfuse.com"
+    ).rstrip("/")
+    timeout = float(client_timeout_seconds())
+    try:
+        import httpx
+
+        with httpx.Client(timeout=timeout) as http:
+            # Prefer health; any HTTP response means the host is reachable.
+            response = http.get(f"{base}/api/public/health")
+            if response.status_code >= 500:
+                mark_langfuse_unreachable(f"health HTTP {response.status_code}")
+                return False
+            return True
+    except Exception as exc:  # noqa: BLE001 — optional dependency path
+        mark_langfuse_unreachable(str(exc) or exc.__class__.__name__)
+        return False
 
 
 def bind_tracing(
@@ -138,24 +240,40 @@ def take_active_prompt() -> Any:
     return prompt
 
 
+def is_transport_error(exc: BaseException) -> bool:
+    text = f"{exc.__class__.__name__}: {exc}".lower()
+    needles = (
+        "timed out",
+        "timeout",
+        "connection",
+        "connecterror",
+        "unreachable",
+        "name or service not known",
+        "getaddrinfo",
+        "temporarily unavailable",
+        "failed to establish",
+    )
+    return any(n in text for n in needles)
+
+
 def flush() -> None:
-    if not tracing_enabled():
+    if not tracing_enabled() or _unreachable:
         return
     try:
-        from langfuse import get_client
-
-        get_client().flush()
-    except Exception:
+        get_langfuse_client().flush()
+    except Exception as exc:  # noqa: BLE001
+        if is_transport_error(exc):
+            mark_langfuse_unreachable(str(exc))
         return
 
 
 def auth_check() -> bool:
-    if not tracing_enabled():
+    if not tracing_enabled() or _unreachable:
         return False
     ensure_host_alias()
     try:
-        from langfuse import get_client
-
-        return bool(get_client().auth_check())
-    except Exception:
+        return bool(get_langfuse_client().auth_check())
+    except Exception as exc:  # noqa: BLE001
+        if is_transport_error(exc):
+            mark_langfuse_unreachable(str(exc))
         return False

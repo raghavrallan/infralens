@@ -29,6 +29,19 @@ def _fallback_compile(template: str, variables: Optional[dict[str, Any]]) -> str
     return _VAR_RE.sub(repl, template)
 
 
+def _handle_langfuse_failure(name: str, exc: BaseException, *, action: str) -> None:
+    if observability.is_transport_error(exc):
+        observability.mark_langfuse_unreachable(str(exc) or exc.__class__.__name__)
+        logger.warning(
+            "Langfuse %s for %s failed (%s); using local prompts for this process",
+            action,
+            name,
+            exc,
+        )
+    else:
+        logger.debug("Langfuse %s for %s unavailable (%s)", action, name, exc)
+
+
 def get_text_prompt(
     name: str,
     *,
@@ -37,17 +50,21 @@ def get_text_prompt(
     label: str = "production",
 ) -> str:
     """Return a compiled text prompt from Langfuse, or the local fallback."""
-    if not observability.tracing_enabled():
+    if not observability.tracing_enabled() or observability.langfuse_unreachable():
         return _fallback_compile(fallback, variables)
     try:
-        from langfuse import get_client
-
-        prompt = get_client().get_prompt(name, label=label)
+        client = observability.get_langfuse_client()
+        prompt = client.get_prompt(
+            name,
+            label=label,
+            max_retries=0,
+            fetch_timeout_seconds=observability.prompt_fetch_timeout_seconds(),
+        )
         observability.set_active_prompt(prompt)
         compiled = prompt.compile(**(variables or {}))
         return compiled if isinstance(compiled, str) else str(compiled)
     except Exception as exc:  # noqa: BLE001 — always degrade gracefully
-        logger.debug("Langfuse prompt %s unavailable (%s); using fallback", name, exc)
+        _handle_langfuse_failure(name, exc, action="fetch")
         return _fallback_compile(fallback, variables)
 
 
@@ -58,14 +75,17 @@ def ensure_text_prompt(
     label: str = "production",
 ) -> None:
     """Create the prompt in Langfuse when it does not already exist."""
-    if not observability.tracing_enabled():
+    if not observability.tracing_enabled() or observability.langfuse_unreachable():
         return
     try:
-        from langfuse import get_client
-
-        client = get_client()
+        client = observability.get_langfuse_client()
         try:
-            client.get_prompt(name, label=label)
+            client.get_prompt(
+                name,
+                label=label,
+                max_retries=0,
+                fetch_timeout_seconds=observability.prompt_fetch_timeout_seconds(),
+            )
             return
         except Exception:
             client.create_prompt(
@@ -75,12 +95,20 @@ def ensure_text_prompt(
                 labels=[label],
             )
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Could not ensure Langfuse prompt %s: %s", name, exc)
+        _handle_langfuse_failure(name, exc, action="ensure")
 
 
 def seed_core_prompts() -> None:
-    """Push core + skill system prompts into Langfuse (idempotent)."""
+    """Push core + skill system prompts into Langfuse (idempotent).
+
+    Skips entirely when Langfuse is disabled or the host fails a short probe so
+    API startup is never blocked on an unreachable aigovernance/Langfuse host.
+    """
     if not observability.tracing_enabled():
+        return
+    if observability.langfuse_unreachable():
+        return
+    if not observability.probe_langfuse():
         return
 
     from app.chat.chat_memory import MEMORY_SYSTEM_PROMPT
@@ -93,17 +121,22 @@ def seed_core_prompts() -> None:
     from app.skills import registry
 
     ensure_text_prompt("orchestrator-system", ORCHESTRATOR_SYSTEM_PROMPT)
+    if observability.langfuse_unreachable():
+        return
     ensure_text_prompt("planner-system", PLANNER_SYSTEM_PROMPT_TEMPLATE)
     ensure_text_prompt("detailed-plan-system", DETAILED_PLAN_SYSTEM_PROMPT_TEMPLATE)
     ensure_text_prompt("chat-memory-system", MEMORY_SYSTEM_PROMPT)
     ensure_text_prompt("finding-extract-system", EXTRACT_SYSTEM_PROMPT_FALLBACK)
 
     for skill in registry.all():
+        if observability.langfuse_unreachable():
+            return
         if skill.system_prompt:
             ensure_text_prompt(f"skill-{skill.name}", skill.system_prompt)
     try:
         from app.agents.solution_architect.prompts import seed_architect_prompts
 
-        seed_architect_prompts()
+        if not observability.langfuse_unreachable():
+            seed_architect_prompts()
     except Exception:
         pass

@@ -59,8 +59,16 @@ async def lifespan(_: FastAPI):
     from app.core.db import ensure_tenancy_seed
 
     ensure_tenancy_seed()
+    # Langfuse is optional. Seed in a daemon thread with a short host probe so a
+    # dead aigovernance/Langfuse URL cannot block Uvicorn from accepting traffic.
     try:
-        prompts.seed_core_prompts()
+        import threading
+
+        threading.Thread(
+            target=prompts.seed_core_prompts,
+            name="langfuse-prompt-seed",
+            daemon=True,
+        ).start()
     except Exception:
         pass
     intel.seed_default_workflows(DEFAULT_PROJECT_ID)
