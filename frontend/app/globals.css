@@ -3101,16 +3101,17 @@ select option:hover {
 }
 
 .dash-sidebar-nav {
-  width: 240px;
+  width: 220px;
   flex-shrink: 0;
   border-right: 1px solid var(--border);
-  padding: 28px 24px 24px 20px;
+  padding: 20px 16px 24px 12px;
   display: flex;
   flex-direction: column;
   overflow-y: auto;
   position: sticky;
   top: 0;
-  height: 100vh;
+  align-self: flex-start;
+  max-height: 100%;
 }
 
 .dash-sidebar-nav .nav-heading {
@@ -3127,7 +3128,7 @@ select option:hover {
 .dash {
   position: relative;
   z-index: 1;
-  padding: 28px 32px 24px;
+  padding: 20px 28px 24px;
   animation: fade-up 0.6s ease both;
   flex: 1;
   min-height: 0;
@@ -3145,9 +3146,9 @@ select option:hover {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 24px;
+  gap: 16px;
   flex-wrap: wrap;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 
 .dash-context {
@@ -7794,3 +7795,249 @@ html[data-theme="dark"] .platform-role-badge.platform-dev {
 .arch-analysis { display: grid; gap: 8px; margin: 8px 0 0; }
 .arch-analysis h5 { margin: 0; font-size: 12px; text-transform: uppercase; color: var(--muted); }
 .arch-analysis ul { margin: 0; padding-left: 18px; font-size: 13px; }
+
+a.tile-link { text-decoration: none; color: inherit; display: block; }
+a.tile-link:hover { border-color: var(--accent, var(--border)); }
+.dash-overview-main { display: flex; flex-direction: column; gap: 20px; min-height: 0; flex: 1; overflow: auto; }
+a.module-tab {
+  text-decoration: none;
+  color: inherit;
+  box-sizing: border-box;
+}
+.dash-subnav a.module-tab {
+  width: 100%;
+}
+
+.findings-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  flex: 1;
+}
+
+.findings-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 4px;
+}
+
+.findings-module-select,
+.findings-status-select {
+  min-width: 160px;
+}
+
+.findings-severity-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex: 1;
+}
+
+.findings-feed-compact {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding-right: 4px;
+  margin-top: 0;
+}
+
+.finding-card-compact {
+  padding: 10px 14px;
+  box-shadow: none;
+}
+
+.finding-card-compact .finding-title {
+  margin: 4px 0 2px;
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.finding-card-compact .finding-meta {
+  margin-bottom: 4px;
+  gap: 8px;
+}
+
+.finding-card-compact .finding-top {
+  margin-bottom: 2px;
+}
+
+.finding-preview {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.finding-card-compact .finding-body {
+  margin-bottom: 8px;
+}
+
+.finding-card-compact .finding-actions {
+  margin-top: 2px;
+  gap: 6px;
+}
+
+.findings-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 48px 24px;
+  text-align: center;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.findings-empty h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.findings-empty p {
+  margin: 0;
+  max-width: 360px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.dash-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  flex: 1;
+}
+
+.dash-page-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.dash-panel-label {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.dash-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.dash-item {
+  margin: 0;
+}
+
+.dash-feed-more {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0 4px;
+}
+
+.dash-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 48px 24px;
+  text-align: center;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.dash-empty h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.dash-empty p {
+  margin: 0;
+  max-width: 360px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.workflows-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 20px;
+  min-height: 0;
+  flex: 1;
+}
+
+.workflows-column {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  min-width: 0;
+}
+
+.workflows-column .dash-feed {
+  max-height: calc(100vh - 220px);
+}
+
+.architecture-details {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.architecture-mermaid {
+  white-space: pre-wrap;
+  font-size: 12px;
+  margin: 0;
+}
+
+@media (max-width: 1100px) {
+  .workflows-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dash-item.approval-card,
+.dash-item.workflow-card,
+.dash-item.finding-card {
+  padding: 10px 14px;
+  box-shadow: none;
+}
+
+.dash-item .finding-title {
+  margin: 4px 0 2px;
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.dash-item .finding-meta {
+  margin-bottom: 4px;
+}
+
+.dash-item.run-item {
+  width: 100%;
+  text-align: left;
+}
+
+.dash-item.approval-card .finding-actions,
+.dash-item.finding-card .finding-actions {
+  flex-wrap: wrap;
+}
