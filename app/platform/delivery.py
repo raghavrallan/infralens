@@ -197,6 +197,8 @@ def transition(
             raise ValueError("Delivery run is not active")
         current_idx = STAGES.index(row.stage) if row.stage in STAGES else 0
         target_idx = STAGES.index(to_stage)
+        from_stage = row.stage
+        project_id = row.project_id
         if target_idx > current_idx + 1:
             raise ValueError("Cannot skip delivery stages")
         if target_idx < current_idx:
@@ -226,6 +228,7 @@ def transition(
             session.refresh(row)
             payload = _dict(row)
             _enqueue_architecture_job(run_id)
+            _emit_stage_webhook(run_id, project_id, from_stage, to_stage, approved_by)
             return payload
         if to_stage == "terraform" and "terraform_pr" not in artifacts:
             model = (artifacts.get("architecture_proposal") or {}).get("architecture") or {}
@@ -272,7 +275,32 @@ def transition(
         row.updated_at = _now()
         session.commit()
         session.refresh(row)
-        return _dict(row)
+        payload = _dict(row)
+    _emit_stage_webhook(run_id, project_id, from_stage, to_stage, approved_by)
+    return payload
+
+
+def _emit_stage_webhook(
+    run_id: str,
+    project_id: str,
+    from_stage: str,
+    to_stage: str,
+    actor: str = "",
+) -> None:
+    try:
+        from app.integrations import n8n_schemas, webhooks
+
+        webhooks.emit_event_async(
+            n8n_schemas.delivery_stage_changed(
+                delivery_run_id=run_id,
+                project_id=project_id,
+                from_stage=from_stage,
+                to_stage=to_stage,
+                actor=actor,
+            )
+        )
+    except Exception:
+        return
 
 
 def retry_architecture(run_id: str, *, user_role: str) -> dict[str, Any]:

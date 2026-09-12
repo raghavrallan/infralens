@@ -123,6 +123,20 @@ def run_workflow(run_id: str) -> dict[str, int]:
                 )
             count = store.save_findings(run_id, workflow["id"], project_id, collected)
             store.mark_run_succeeded(run_id, count)
+            try:
+                from app.integrations import n8n_schemas, webhooks
+
+                webhooks.emit_event_async(
+                    n8n_schemas.workflow_run_completed(
+                        run_id=run_id,
+                        workflow_id=workflow["id"],
+                        project_id=project_id,
+                        status="succeeded",
+                        finding_count=count,
+                    )
+                )
+            except Exception:
+                pass
             return {"findings": count}
         except Exception as exc:  # noqa: BLE001 - record the failure on the run
             store.mark_run_failed(run_id, str(exc))

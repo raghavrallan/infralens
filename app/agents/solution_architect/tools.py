@@ -95,6 +95,14 @@ def get_code_artifacts(project_id: str, kinds: Optional[list[str]] = None) -> st
 
 def search_precedent(project_id: str, skill: str = "solution_architect") -> str:
     try:
+        from app.agents.runtime.retrievers import get_precedent_retriever
+
+        text = get_precedent_retriever(project_id, limit=8).as_text(skill=skill)
+        if text and "No engineering precedent" not in text:
+            return _clip(text, 8000)
+    except Exception:
+        pass
+    try:
         from app.platform.engineering.knowledge import architect_context
 
         ctx = architect_context(project_id)

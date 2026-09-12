@@ -27,7 +27,10 @@ Production: one Uvicorn process serves `/api/*` and mounts `frontend/out`.
 | `app/chat` | Agent/Plan modes, multi-skill planning, SSE stream, chat memory |
 | `app/skills` | ~20 registered skills; `classification.py` marks workflow-safe diagnose set |
 | `app/intelligence` | Six modules, runs, findings, risk engine, APScheduler, RQ worker |
-| `app/agents/solution_architect` | Sequential graph: clarify → explore → design → critique → verify → finalize |
+| `app/agents/solution_architect` | Sequential graph (default) or LangGraph when `ARCHITECT_LANGGRAPH=true`: clarify → explore → design → critique → verify → finalize |
+| `app/agents/runtime` | Shared LLM factory, loop policies, feature flags, LC tools/retrievers |
+| `app/agents/debug_graph` | Bounded ReAct facade over execution debug_loop (`DEBUG_REACT_ENABLED`) |
+| `app/integrations` | Signed outbound webhooks + n8n event schemas (`N8N_WEBHOOKS_ENABLED`) |
 | `app/platform` | Connections, delivery stages, break-glass, engineering IaC/tasks/memory |
 | `app/execution` | Structured provider actions, Terraform runner, org RQ queues |
 | `app/providers` | Azure/AWS/GitHub inventory adapters |

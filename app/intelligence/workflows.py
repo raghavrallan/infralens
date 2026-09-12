@@ -577,9 +577,9 @@ def _ensure_pending_approval(
     finding_id: str,
     project_id: str,
     gate: str,
-) -> None:
+) -> Optional[str]:
     if gate not in _APPROVAL_GATES:
-        return
+        return None
     existing = session.scalar(
         select(Approval.id).where(
             Approval.finding_id == finding_id,
@@ -587,10 +587,11 @@ def _ensure_pending_approval(
         )
     )
     if existing:
-        return
+        return None
+    approval_id = str(uuid.uuid4())
     session.add(
         Approval(
-            id=str(uuid.uuid4()),
+            id=approval_id,
             finding_id=finding_id,
             project_id=project_id,
             gate=gate,
@@ -598,6 +599,7 @@ def _ensure_pending_approval(
             expires_at=_now() + timedelta(hours=_APPROVAL_TTL_HOURS),
         )
     )
+    return approval_id
 
 
 def collapse_duplicate_findings(project_id: str) -> int:
@@ -692,6 +694,7 @@ def save_findings(
     if not findings:
         return 0
     written = 0
+    created_approvals: list[tuple[str, str, str, str, str]] = []
     with SessionLocal() as session:
         # autoflush=False: session.get() does not see rows added earlier in this
         # loop, so keep the ORM objects and reuse them instead of INSERTing the
@@ -722,12 +725,22 @@ def save_findings(
                     identity.last_seen_at = _now()
                     pending_identities[fp] = identity
                 pending_findings[fp] = existing
-                _ensure_pending_approval(
+                approval_id = _ensure_pending_approval(
                     session,
                     finding_id=existing.id,
                     project_id=project_id,
                     gate=gate,
                 )
+                if approval_id:
+                    created_approvals.append(
+                        (
+                            approval_id,
+                            existing.id,
+                            gate,
+                            existing.severity or "",
+                            existing.title or "",
+                        )
+                    )
                 written += 1
                 continue
 
@@ -772,14 +785,41 @@ def save_findings(
                 identity.occurrence_count = int(identity.occurrence_count or 1) + 1
                 identity.last_seen_at = _now()
             pending_identities[fp] = identity
-            _ensure_pending_approval(
+            approval_id = _ensure_pending_approval(
                 session,
                 finding_id=finding_id,
                 project_id=project_id,
                 gate=gate,
             )
+            if approval_id:
+                created_approvals.append(
+                    (
+                        approval_id,
+                        finding_id,
+                        gate,
+                        item.get("severity", "low") or "low",
+                        title,
+                    )
+                )
             written += 1
         session.commit()
+    if created_approvals:
+        try:
+            from app.integrations import n8n_schemas, webhooks
+
+            for approval_id, finding_id, gate, severity, title in created_approvals:
+                webhooks.emit_event_async(
+                    n8n_schemas.approval_created(
+                        approval_id=approval_id,
+                        finding_id=finding_id,
+                        project_id=project_id,
+                        gate=gate,
+                        severity=severity,
+                        title=title,
+                    )
+                )
+        except Exception:
+            pass
     return written
 
 
@@ -1000,7 +1040,22 @@ def decide_approval(
                 )
             )
         session.commit()
-        return _approval_dict(approval, finding)
+        result = _approval_dict(approval, finding)
+    try:
+        from app.integrations import n8n_schemas, webhooks
+
+        webhooks.emit_event_async(
+            n8n_schemas.approval_decided(
+                approval_id=approval_id,
+                project_id=str(result.get("project_id") or ""),
+                decision=decision,
+                decided_by=str(result.get("decided_by") or decided_by or ""),
+                title=str((result.get("finding") or {}).get("title") or result.get("title") or ""),
+            )
+        )
+    except Exception:
+        pass
+    return result
 
 
 def _pending_approvals(session: Any, project_id: str) -> int:
