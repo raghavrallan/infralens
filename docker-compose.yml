@@ -94,11 +94,10 @@ services:
       redis:
         condition: service_healthy
 
-  # On-prem n8n is mandatory for our server deploy (gha-deploy enables profile "n8n").
-  # Local/full stack: docker compose --profile container-app --profile n8n up -d
-  # Optional skip: omit --profile n8n (or set REQUIRE_N8N=false on a fork deploy).
+  # On-prem n8n is mandatory for our server (container-app profile).
+  # Forks: docker compose -f docker-compose.yml -f docker-compose.without-n8n.yml --profile container-app up -d
   n8n:
-    profiles: ["n8n"]
+    profiles: ["container-app"]
     image: n8nio/n8n:1.82.3
     container_name: devsecops-n8n
     restart: unless-stopped
@@ -112,7 +111,9 @@ services:
       WEBHOOK_URL: ${N8N_PUBLIC_WEBHOOK_URL:-http://127.0.0.1:5678/}
       GENERIC_TIMEZONE: ${GENERIC_TIMEZONE:-Asia/Kolkata}
       TZ: ${GENERIC_TIMEZONE:-Asia/Kolkata}
-      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY in .env}
+      # Do not use ${VAR:?} — Compose interpolates all services and broke deploy when .env lacked the key.
+      # Prefer a real key in .env; gha-deploy.sh auto-generates one when missing.
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-infralens-onprem-n8n-change-me}
       N8N_DIAGNOSTICS_ENABLED: "false"
       N8N_PERSONALIZATION_ENABLED: "false"
       N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
