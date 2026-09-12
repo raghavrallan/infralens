@@ -7806,3 +7806,92 @@ a.module-tab {
 .dash-subnav a.module-tab {
   width: 100%;
 }
+
+.findings-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  flex: 1;
+}
+
+.findings-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 4px;
+}
+
+.findings-module-select,
+.findings-status-select {
+  min-width: 160px;
+}
+
+.findings-severity-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex: 1;
+}
+
+.findings-feed-compact {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.finding-card-compact {
+  padding: 14px 16px;
+}
+
+.finding-card-compact .finding-title {
+  margin: 8px 0 4px;
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.finding-card-compact .finding-meta {
+  margin-bottom: 8px;
+}
+
+.finding-preview {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.finding-card-compact .finding-body {
+  margin-bottom: 10px;
+}
+
+.findings-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 48px 24px;
+  text-align: center;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.findings-empty h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.findings-empty p {
+  margin: 0;
+  max-width: 360px;
+  color: var(--muted);
+  font-size: 14px;
+}
