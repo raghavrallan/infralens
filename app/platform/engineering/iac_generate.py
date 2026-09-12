@@ -41,7 +41,22 @@ def generate_artifact_content(
 ) -> str:
     architecture = load_architecture(project_id, delivery_run_id)
     cloud = str(architecture.get("cloud") or "azure")
-    lowered = (name or "").lower()
+    lowered = (name or "").lower().replace("\\", "/")
+    # Prefer architecture-driven module/env tree when path requests it.
+    if lowered.startswith("modules/") or lowered.startswith("envs/") or lowered in {"readme.md"}:
+        env = "dev"
+        for part in lowered.split("/"):
+            if part in {"dev", "stage", "staging", "prod", "production", "test"}:
+                env = "prod" if part.startswith("prod") else ("stage" if part.startswith("stage") else part)
+                break
+        tree = generate_module_env_tree(architecture, env=env)
+        if lowered in tree:
+            return tree[lowered]
+        # fuzzy: basename match
+        base = lowered.rsplit("/", 1)[-1]
+        for path_key, content in tree.items():
+            if path_key.endswith("/" + base) or path_key == base:
+                return content
     if kind == "terraform" or lowered.endswith(".tf"):
         return _terraform_file(lowered, title, cloud, architecture)
     if kind in {"yaml", "cicd", "kubernetes"} or lowered.endswith((".yml", ".yaml")):
@@ -49,6 +64,7 @@ def generate_artifact_content(
     if kind == "python" or lowered.endswith(".py"):
         return _smoke_test(title)
     return _document(name, title, description, architecture)
+
 
 
 def _terraform_file(name: str, title: str, cloud: str, architecture: dict[str, Any]) -> str:
@@ -552,12 +568,164 @@ resource "aws_secretsmanager_secret_version" "app" {
 """
 
 
+
+
+def _slug(value: str) -> str:
+    cleaned = "".join(ch.lower() if ch.isalnum() else "-" for ch in (value or "component"))
+    while "--" in cleaned:
+        cleaned = cleaned.replace("--", "-")
+    return cleaned.strip("-")[:48] or "component"
+
+
+
+
+def _llm_enrich_module(name: str, purpose: str, cloud: str, skeleton: str) -> str:
+    """Optionally refine a module skeleton with LangChain; fall back to skeleton."""
+    try:
+        from app.agents.runtime.llm import get_chat_llm
+        llm = get_chat_llm(temperature=0.1)
+        prompt = (
+            "Return Terraform HCL only for a reusable module. "
+            f"Cloud={cloud}. Module={name}. Purpose={purpose}. "
+            "Keep variables name_prefix and tags. No markdown fences.\n\n"
+            f"Starting point:\n{skeleton[:3000]}"
+        )
+        raw = llm.invoke(prompt)
+        text = getattr(raw, "content", None) or str(raw)
+        if isinstance(text, list):
+            text = "".join(str(part) for part in text)
+        text = str(text).strip()
+        if "```" in text:
+            text = text.split("```")[1]
+            if text.startswith("hcl") or text.startswith("terraform"):
+                text = text.split("\n", 1)[-1]
+        if "resource " in text or "module " in text or "variable " in text:
+            return text.strip() + "\n"
+    except Exception:
+        pass
+    return skeleton
+
+
+def generate_module_env_tree(
+    architecture: dict[str, Any],
+    *,
+    env: str = "dev",
+) -> dict[str, str]:
+    """Return path->content for modules/<component> + envs/<env> root wiring."""
+    cloud = str(architecture.get("cloud") or architecture.get("provider") or "azure").lower()
+    components = [
+        item for item in (architecture.get("components") or []) if isinstance(item, dict)
+    ]
+    if not components:
+        components = [
+            {"name": "network", "service": "network"},
+            {"name": "compute", "service": "compute"},
+            {"name": "data", "service": "database"},
+        ]
+    files: dict[str, str] = {}
+    module_names: list[str] = []
+    for item in components[:12]:
+        name = _slug(str(item.get("name") or item.get("service") or "component"))
+        module_names.append(name)
+        service = str(item.get("service") or item.get("type") or name).lower()
+        purpose = str(item.get("purpose") or item.get("description") or title_case(name))
+        kind_hint = "network" if "net" in service or "vnet" in service or "vpc" in service else (
+            "database" if any(tok in service for tok in ("db", "sql", "postgres", "mysql", "cosmos")) else (
+            "compute" if any(tok in service for tok in ("compute", "app", "container", "vm", "aks", "ecs", "function")) else (
+            "storage" if "stor" in service or "blob" in service or "s3" in service else (
+            "secret" if "secret" in service or "vault" in service else "generic"))))
+        body = _terraform_file(f"{kind_hint}.tf", purpose, cloud if cloud in {"azure", "aws"} else "azure", architecture)
+        files[f"modules/{name}/main.tf"] = _llm_enrich_module(
+            name, purpose, cloud,
+            f"# Module: {name}\n# Purpose: {purpose}\n# Cloud: {cloud}\n\n" + body,
+        )
+        files[f"modules/{name}/variables.tf"] = (
+            'variable "name_prefix" {\n  type = string\n}\n\n'
+            'variable "tags" {\n  type = map(string)\n  default = {}\n}\n'
+        )
+        files[f"modules/{name}/outputs.tf"] = (
+            'output "module_name" {\n  value = "' + name + '"\n}\n'
+        )
+
+    provider = AZURE_PROVIDERS if cloud != "aws" else AWS_PROVIDERS
+    backend = AZURE_BACKEND if cloud != "aws" else AWS_BACKEND
+    files[f"envs/{env}/providers.tf"] = provider
+    files[f"envs/{env}/backend.tf"] = backend
+    files[f"envs/{env}/variables.tf"] = (
+        'variable "name_prefix" {\n  type = string\n  default = "infralens-' + env + '"\n}\n\n'
+        'variable "tags" {\n  type = map(string)\n  default = {\n    env = "' + env + '"\n  }\n}\n'
+    )
+    module_blocks = []
+    for name in module_names:
+        module_blocks.append(
+            f'module "{name}" {{\n'
+            f'  source      = "../../modules/{name}"\n'
+            f'  name_prefix = var.name_prefix\n'
+            f'  tags        = var.tags\n'
+            f'}}\n'
+        )
+    files[f"envs/{env}/main.tf"] = (
+        f"# Environment root: {env}\n"
+        f"# Wired from architecture components ({len(module_names)} modules)\n\n"
+        + "\n".join(module_blocks)
+    )
+    files[f"envs/{env}/outputs.tf"] = "\n".join(
+        f'output "{name}_module" {{\n  value = module.{name}.module_name\n}}\n' for name in module_names
+    )
+    files["README.md"] = (
+        f"# Generated IaC ({cloud})\n\n"
+        f"Modules under `modules/` and environment root under `envs/{env}/`.\n"
+        "Generated by InfraLens from the accepted architecture model.\n"
+    )
+    return files
+
+
+def title_case(value: str) -> str:
+    return " ".join(part.capitalize() for part in value.replace("-", " ").replace("_", " ").split())
+
+
 def generate_missing_for_project(project_id: str, *, actor: str = "") -> dict[str, Any]:
     """Attach required artifacts for every delivery task that is still missing files."""
     from app.platform.engineering import artifacts as artifact_store
     from app.platform.engineering import tasks as task_store
 
     generated: list[dict[str, str]] = []
+
+    # Architecture-driven modules/ + envs/ tree (in addition to task-required files).
+    try:
+        architecture = load_architecture(project_id)
+        tree = generate_module_env_tree(architecture, env="dev")
+        existing = {
+            (item.get("name") or item.get("filename") or "").replace("\\", "/").lower()
+            for item in artifact_store.list_artifacts(project_id)
+        }
+        for rel_path, content in tree.items():
+            key = rel_path.replace("\\", "/").lower()
+            if key in existing:
+                continue
+            kind = "terraform" if rel_path.endswith(".tf") else ("markdown" if rel_path.endswith(".md") else "document")
+            saved = artifact_store.save_artifact(
+                project_id=project_id,
+                name=rel_path,
+                filename=rel_path,
+                kind=kind,
+                origin="generated",
+                content_text=content,
+                task_id="",
+                delivery_run_id="",
+                created_by=actor,
+            )
+            generated.append(
+                {
+                    "task_id": "",
+                    "title": "module-env-tree",
+                    "name": rel_path,
+                    "validation_status": str(saved.get("validation_status") or ""),
+                }
+            )
+    except Exception:
+        pass
+
     delivery_run_id = ""
     for task in task_store.list_tasks(project_id):
         delivery_run_id = delivery_run_id or str(task.get("delivery_run_id") or "")

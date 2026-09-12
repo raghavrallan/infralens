@@ -1,9 +1,13 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
+
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { getStoredUser } from "../lib/auth";
 import { ArchitectureDiagram } from "./architecture-diagram";
+import { DeliveryStagePanel } from "./delivery-stage-panel";
+import { DeliveryStageRail } from "./delivery-stage-rail";
 import { Modal } from "./modal";
 
 type RevertModal =
@@ -75,7 +79,15 @@ const NEXT_STATUS: Record<string, string> = {
   approved: "completed",
 };
 
+function emitEngineeringRefresh() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("infralens-refresh"));
+  }
+}
+
 export function DeliveryChecklist({ projectId }: { projectId: string }) {
+  const searchParams = useSearchParams();
+  const focusTaskId = searchParams.get("task_id") || "";
   const me = getStoredUser();
   const [run, setRun] = useState<DeliveryRun | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -83,6 +95,9 @@ export function DeliveryChecklist({ projectId }: { projectId: string }) {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [openId, setOpenId] = useState<string>("");
+  useEffect(() => {
+    if (focusTaskId) setOpenId(focusTaskId);
+  }, [focusTaskId]);
   const [viewing, setViewing] = useState<{ id: string; name: string; content: string } | null>(null);
   const [revertRequests, setRevertRequests] = useState<RevertRequest[]>([]);
   const [revertModal, setRevertModal] = useState<RevertModal | null>(null);
@@ -183,6 +198,7 @@ export function DeliveryChecklist({ projectId }: { projectId: string }) {
     setMessage("");
     try {
       setRun(await api<DeliveryRun>("/api/delivery/runs", { method: "POST", body: JSON.stringify({ project_id: projectId }) }));
+      emitEngineeringRefresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not start delivery");
     } finally {
@@ -234,6 +250,7 @@ export function DeliveryChecklist({ projectId }: { projectId: string }) {
       });
       setRun(updated);
       await loadTasks();
+      emitEngineeringRefresh();
       return updated;
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Transition failed");
@@ -438,6 +455,69 @@ export function DeliveryChecklist({ projectId }: { projectId: string }) {
   const pendingRevert = revertRequests.find((item) => item.status === "pending");
   const repairing = terraformRepair.status === "running" || busy;
 
+
+  const importFromRepo = async () => {
+    if (!run) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const updated = await api<DeliveryRun>(`/api/delivery/runs/${run.id}/workspace/sync`, {
+        method: "POST",
+        body: JSON.stringify({ mode: "import_repo" }),
+      });
+      setRun(updated);
+      setMessage("Imported latest files from the mapped repository.");
+      emitEngineeringRefresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Repo import failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const markExternalApply = async () => {
+    if (!run) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const updated = await api<DeliveryRun>(`/api/delivery/runs/${run.id}/transition`, {
+        method: "POST",
+        body: JSON.stringify({
+          to_stage: run.stage === "plan" ? "apply" : run.stage,
+          artifact_key: "externally_applied",
+          artifact_value: { at: new Date().toISOString(), evidence: "marked-in-ui" },
+        }),
+      });
+      setRun(updated);
+      setMessage("Marked as applied externally (evidence recorded).");
+      emitEngineeringRefresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not mark external apply");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const retryRepair = async () => {
+    if (!run) return;
+    await runIsolated("terraform/init");
+  };
+
+  const stageHint =
+    run?.stage === "ingest"
+      ? "Paste docs or upload a file, then continue."
+      : run?.stage === "architecture"
+        ? "Review the proposal, or upload an existing architecture pack."
+        : run?.stage === "terraform"
+          ? "Generate module/env Terraform, upload HCL, or import from the mapped repo."
+          : run?.stage === "plan"
+            ? "Run an isolated plan, or mark that plan/apply already happened outside InfraLens."
+            : run?.stage === "apply"
+              ? "Lead+ apply in the isolated workspace, or record an external apply."
+              : run?.stage === "code"
+                ? "Scaffold application code once infrastructure is ready."
+                : "";
+
   return (
     <section className="card delivery-checklist" id="delivery" style={{ padding: "24px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "24px" }}>
@@ -461,22 +541,49 @@ export function DeliveryChecklist({ projectId }: { projectId: string }) {
         <p className="empty-note">Docs → architecture → generated tasks → gated apply. Nothing completes on a click alone.</p>
       ) : (
         <>
-          <div style={{ display: "flex", alignItems: "flex-start", marginBottom: "36px" }}>
-            {run.checklist.map((item, i) => {
-              const isDone = item.status === "done";
-              const isCurrent = item.status === "current";
-              const color = isDone || isCurrent ? "var(--primary)" : "var(--muted)";
-              return (
-                <div key={item.stage} style={{ display: "flex", alignItems: "center", flex: i === run.checklist.length - 1 ? "none" : 1 }}>
-                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", position: "relative" }}>
-                    <div style={{ width: 32, height: 32, borderRadius: "50%", border: `2px solid ${isDone || isCurrent ? "var(--primary)" : "var(--border)"}`, background: isDone ? "var(--primary)" : "transparent", color: isDone ? "#fff" : color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 }}>{isDone ? "✓" : i + 1}</div>
-                    <span style={{ position: "absolute", top: 40, fontSize: 12, color, whiteSpace: "nowrap" }}>{item.label}</span>
-                  </div>
-                  {i < run.checklist.length - 1 && <div style={{ flex: 1, borderTop: "2px dashed var(--border)", margin: "0 10px" }} />}
-                </div>
-              );
-            })}
-          </div>
+          <DeliveryStageRail items={run.checklist} currentStage={run.stage} />
+
+          <DeliveryStagePanel
+            stage={run.stage}
+            busy={busy}
+            canAdvance={canAdvance}
+            hint={stageHint}
+            repair={{
+              status: terraformRepair.status,
+              attempt: Number((terraformRepair as { attempt?: number }).attempt || (terraformRepair.turns || []).length || 0),
+              max_attempts: 4,
+              progress: terraformProgress,
+              last_error: terraformRepair.last_diagnosis || terraformInit.stderr,
+            }}
+            onPrimary={() => {
+              const next = nextStage();
+              if (run.stage === "ingest") {
+                if (!next) return;
+                void saveDocs().then(() => void advance(next));
+              } else if (run.stage === "architecture") {
+                if (!next) return;
+                void advance(next, "architecture_accepted", { accepted: true });
+              } else if (run.stage === "terraform") {
+                const first = tasks.find((t) => (t.missing_artifacts || []).length || t.status !== "completed");
+                if (first) void generateForTask(first).then(() => void runIsolated("terraform/init"));
+                else void runIsolated("terraform/init");
+              } else if (run.stage === "plan") void runIsolated("terraform/plan");
+              else if (run.stage === "apply") void runIsolated("terraform/apply");
+              else if (next) void advance(next);
+            }}
+            onUpload={(file) => {
+              if (run.stage === "ingest") void uploadIngest(file);
+              else {
+                const first = tasks[0];
+                if (first) void attachToTask(first, file);
+                else void uploadIngest(file);
+              }
+            }}
+            onImportRepo={() => void importFromRepo()}
+            onMarkExternal={() => void markExternalApply()}
+            onRetryRepair={() => void retryRepair()}
+          />
+
 
           {run.stage === "ingest" && (
             <div className="delivery-docs">
@@ -745,7 +852,7 @@ export function DeliveryChecklist({ projectId }: { projectId: string }) {
                 if (!next) return;
                 if (run.stage === "architecture") {
                   void (async () => {
-                    const accepted = await advance("architecture", "architecture_accepted", true);
+                    const accepted = await advance("architecture", "architecture_accepted", { accepted: true });
                     if (accepted) await advance(next);
                   })();
                   return;

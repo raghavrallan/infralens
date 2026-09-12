@@ -246,14 +246,34 @@ def generate_for_task(
         ref_id=task_id,
     )
     workspace = {}
+    repair = {}
     if task.get("delivery_run_id"):
+        run_id = str(task["delivery_run_id"])
         try:
             from app.platform.engineering import iac_workspace
 
-            workspace = iac_workspace.sync(task["project_id"], str(task["delivery_run_id"]))
+            workspace = iac_workspace.sync(task["project_id"], run_id)
         except Exception:
             workspace = {}
-    return {"task": task_store.get_task(task_id), "artifacts": saved, "workspace": workspace}
+        # Validate/init with repair loop so generated modules converge toward green.
+        try:
+            from app.platform.engineering import iac_delivery
+
+            repair = iac_delivery.run_init(run_id)
+            try:
+                from app.platform.engineering.sync import stamp_delivery_sync
+
+                stamp_delivery_sync(run_id, note="generate+init-repair")
+            except Exception:
+                pass
+        except Exception as exc:
+            repair = {"status": "error", "error": str(exc)[:500]}
+    return {
+        "task": task_store.get_task(task_id),
+        "artifacts": saved,
+        "workspace": workspace,
+        "repair": repair,
+    }
 
 
 @router.get("/api/engineering/memory")
@@ -334,6 +354,19 @@ def accept_recommendation(
             ref_type="project",
             ref_id=body.project_id,
         )
+        # Kick isolated terraform init/repair when a delivery run is active.
+        try:
+            from app.platform.engineering.sync import active_delivery_run, stamp_delivery_sync
+            from app.platform.engineering import iac_delivery, iac_workspace
+
+            delivery = active_delivery_run(body.project_id)
+            if delivery and delivery.get("id"):
+                run_id = str(delivery["id"])
+                iac_workspace.sync(body.project_id, run_id)
+                result["repair"] = iac_delivery.run_init(run_id)
+                stamp_delivery_sync(run_id, note="recommendation:generate_terraform")
+        except Exception as exc:
+            result["repair"] = {"status": "error", "error": str(exc)[:500]}
         return {"action": "generate_terraform", **result}
     task = task_store.create_task(
         project_id=body.project_id,

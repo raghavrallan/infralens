@@ -1,7 +1,7 @@
 "use client";
 
 /* eslint-disable @next/next/no-html-link-for-pages */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 import {
   numberValue,
@@ -156,7 +156,9 @@ function OverviewBody() {
       </section>
 
       <section className="dash-overview-main">
-        {projectId ? <DeliveryChecklist projectId={projectId} /> : (
+        {projectId ? <Suspense fallback={<div className="empty-note">Loading delivery…</div>}>
+          <DeliveryChecklist projectId={projectId} />
+        </Suspense> : (
           <div className="empty-note">Select a project to open delivery.</div>
         )}
         {projectId ? <MemoryStrip projectId={projectId} /> : null}

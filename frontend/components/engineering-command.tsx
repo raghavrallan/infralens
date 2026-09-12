@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../lib/api";
 
 type HealthBar = { label: string; percent: number; done: number; total: number };
-type Blocker = { id: string; level: string; title: string; task_id?: string };
+type Blocker = { id: string; level: string; title: string; task_id?: string; href?: string };
 type Rec = {
   id: string;
   title: string;
@@ -30,6 +30,11 @@ type Health = {
   artifact_count: number;
   memory_count: number;
   pending_adrs: number;
+  delivery_stage?: string;
+  delivery_stage_label?: string;
+  delivery_run_id?: string;
+  terraform_repair?: { status?: string; attempt?: number; max_attempts?: number; progress?: string; last_error?: string };
+  synced_at?: string;
 };
 
 const BAR_ORDER = [
@@ -59,7 +64,12 @@ export function EngineeringCommand({ projectId }: { projectId: string }) {
   useEffect(() => {
     void load();
     const timer = window.setInterval(() => void load(), 15000);
-    return () => window.clearInterval(timer);
+    const onRefresh = () => void load();
+    window.addEventListener("infralens-refresh", onRefresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("infralens-refresh", onRefresh);
+    };
   }, [load]);
 
   const accept = async (rec: Rec) => {
@@ -82,6 +92,7 @@ export function EngineeringCommand({ projectId }: { projectId: string }) {
           : "Added to the delivery checklist.",
       );
       await load();
+      window.dispatchEvent(new Event("infralens-refresh"));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not add task");
     } finally {
@@ -107,6 +118,13 @@ export function EngineeringCommand({ projectId }: { projectId: string }) {
           <div>
             <h3>Project health</h3>
             <p className="muted">{health.summary}</p>
+            {health.delivery_stage_label ? (
+              <p className="muted">
+                Delivery stage: <strong>{health.delivery_stage_label}</strong>
+                {health.terraform_repair?.status ? ` · repair ${health.terraform_repair.status}` : ""}
+                {health.synced_at ? ` · synced ${new Date(health.synced_at).toLocaleTimeString()}` : ""}
+              </p>
+            ) : null}
           </div>
           <div className={`eng-score${health.readiness.ready ? " ok" : ""}`}>
             <strong>{health.overall}%</strong>
@@ -138,7 +156,7 @@ export function EngineeringCommand({ projectId }: { projectId: string }) {
               {health.blockers.map((item) => (
                 <li key={item.id} className={`eng-blocker ${item.level}`}>
                   <span className="eng-dot" />
-                  <a href="#delivery">{item.title}</a>
+                  <a href={item.href || `/dashboard?focus=delivery${item.task_id ? `&task_id=${encodeURIComponent(item.task_id)}` : ""}`}>{item.title}</a>
                 </li>
               ))}
             </ul>
@@ -155,7 +173,7 @@ export function EngineeringCommand({ projectId }: { projectId: string }) {
                   <strong>{rec.title}</strong>
                   <p>Why? {rec.reason}</p>
                   <p className="muted">Impact: {rec.impact}</p>
-                  {rec.action === "add_task" || rec.action === "generate_terraform" ? (
+                  {rec.action === "add_task" || rec.action === "open_task" || rec.action === "generate_terraform" ? (
                     <button
                       type="button"
                       className="tiny-btn solid"

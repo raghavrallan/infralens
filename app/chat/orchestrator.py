@@ -418,6 +418,77 @@ def _detect_branch(task: str) -> Optional[str]:
 # so don't go fetching code from their repos.
 _PASTED_CONTENT_CHARS = 1500
 
+# Skills that usually run on pasted findings / snippets and should not wait on GitHub.
+_INLINE_FIRST_SKILLS = {
+    "iac_reviewer",
+    "policy_generator",
+    "report_writer",
+    "compliance_mapper",
+    "terraform_generator",
+}
+
+_EXPLICIT_SKILL_ALIASES = {
+    "iac": "iac_reviewer",
+    "iac_review": "iac_reviewer",
+    "iacreviewer": "iac_reviewer",
+    "code": "code_reviewer",
+    "code_review": "code_reviewer",
+    "codereviewer": "code_reviewer",
+}
+
+
+def resolve_forced_skill(skill: Optional[str], message: str) -> Optional[str]:
+    """Honor an explicit UI skill, else parse a `Skill: IaC Reviewer` line from the message."""
+    if skill and registry.get(skill) is not None:
+        return skill
+    match = re.search(r"(?:^|\n)\s*skill\s*:\s*([^\n]+)", message or "", flags=re.IGNORECASE)
+    if not match:
+        return skill if skill else None
+    raw = match.group(1).strip().lower().strip("`\"'")
+    slug = re.sub(r"[^a-z0-9]+", "_", raw).strip("_")
+    wanted = _EXPLICIT_SKILL_ALIASES.get(slug, slug)
+    if registry.get(wanted) is not None:
+        return wanted
+    pretty = raw.replace("_", " ")
+    for item in registry.all():
+        name = item.name
+        if name == wanted or name.replace("_", " ") == pretty:
+            return name
+        if pretty in {name.replace("_", " "), _pretty(name).lower()}:
+            return name
+    return skill if skill else None
+
+
+def _has_inline_artifact(task: str) -> bool:
+    """True when the user already pasted a finding / snippet — skip slow repo fetches."""
+    text = task or ""
+    if len(text) > _PASTED_CONTENT_CHARS:
+        return True
+    lowered = text.lower()
+    markers = (
+        "severity:",
+        "title:",
+        "evidence:",
+        "publiclyaccessible",
+        "```",
+        'resource "',
+        "resource '",
+        "apiversion:",
+        "aws_db_instance",
+        "azurerm_",
+    )
+    return any(marker in lowered for marker in markers)
+
+
+def _should_skip_code_fetch(task: str, skill: Optional[str] = None) -> bool:
+    if _has_inline_artifact(task):
+        return True
+    if skill in _INLINE_FIRST_SKILLS and (
+        "skill:" in (task or "").lower() or "finding" in (task or "").lower()
+    ):
+        return True
+    return False
+
 
 def _detect_code_kinds(task_lower: str) -> list[str]:
     kinds = {
@@ -532,14 +603,14 @@ def _filter_scope_clarifications(
 
 
 def _gather_code_context(
-    task: str, project_id: str, force: bool = False
+    task: str, project_id: str, force: bool = False, skip: bool = False
 ) -> Optional[str]:
     """Locate and fetch the real source files the user is asking about from GitHub.
 
     When ``force`` is set (the planner chose a code-backed skill), fall back to a
     broad default artifact set even if the phrasing matched no specific keyword.
     """
-    if len(task) > _PASTED_CONTENT_CHARS or not github_infra.is_connected(project_id):
+    if skip or _should_skip_code_fetch(task) or not github_infra.is_connected(project_id):
         return None
     if _looks_like_diagnostic_intent(task):
         force = True
@@ -1361,6 +1432,7 @@ def _gather_live_context(
     force_metrics: bool = False,
     force_logs: bool = False,
     force_security: bool = False,
+    skill: Optional[str] = None,
 ) -> tuple[Optional[str], list[dict[str, Any]]]:
     """Fetch live, read-only context from GitHub code and every relevant provider.
 
@@ -1374,6 +1446,10 @@ def _gather_live_context(
     """
     task_lower = task.lower()
     blocks: list[str] = []
+    skip_code = _should_skip_code_fetch(task, skill)
+    # Inline findings / forced IaC review: answer from the pasted evidence fast.
+    if skip_code and skill in _INLINE_FIRST_SKILLS and not force_cost and not force_metrics and not force_logs and not force_security:
+        return None, []
     cost_block = _gather_cost_context(task, project_id, force=force_cost)
     if cost_block:
         blocks.append(cost_block)
@@ -1387,9 +1463,11 @@ def _gather_live_context(
         blocks.append(logs_block)
     if logs_charts:
         charts = charts + logs_charts
-    diagnostic = _looks_like_diagnostic_intent(task)
+    diagnostic = _looks_like_diagnostic_intent(task) and not skip_code
     force_env = force or diagnostic
-    code_block = _gather_code_context(task, project_id, force=diagnostic)
+    code_block = _gather_code_context(
+        task, project_id, force=diagnostic, skip=skip_code
+    )
     if code_block:
         blocks.append(code_block)
     if force_security:
@@ -2350,11 +2428,13 @@ def run_chat(
     """
     policy = build_agent_policy(action_scope, access_level) if mode == "agent" else build_policy(action_scope, access_level)
     task = _last_user_message(messages)
+    skill = resolve_forced_skill(skill, task)
     contextual_task = _contextual_task(messages)
     topology = _gather_project_topology(project_id, messages)
     forced = registry.get(skill) if skill else None
     agentic = _is_agentic(forced)
-    if agentic:
+    inline_fast = bool(skill in _INLINE_FIRST_SKILLS and _should_skip_code_fetch(task, skill))
+    if agentic or inline_fast:
         live_context, charts = provider_status_text(project_id, action_scope), []
         live_context = _merge_context(topology, live_context)
     else:
@@ -2369,6 +2449,7 @@ def run_chat(
             force_metrics=(skill == "metrics_analyzer"),
             force_logs=(skill == "log_analyzer"),
             force_security=(skill in _SECURITY_SKILLS or _is_security_task(task)),
+            skill=skill,
         )
         status_context = provider_status_text(project_id, action_scope)
         live_context = _merge_context(topology, live_context, status_context)
@@ -2631,7 +2712,7 @@ def _heartbeat_call(label: str, fn: Callable[[], Any]) -> Iterator[dict[str, Any
     yield {"type": "status", "text": label}
     while True:
         try:
-            ok, payload = result.get(timeout=12)
+            ok, payload = result.get(timeout=8)
             if not ok:
                 raise payload
             return payload
@@ -2655,6 +2736,7 @@ def run_chat_stream(
     """
     policy = build_agent_policy(action_scope, access_level) if mode == "agent" else build_policy(action_scope, access_level)
     task = _last_user_message(messages)
+    skill = resolve_forced_skill(skill, task)
     contextual_task = _contextual_task(messages)
     topology = yield from _heartbeat_call(
         "Loading project context",
@@ -2662,7 +2744,9 @@ def run_chat_stream(
     )
     forced = registry.get(skill) if skill else None
     agentic = _is_agentic(forced)
-    if agentic:
+    inline_fast = bool(skill in _INLINE_FIRST_SKILLS and _should_skip_code_fetch(task, skill))
+    if agentic or inline_fast:
+        yield {"type": "status", "text": f"Running {_pretty(skill)}" if skill else "Working on it"}
         live_context, charts = provider_status_text(project_id, action_scope), []
         live_context = _merge_context(topology, live_context)
     else:
@@ -2679,6 +2763,7 @@ def run_chat_stream(
                 force_metrics=(skill == "metrics_analyzer"),
                 force_logs=(skill == "log_analyzer"),
                 force_security=(skill in _SECURITY_SKILLS or _is_security_task(task)),
+                skill=skill,
             ),
         )
         status_context = provider_status_text(project_id, action_scope)
