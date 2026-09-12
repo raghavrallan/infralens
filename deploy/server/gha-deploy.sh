@@ -80,6 +80,10 @@ if [[ "$REQUIRE_N8N" == "true" ]]; then
   ensure_n8n_encryption_key
   ensure_env_default N8N_WEBHOOKS_ENABLED true
   ensure_env_default N8N_WEBHOOK_URL http://n8n:5678/webhook/infralens
+  # Required for HTTP editor access until TLS is in front of n8n.
+  ensure_env_default N8N_SECURE_COOKIE false
+  ensure_env_default N8N_PUBLIC_WEBHOOK_URL http://127.0.0.1:5678/
+  ensure_env_default N8N_EDITOR_BASE_URL http://127.0.0.1:5678/
 fi
 
 echo "==> Validating compose (profiles: ${PROFILE_ARGS[*]})"
