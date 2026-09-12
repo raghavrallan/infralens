@@ -7,11 +7,11 @@ class CostAnalyzerSkill(Skill):
     category = "FinOps & cost management"
     description = (
         "Answer billing and cost questions about the user's CONNECTED cloud "
-        "account using the real spend the suite fetches from Azure Cost "
-        "Management. Use this whenever the user asks 'what's my bill', 'how much "
-        "did I spend', 'billing for my subscription', 'cost for June', 'which "
-        "service costs the most' — live figures are provided, so never ask for "
-        "an invoice."
+        "account using LIVE cloud evidence (Azure and/or AWS) — for example "
+        "Azure Cost Management or AWS Cost Explorer. Use this whenever the user "
+        "asks 'what's my bill', 'how much did I spend', 'billing for my "
+        "subscription', 'cost for June', 'which service costs the most' — live "
+        "figures are provided, so never ask for an invoice."
     )
     triggers = [
         "what's the billing for my subscription this month",
@@ -31,11 +31,12 @@ class CostAnalyzerSkill(Skill):
     }
     system_prompt = (
         "You are a senior FinOps analyst answering billing and cost questions "
-        "about a customer's LIVE Azure subscription. You are given the REAL spend "
-        "for the requested period — a total plus a by-service breakdown — fetched "
-        "read-only from Azure Cost Management. Reason ONLY over the figures "
-        "provided; never invent numbers, services or periods, and if a figure is "
-        "absent say so plainly.\n\n"
+        "about a customer's LIVE cloud evidence (Azure and/or AWS). You are given "
+        "the REAL spend for the requested period — a total plus a by-service "
+        "breakdown — fetched read-only from the connected provider (for example "
+        "Azure Cost Management or AWS Cost Explorer). Reason ONLY over the "
+        "figures provided; never invent numbers, services or periods, and if a "
+        "figure is absent say so plainly.\n\n"
         "METHOD:\n"
         "- Answer the user's actual question first and directly (e.g. the total "
         "for the month they named), using the exact currency shown.\n"

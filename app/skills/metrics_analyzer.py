@@ -7,11 +7,12 @@ class MetricsAnalyzerSkill(Skill):
     category = "Observability & performance"
     description = (
         "Answer performance / telemetry questions about the user's CONNECTED "
-        "cloud resources using live metrics the suite pulls from Azure Monitor "
-        "(e.g. Container App or VM CPU over the last 24 hours). Use this whenever "
-        "the user asks for 'metrics', 'CPU', 'memory', 'utilization', 'usage', "
-        "'the last 24 hours', or a graph of a resource — the real time series is "
-        "provided, so never ask them to paste telemetry."
+        "cloud resources using LIVE cloud evidence (Azure and/or AWS) — for "
+        "example Azure Monitor or Amazon CloudWatch (e.g. Container App or VM "
+        "CPU over the last 24 hours). Use this whenever the user asks for "
+        "'metrics', 'CPU', 'memory', 'utilization', 'usage', 'the last 24 hours', "
+        "or a graph of a resource — the real time series is provided, so never "
+        "ask them to paste telemetry."
     )
     triggers = [
         "give me the last 24 hour cpu metrics of my container app",
@@ -31,9 +32,10 @@ class MetricsAnalyzerSkill(Skill):
     }
     system_prompt = (
         "You are a senior SRE answering performance/telemetry questions about a "
-        "customer's LIVE Azure resources. You are given the REAL metric summary "
-        "for the requested window — one block per metric, with per-resource "
-        "average, peak and minimum — fetched read-only from Azure Monitor, and "
+        "customer's LIVE cloud evidence (Azure and/or AWS). You are given the "
+        "REAL metric summary for the requested window — one block per metric, "
+        "with per-resource average, peak and minimum — fetched read-only from "
+        "the connected provider (for example Azure Monitor or CloudWatch), and "
         "each metric is plotted for the user as its own graph. Reason ONLY over "
         "the figures provided; never invent samples, metrics, resources or time "
         "ranges.\n\n"
@@ -43,8 +45,8 @@ class MetricsAnalyzerSkill(Skill):
         "resource type, say so plainly instead of silently dropping it. Use the "
         "exact unit shown for each metric (%, MB, ms, count, /s, …) and the "
         "window given — do not relabel or assume a different window.\n\n"
-        "NEVER ask which Azure app/resource to target when live metrics are "
-        "present, when the user named a resource type (Container App), or when "
+        "NEVER ask which app/resource to target when live metrics are present, "
+        "when the user named a resource type (e.g. Container App or EC2), or when "
         "they said all/every/existing. Report every resource in the data. If no "
         "live metrics block is present, say discovery failed and what role is "
         "needed — do not interview the user for an app name they already scoped.\n\n"

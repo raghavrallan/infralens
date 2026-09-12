@@ -12,8 +12,10 @@ type Step =
   | "github"
   | "repos"
   | "create-repo"
-  | "azure"
+  | "cloud"
   | "done";
+
+type CloudProvider = "azure" | "aws";
 
 type AuthOptions = {
   github: {
@@ -42,8 +44,8 @@ const STEP_BACK: Partial<Record<Step, Step>> = {
   github: "path",
   repos: "github",
   "create-repo": "github",
-  azure: "repos",
-  done: "azure",
+  cloud: "repos",
+  done: "cloud",
 };
 
 const FLOW_STEPS: { id: Step; label: string }[] = [
@@ -51,7 +53,7 @@ const FLOW_STEPS: { id: Step; label: string }[] = [
   { id: "path", label: "Project" },
   { id: "github", label: "GitHub" },
   { id: "repos", label: "Repos" },
-  { id: "azure", label: "Azure" },
+  { id: "cloud", label: "Cloud" },
   { id: "done", label: "Done" },
 ];
 
@@ -60,7 +62,7 @@ function stepIndex(step: Step, path: PathId): number {
   if (step === "path") return 1;
   if (step === "github") return 2;
   if (step === "repos" || step === "create-repo") return 3;
-  if (step === "azure") return 4;
+  if (step === "cloud") return 4;
   if (step === "done") return 5;
   return path === "new" ? 3 : 3;
 }
@@ -77,6 +79,15 @@ function IconAzure({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <path d="M13.05 4.24 6.02 19.76h4.14l1.65-3.88h5.44l-4.2-11.64Zm1.18 2.9 3.02 8.38h-3.66l-.98-2.72-.93 2.72H8.5l5.73-8.38Z" />
+    </svg>
+  );
+}
+
+function IconAws({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M6.8 10.2c0 .4.05.7.14 1 .1.3.23.55.4.75l-.9.45c-.1-.18-.2-.4-.28-.66A4.1 4.1 0 0 1 6 10.2c0-.55.1-1 .28-1.4.19-.4.45-.74.78-1.02.33-.28.72-.5 1.16-.64.45-.15.93-.22 1.45-.22.55 0 1.04.08 1.47.24.43.15.8.38 1.1.67.3.3.53.66.69 1.08.16.42.24.9.24 1.42v.86H7.35c.05.62.26 1.1.62 1.44.36.34.85.5 1.47.5.4 0 .76-.05 1.08-.16.32-.1.62-.26.9-.46l.4.86a4.3 4.3 0 0 1-1.12.55c-.42.14-.9.2-1.42.2-.6 0-1.13-.1-1.6-.28a3.4 3.4 0 0 1-1.2-.8 3.5 3.5 0 0 1-.75-1.26 4.5 4.5 0 0 1-.25-1.54Zm4.1-.55c0-.35-.06-.65-.18-.9a1.7 1.7 0 0 0-.5-.65 2 2 0 0 0-.75-.38 3.2 3.2 0 0 0-.94-.12c-.7 0-1.25.18-1.66.54-.4.35-.65.84-.73 1.5h4.76ZM13.6 14.5V6.9h1.05v.7c.2-.25.45-.46.75-.62.3-.16.65-.24 1.05-.24.4 0 .76.08 1.08.24.32.16.6.4.82.7.23.3.4.68.53 1.12.12.44.18.95.18 1.52 0 .56-.06 1.06-.18 1.5-.13.44-.3.8-.54 1.1a2.4 2.4 0 0 1-.85.7c-.33.16-.7.24-1.1.24-.38 0-.72-.08-1-.24a2 2 0 0 1-.72-.66v2.46h-1.07Zm3.05-3.18c0-.38-.05-.72-.14-1.02a2 2 0 0 0-.4-.76 1.7 1.7 0 0 0-.64-.48 1.9 1.9 0 0 0-.82-.17c-.28 0-.54.05-.78.16-.24.1-.45.26-.62.46v3.5c.18.2.4.36.64.47.24.1.5.16.78.16.3 0 .56-.06.8-.17.23-.12.43-.28.6-.5.16-.22.28-.5.37-.82.08-.32.12-.68.12-.08Z" />
+      <path d="M4.2 16.4c1.7 1.25 3.7 1.88 5.95 1.88 2.4 0 4.55-.7 6.45-2.1.18-.13.35.1.2.28-1.55 2.05-3.95 3.22-6.65 3.22-2.55 0-4.9-1.05-6.6-2.8-.14-.14.05-.33.25-.18.13.1.27.2.4.3Z" />
     </svg>
   );
 }
@@ -139,7 +150,14 @@ export function OnboardingWizard({
     client_secret: "",
     subscription_id: "",
   });
+  const [aws, setAws] = useState({
+    access_key_id: "",
+    secret_access_key: "",
+    region: "us-east-1",
+  });
+  const [cloudProvider, setCloudProvider] = useState<CloudProvider>("azure");
   const [azureConnected, setAzureConnected] = useState(false);
+  const [awsConnected, setAwsConnected] = useState(false);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -174,7 +192,7 @@ export function OnboardingWizard({
     if (step === "welcome") {
       return {
         title: "Welcome to InfraLens",
-        desc: "Connect GitHub, map repositories, and optionally link Azure — then open gated delivery workflows.",
+        desc: "Connect GitHub, map repositories, and optionally link Azure and/or AWS — then open gated delivery workflows.",
       };
     }
     if (step === "path") {
@@ -201,10 +219,10 @@ export function OnboardingWizard({
         desc: "InfraLens will create the repo on GitHub, then link it to your project.",
       };
     }
-    if (step === "azure") {
+    if (step === "cloud") {
       return {
-        title: "Connect Azure",
-        desc: "Optional — link a subscription for cloud-aware delivery. You can skip and add this later.",
+        title: "Connect cloud provider",
+        desc: "Optional — link Azure and/or AWS for cloud-aware delivery. Skip if you only need GitHub for now.",
       };
     }
     return {
@@ -223,7 +241,7 @@ export function OnboardingWizard({
   const goBack = () => {
     setMessage("");
     let prev = STEP_BACK[step];
-    if (step === "azure") {
+    if (step === "cloud") {
       prev = path === "new" ? "create-repo" : "repos";
     }
     if (prev) setStep(prev);
@@ -328,7 +346,7 @@ export function OnboardingWizard({
       });
       setSelected([created.full_name]);
       if (!projectName.trim()) setProjectName(created.full_name.split("/")[1] || created.full_name);
-      setStep("azure");
+      setStep("cloud");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not create repo");
     } finally {
@@ -366,6 +384,36 @@ export function OnboardingWizard({
     }
   };
 
+  const connectAws = async () => {
+    setBusy(true);
+    setMessage("");
+    try {
+      const pid = await ensureProject();
+      if (!aws.access_key_id.trim() || !aws.secret_access_key.trim()) {
+        setMessage("Access key ID and secret access key are required.");
+        setBusy(false);
+        return;
+      }
+      await api(`/api/projects/${pid}/connections/aws`, {
+        method: "PUT",
+        body: JSON.stringify({
+          method: "access_key",
+          fields: {
+            access_key_id: aws.access_key_id.trim(),
+            secret_access_key: aws.secret_access_key,
+            region: aws.region.trim() || "us-east-1",
+          },
+        }),
+      });
+      setAwsConnected(true);
+      setMessage("AWS connected.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "AWS connect failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const finish = async () => {
     setBusy(true);
     setMessage("");
@@ -395,6 +443,7 @@ export function OnboardingWizard({
           project_name: projectName.trim() || "InfraLens project",
           repos: linked,
           azure_connected: azureConnected,
+          aws_connected: awsConnected,
           github_connected: true,
         }),
       });
@@ -410,7 +459,7 @@ export function OnboardingWizard({
     if (onClose && !busy && !force) onClose();
   };
 
-  const canGoBack = Boolean(STEP_BACK[step] || step === "azure");
+  const canGoBack = Boolean(STEP_BACK[step] || step === "cloud");
 
   const body = (
     <div className={`ob-body${asPage ? " ob-body-page" : ""}`} key={step}>
@@ -448,8 +497,8 @@ export function OnboardingWizard({
               </div>
               <div className="ob-welcome-num inactive">3</div>
               <div className="ob-welcome-text">
-                <div className="ob-welcome-title">Connect Azure (Optional)</div>
-                <div className="ob-welcome-desc">Link your Azure subscription (optional).</div>
+                <div className="ob-welcome-title">Connect cloud (Optional)</div>
+                <div className="ob-welcome-desc">Link Azure and/or AWS for cloud-aware delivery.</div>
               </div>
               <div className="ob-welcome-badge optional">Optional</div>
               <svg className="ob-welcome-chevron" viewBox="0 0 24 24" fill="none" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
@@ -684,7 +733,7 @@ export function OnboardingWizard({
                 if (!projectName.trim() && selected[0]) {
                   setProjectName(selected[0].split("/")[1] || selected[0]);
                 }
-                setStep("azure");
+                setStep("cloud");
               }}
             >
               Continue
@@ -740,59 +789,126 @@ export function OnboardingWizard({
         </>
       )}
 
-      {step === "azure" && (
+      {step === "cloud" && (
         <>
-          <div className="ob-toggle" role="tablist" aria-label="Azure auth method">
+          <div className="ob-toggle" role="tablist" aria-label="Cloud provider">
             <button
               type="button"
               role="tab"
-              aria-selected={azMethod === "client_secret"}
-              className={azMethod === "client_secret" ? "active" : ""}
-              onClick={() => setAzMethod("client_secret")}
+              aria-selected={cloudProvider === "azure"}
+              className={cloudProvider === "azure" ? "active" : ""}
+              onClick={() => {
+                setCloudProvider("azure");
+                setMessage("");
+              }}
             >
-              Service principal
+              Azure{azureConnected ? " ✓" : ""}
             </button>
             <button
               type="button"
               role="tab"
-              aria-selected={azMethod === "oauth"}
-              className={azMethod === "oauth" ? "active" : ""}
-              onClick={() => setAzMethod("oauth")}
+              aria-selected={cloudProvider === "aws"}
+              className={cloudProvider === "aws" ? "active" : ""}
+              onClick={() => {
+                setCloudProvider("aws");
+                setMessage("");
+              }}
             >
-              Azure OAuth
+              AWS{awsConnected ? " ✓" : ""}
             </button>
           </div>
 
-          {azMethod === "oauth" ? (
-            <div className="ob-sso-panel">
-              <IconAzure className="ob-sso-mark azure" />
-              <p>
-                {authOptions?.azure.oauth
-                  ? "You’ll be redirected to Microsoft to authorize InfraLens."
-                  : authOptions?.azure.oauth_note ||
-                    "Azure OAuth isn’t configured. Use a service principal, or skip for now."}
-              </p>
-            </div>
+          {cloudProvider === "azure" ? (
+            <>
+              <div className="ob-toggle" role="tablist" aria-label="Azure auth method">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={azMethod === "client_secret"}
+                  className={azMethod === "client_secret" ? "active" : ""}
+                  onClick={() => setAzMethod("client_secret")}
+                >
+                  Service principal
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={azMethod === "oauth"}
+                  className={azMethod === "oauth" ? "active" : ""}
+                  onClick={() => setAzMethod("oauth")}
+                >
+                  Azure OAuth
+                </button>
+              </div>
+
+              {azMethod === "oauth" ? (
+                <div className="ob-sso-panel">
+                  <IconAzure className="ob-sso-mark azure" />
+                  <p>
+                    {authOptions?.azure.oauth
+                      ? "You’ll be redirected to Microsoft to authorize InfraLens."
+                      : authOptions?.azure.oauth_note ||
+                        "Azure OAuth isn’t configured. Use a service principal, or skip for now."}
+                  </p>
+                </div>
+              ) : (
+                <div className="ob-fields ob-fields-grid">
+                  {([
+                    ["tenant_id", "Tenant ID"],
+                    ["client_id", "Client ID"],
+                    ["client_secret", "Client secret"],
+                    ["subscription_id", "Subscription ID"],
+                  ] as const).map(([field, label]) => (
+                    <label className="ob-field" key={field}>
+                      <span>{label}</span>
+                      <input
+                        type={field.includes("secret") ? "password" : "text"}
+                        value={azure[field]}
+                        onChange={(e) => setAzure((cur) => ({ ...cur, [field]: e.target.value }))}
+                        autoComplete="off"
+                      />
+                    </label>
+                  ))}
+                </div>
+              )}
+            </>
           ) : (
-            <div className="ob-fields ob-fields-grid">
-              {([
-                ["tenant_id", "Tenant ID"],
-                ["client_id", "Client ID"],
-                ["client_secret", "Client secret"],
-                ["subscription_id", "Subscription ID"],
-              ] as const).map(([field, label]) => (
-                <label className="ob-field" key={field}>
-                  <span>{label}</span>
-                  <input
-                    type={field.includes("secret") ? "password" : "text"}
-                    value={azure[field]}
-                    onChange={(e) => setAzure((cur) => ({ ...cur, [field]: e.target.value }))}
-                    autoComplete="off"
-                  />
-                </label>
-              ))}
-            </div>
+            <>
+              <div className="ob-sso-panel">
+                <IconAws className="ob-sso-mark" />
+                <p>Enter an IAM access key. You can also connect Azure on the other tab — either or both is fine.</p>
+              </div>
+              <div className="ob-fields ob-fields-grid">
+                {([
+                  ["access_key_id", "Access key ID", "text"],
+                  ["secret_access_key", "Secret access key", "password"],
+                  ["region", "Region", "text"],
+                ] as const).map(([field, label, inputType]) => (
+                  <label className="ob-field" key={field}>
+                    <span>{label}</span>
+                    <input
+                      type={inputType}
+                      value={aws[field]}
+                      onChange={(e) => setAws((cur) => ({ ...cur, [field]: e.target.value }))}
+                      autoComplete="off"
+                      placeholder={field === "region" ? "us-east-1" : undefined}
+                    />
+                  </label>
+                ))}
+              </div>
+            </>
           )}
+
+          {(azureConnected || awsConnected) ? (
+            <div className="ob-status ok">
+              {[
+                azureConnected ? "Azure connected" : null,
+                awsConnected ? "AWS connected" : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </div>
+          ) : null}
 
           <div className="ob-actions">
             {canGoBack ? (
@@ -801,15 +917,21 @@ export function OnboardingWizard({
               </button>
             ) : null}
             <button type="button" className="ob-btn ghost" onClick={() => setStep("done")}>
-              Skip for now
+              {azureConnected || awsConnected ? "Continue" : "Skip for now"}
             </button>
             <button
               type="button"
               className="ob-btn primary"
               disabled={busy}
-              onClick={() => void connectAzure().then(() => setStep("done"))}
+              onClick={() =>
+                void (cloudProvider === "azure" ? connectAzure() : connectAws())
+              }
             >
-              {busy ? "Saving…" : "Connect Azure"}
+              {busy
+                ? "Saving…"
+                : cloudProvider === "azure"
+                  ? "Connect Azure"
+                  : "Connect AWS"}
             </button>
           </div>
         </>
@@ -830,6 +952,7 @@ export function OnboardingWizard({
                     ? "New repository linked"
                     : "Ready to open"}
                 {azureConnected ? " · Azure connected" : ""}
+                {awsConnected ? " · AWS connected" : ""}
               </span>
             </div>
           </div>
@@ -918,7 +1041,7 @@ export function OnboardingWizard({
                    { id: 'welcome', label: 'Welcome', num: 1 },
                    { id: 'github', label: 'GitHub', num: 2 },
                    { id: 'repos', label: 'Repositories', num: 3 },
-                   { id: 'azure', label: 'Azure', num: 4 },
+                   { id: 'cloud', label: 'Cloud', num: 4 },
                    { id: 'done', label: 'Finish', num: 5 }
                  ].map((s, idx) => {
                     let state = 'todo';

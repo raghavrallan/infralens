@@ -23,7 +23,11 @@ const providerFields: Record<
   aws: [
     { label: "Access key ID", name: "access_key_id" },
     { label: "Secret access key", name: "secret_access_key", type: "password" },
+    { label: "Session token (optional)", name: "session_token", type: "password" },
     { label: "Region", name: "region", placeholder: "us-east-1" },
+    { label: "Role ARN (optional)", name: "role_arn" },
+    { label: "External ID (optional)", name: "external_id" },
+    { label: "Regions (optional)", name: "regions", placeholder: "us-west-2,eu-west-1" },
   ],
   github: [
     { label: "Username", name: "username" },

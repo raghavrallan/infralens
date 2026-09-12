@@ -705,47 +705,84 @@ def _cost_service_filter(task_lower: str) -> Optional[list[str]]:
 def _gather_cost_context(
     task: str, project_id: str, force: bool = False
 ) -> Optional[str]:
-    """Fetch real Azure spend when the user asks about billing / cost.
+    """Fetch real cloud spend when the user asks about billing / cost.
 
-    Detects the service the user is asking about (storage, Foundry/OpenAI, …) to
-    filter the bill, and whether they want a fine meter-level breakdown (token
-    meters for OpenAI, etc.).
+    Prefers Azure Cost Management when Azure is connected, AWS Cost Explorer when
+    AWS is connected (both when both are). Detects service filters and meter-level
+    breakdowns from the user wording.
     """
     task_lower = task.lower()
     if not force and not any(term in task_lower for term in _COST_TRIGGERS):
         return None
-    if not azure_infra.is_connected(project_id):
+    azure_ok = azure_infra.is_connected(project_id)
+    aws_ok = aws_infra.is_connected(project_id)
+    if not azure_ok and not aws_ok:
         return None
-    from_date, to_date, label = azure_infra.parse_cost_period(task)
     service_filter = _cost_service_filter(task_lower)
     group_by = "meter" if any(t in task_lower for t in _COST_METER_TERMS) else "service"
-    try:
-        report = azure_infra.build_cost_report(
-            project_id,
-            from_date,
-            to_date,
-            label,
-            group_by=group_by,
-            service_filter=service_filter,
-        )
-    except azure_infra.AzureConnectionError:
+    blocks: list[str] = []
+
+    if azure_ok:
+        from_date, to_date, label = azure_infra.parse_cost_period(task)
+        try:
+            report = azure_infra.build_cost_report(
+                project_id,
+                from_date,
+                to_date,
+                label,
+                group_by=group_by,
+                service_filter=service_filter,
+            )
+            blocks.append(
+                "LIVE AZURE BILLING DATA — read-only, fetched just now via Azure Cost "
+                "Management using the user's connected credentials. Answer the billing "
+                "question directly from these REAL figures. Do NOT ask the user to paste "
+                "an invoice or subscription details; the actual spend is below.\n\n"
+                + report["text"]
+            )
+        except azure_infra.AzureConnectionError:
+            pass
+        except azure_infra.AzureApiError as exc:
+            blocks.append(
+                "LIVE AZURE BILLING FETCH FAILED. The user's Azure account IS "
+                "connected, but the read-only Cost Management query failed. Tell the "
+                "user this, show the error verbatim, and note the most likely cause: "
+                "the app registration needs the 'Cost Management Reader' role (or "
+                "Reader) on the subscription, and a subscription id must be set. Do "
+                f"NOT ask them to paste an invoice.\nError: {exc}"
+            )
+
+    if aws_ok:
+        from_date, to_date, label = aws_infra.parse_cost_period(task)
+        try:
+            report = aws_infra.build_cost_report(
+                project_id,
+                from_date,
+                to_date,
+                label,
+                group_by=group_by,
+                service_filter=service_filter,
+            )
+            blocks.append(
+                "LIVE AWS BILLING DATA — read-only, fetched just now via AWS Cost "
+                "Explorer using the user's connected credentials. Answer the billing "
+                "question directly from these REAL figures. Do NOT ask the user to paste "
+                "an invoice; the actual spend is below.\n\n"
+                + report["text"]
+            )
+        except aws_infra.AwsConnectionError:
+            pass
+        except aws_infra.AwsApiError as exc:
+            blocks.append(
+                "LIVE AWS BILLING FETCH FAILED. The user's AWS account IS connected, "
+                "but Cost Explorer failed. Tell the user this, show the error verbatim, "
+                "and note they need ce:GetCostAndUsage (Billing) permissions on the IAM "
+                f"principal. Do NOT ask them to paste an invoice.\nError: {exc}"
+            )
+
+    if not blocks:
         return None
-    except azure_infra.AzureApiError as exc:
-        return (
-            "LIVE AZURE BILLING FETCH FAILED. The user's Azure account IS "
-            "connected, but the read-only Cost Management query failed. Tell the "
-            "user this, show the error verbatim, and note the most likely cause: "
-            "the app registration needs the 'Cost Management Reader' role (or "
-            "Reader) on the subscription, and a subscription id must be set. Do "
-            f"NOT ask them to paste an invoice.\nError: {exc}"
-        )
-    return (
-        "LIVE AZURE BILLING DATA — read-only, fetched just now via Azure Cost "
-        "Management using the user's connected credentials. Answer the billing "
-        "question directly from these REAL figures. Do NOT ask the user to paste "
-        "an invoice or subscription details; the actual spend is below.\n\n"
-        + report["text"]
-    )
+    return "\n\n---\n\n".join(blocks)
 
 
 # Phrasing that means "show me telemetry / how busy a resource has been".
@@ -1090,95 +1127,77 @@ def _gather_metrics_context(
     # turn asked for CPU/memory; force discovery rather than asking again.
     if not force and _looks_like_metrics_followup(current):
         force = True
-    if not azure_infra.is_connected(project_id):
+    azure_ok = azure_infra.is_connected(project_id)
+    aws_ok = aws_infra.is_connected(project_id)
+    if not azure_ok and not aws_ok:
         return None, []
     resource_types, resource_name, metric_hints = _parse_metric_intent(task)
-    if azure_infra.wants_all_resources(current):
-        resource_name = None
-        if not resource_types:
-            resource_types = ["container_app"]
-        # Ensure the task text keeps the "all" signal for resource selection.
-        task = f"{task}\nScope: all matching resources"
-    try:
-        report = azure_infra.build_metrics_report(
-            project_id,
-            task,
-            resource_types=resource_types,
-            resource_name=resource_name,
-            metric_hints=metric_hints,
-        )
-    except azure_infra.AzureConnectionError:
+    blocks: list[str] = []
+    charts: list[dict[str, Any]] = []
+    if azure_ok:
+        local_types = list(resource_types or [])
+        local_name = resource_name
+        local_task = task
+        if azure_infra.wants_all_resources(current):
+            local_name = None
+            if not local_types:
+                local_types = ["container_app"]
+            local_task = f"{task}\nScope: all matching resources"
+        try:
+            report = azure_infra.build_metrics_report(
+                project_id,
+                local_task,
+                resource_types=local_types,
+                resource_name=local_name,
+                metric_hints=metric_hints,
+            )
+            blocks.append(
+                "LIVE AZURE METRICS DATA — read-only, fetched just now via Azure Monitor "
+                "using the user's connected credentials. Answer the performance question "
+                "directly from these REAL figures; the same series is being plotted as a "
+                "graph for the user. Do NOT ask the user to paste telemetry.\n\n"
+                + report["text"]
+            )
+            charts.extend(report.get("charts", []))
+        except azure_infra.AzureConnectionError:
+            pass
+        except azure_infra.AzureApiError as exc:
+            blocks.append(
+                "LIVE AZURE METRICS FETCH FAILED. The user's Azure account IS "
+                "connected, but the read-only Azure Monitor query failed. Tell the "
+                "user this, show the error verbatim, and note the most likely cause: "
+                "the app registration needs the 'Monitoring Reader' role (or Reader) "
+                "on the subscription, and a subscription id must be set. Do NOT ask "
+                f"them to paste telemetry.\nError: {exc}"
+            )
+    if aws_ok:
+        try:
+            report = aws_infra.build_metrics_report(
+                project_id,
+                task,
+                resource_types=resource_types,
+                resource_name=resource_name,
+                metric_hints=metric_hints,
+            )
+            blocks.append(
+                "LIVE AWS METRICS DATA — read-only, fetched just now via CloudWatch "
+                "using the user's connected credentials. Answer the performance question "
+                "directly from these REAL figures; the same series is being plotted as a "
+                "graph for the user. Do NOT ask the user to paste telemetry.\n\n"
+                + report["text"]
+            )
+            charts.extend(report.get("charts", []))
+        except aws_infra.AwsConnectionError:
+            pass
+        except aws_infra.AwsApiError as exc:
+            blocks.append(
+                "LIVE AWS METRICS FETCH FAILED. The user's AWS account IS connected, "
+                "but CloudWatch failed. Tell the user this, show the error verbatim, "
+                f"and note cloudwatch:GetMetricStatistics permissions.\nError: {exc}"
+            )
+    if not blocks:
         return None, []
-    except azure_infra.AzureApiError as exc:
-        note = (
-            "LIVE AZURE METRICS FETCH FAILED. The user's Azure account IS "
-            "connected, but the read-only Azure Monitor query failed. Tell the "
-            "user this, show the error verbatim, and note the most likely cause: "
-            "the app registration needs the 'Monitoring Reader' role (or Reader) "
-            "on the subscription, and a subscription id must be set. Do NOT ask "
-            f"them to paste telemetry.\nError: {exc}"
-        )
-        return note, []
-    block = (
-        "LIVE AZURE METRICS DATA — read-only, fetched just now via Azure Monitor "
-        "using the user's connected credentials. Answer the performance question "
-        "directly from these REAL figures; the same series is being plotted as a "
-        "graph for the user. Do NOT ask the user to paste telemetry.\n\n"
-        + report["text"]
-    )
-    return block, report.get("charts", [])
-
-
-# Phrasing that means "count errors / HTTP statuses from request telemetry".
-_LOG_TRIGGERS = (
-    "log",
-    "logs",
-    "error",
-    "errors",
-    "4xx",
-    "5xx",
-    "400",
-    "401",
-    "403",
-    "404",
-    "429",
-    "500",
-    "502",
-    "503",
-    "504",
-    "status code",
-    "status codes",
-    "failed request",
-    "failing",
-    "error rate",
-)
-
-
-# Phrasing that means "read the actual log lines / diagnose a failure".
-_LOG_CONTENT_TRIGGERS = (
-    "log",
-    "logs",
-    "revision",
-    "crash",
-    "crashed",
-    "restart",
-    "exception",
-    "traceback",
-    "stack trace",
-    "stacktrace",
-    "failed",
-    "failing",
-    "failure",
-    "provision",
-    "deploy",
-    "deployment",
-    "why is",
-    "what happened",
-    "root cause",
-    "diagnose",
-    "not starting",
-    "won't start",
-)
+    return "\n\n---\n\n".join(blocks), charts
 
 
 def _gather_logs_context(
@@ -1196,13 +1215,15 @@ def _gather_logs_context(
     want_content = force or any(term in task_lower for term in _LOG_CONTENT_TRIGGERS)
     if not want_status and not want_content:
         return None, []
-    if not azure_infra.is_connected(project_id):
+    azure_ok = azure_infra.is_connected(project_id)
+    aws_ok = aws_infra.is_connected(project_id)
+    if not azure_ok and not aws_ok:
         return None, []
 
     blocks: list[str] = []
     charts: list[dict[str, Any]] = []
 
-    if want_status:
+    if azure_ok and want_status:
         try:
             report = azure_infra.build_status_report(project_id, task)
             blocks.append(
@@ -1222,7 +1243,7 @@ def _gather_logs_context(
                 f"the window. Error: {exc}"
             )
 
-    if want_content:
+    if azure_ok and want_content:
         try:
             logs = azure_infra.build_logs_report(project_id, task)
             blocks.append(
@@ -1242,6 +1263,38 @@ def _gather_logs_context(
                 "registration needs the 'Log Analytics Reader' (or Reader) role, or "
                 "no workspace is linked to the container app environment. Do NOT "
                 f"ask them to paste logs.\nError: {exc}"
+            )
+
+    if aws_ok and want_status:
+        try:
+            report = aws_infra.build_status_report(project_id, task)
+            blocks.append(
+                "LIVE AWS STATUS / ERROR SIGNALS — read-only CloudWatch signals "
+                "fetched with the user's connected credentials. Answer from these "
+                "REAL counts; do NOT ask the user to paste logs.\n\n"
+                + report["text"]
+            )
+            charts = charts + report.get("charts", [])
+        except aws_infra.AwsConnectionError:
+            pass
+        except aws_infra.AwsApiError as exc:
+            blocks.append(f"LIVE AWS STATUS TELEMETRY unavailable: {exc}")
+
+    if aws_ok and want_content:
+        try:
+            logs = aws_infra.build_logs_report(project_id, task)
+            blocks.append(
+                "LIVE AWS LOGS — read-only CloudWatch Logs fetched with the user's "
+                "connected credentials. Diagnose from these REAL log lines; do NOT "
+                "ask the user to paste logs.\n\n" + logs["text"]
+            )
+        except aws_infra.AwsConnectionError:
+            pass
+        except aws_infra.AwsApiError as exc:
+            blocks.append(
+                "LIVE AWS LOGS FETCH FAILED. The user's AWS account IS connected, "
+                "but CloudWatch Logs failed. Tell the user this, show the error "
+                f"verbatim, and note logs:FilterLogEvents permissions.\nError: {exc}"
             )
 
     if not blocks:
@@ -1310,6 +1363,14 @@ def _gather_live_context(
             "resource group vs resource names — inventory the connected "
             "subscription and compare against the fetched GitHub code.",
         )
+    if diagnostic and aws_infra.is_connected(project_id):
+        blocks.insert(
+            0,
+            "DEFAULT AWS SCOPE: the connected AWS account/region already configured "
+            "for this project. Do NOT ask the user to choose account vs region vs "
+            "resource names — inventory the connected account and compare against "
+            "the fetched GitHub code.",
+        )
     if diagnostic and github_infra.is_connected(project_id):
         named = _extract_named_repos(task)
         repo_note = (
@@ -1352,14 +1413,14 @@ def _ensure_planned_context(
             charts = gathered
     ctx = live_context or ""
     if names & {"log_analyzer", "incident_analyzer"} and (
-        "AZURE REQUEST/ERROR TELEMETRY" not in ctx and "AZURE LOGS" not in ctx
+        "AZURE REQUEST/ERROR TELEMETRY" not in ctx and "AZURE LOGS" not in ctx and "LIVE AWS STATUS" not in ctx and "LIVE AWS LOGS" not in ctx
     ):
         text, gathered = _gather_logs_context(task, project_id, force=True)
         if text:
             extra.append(text)
         if gathered:
             charts = charts + gathered
-    if "cost_analyzer" in names and "LIVE AZURE BILLING" not in ctx:
+    if "cost_analyzer" in names and "LIVE AZURE BILLING" not in ctx and "LIVE AWS BILLING" not in ctx:
         block = _gather_cost_context(task, project_id, force=True)
         if block:
             extra.append(block)
