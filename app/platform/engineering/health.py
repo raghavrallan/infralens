@@ -29,6 +29,12 @@ def _pct(done: int, total: int) -> int:
     return int(round(100 * done / total))
 
 
+def _delivery_architecture_status(project_id: str) -> str:
+    """Latest delivery-run architecture status for tests and summary helpers."""
+    run = eng_sync.active_delivery_run(project_id)
+    return str((run or {}).get("architecture_status") or "")
+
+
 def build_health(project_id: str) -> dict[str, Any]:
     projection = eng_sync.project_projection(project_id)
     items = projection["tasks"]

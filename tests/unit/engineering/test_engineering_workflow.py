@@ -413,15 +413,21 @@ def test_build_health_aggregates_mocked_project_state():
         {"id": "1", "stage": "architecture", "status": "completed", "title": "HLD", "priority": "low", "missing_artifacts": [], "ai_recommendation": ""},
         {"id": "2", "stage": "infrastructure", "status": "in_progress", "title": "VPC", "priority": "high", "missing_artifacts": [], "ai_recommendation": "Attach TF"},
     ]
-    with patch("app.platform.engineering.health.task_store.list_tasks", return_value=items):
-        with patch("app.platform.engineering.health.knowledge.list_knowledge", return_value=[{"status": "verified"}]):
-            with patch("app.platform.engineering.health.artifact_store.list_artifacts", return_value=[{"kind": "terraform"}]):
-                with patch("app.platform.engineering.health._open_risks", return_value=[]):
-                    with patch("app.platform.engineering.health._pending_adrs", return_value=2):
-                        with patch("app.platform.engineering.health._delivery_architecture_status", return_value=""):
-                            from app.platform.engineering.health import build_health
+    projection = {
+        "tasks": items,
+        "memory": [{"status": "verified"}],
+        "artifacts": [{"kind": "terraform"}],
+        "delivery": {"architecture_status": "", "stage": "architecture", "stage_label": "Architecture", "terraform_repair": {}},
+        "delivery_run_id": "run-1",
+        "task_counts": {"total": 2, "completed": 1, "in_progress": 1},
+        "synced_at": "2026-01-01T00:00:00Z",
+    }
+    with patch("app.platform.engineering.health.eng_sync.project_projection", return_value=projection):
+        with patch("app.platform.engineering.health._open_risks", return_value=[]):
+            with patch("app.platform.engineering.health._pending_adrs", return_value=2):
+                from app.platform.engineering.health import build_health
 
-                            snapshot = build_health("proj-1")
+                snapshot = build_health("proj-1")
     assert snapshot["bars"]["architecture"]["percent"] == 100
     assert snapshot["bars"]["infrastructure"]["percent"] == 0
     assert snapshot["task_counts"]["total"] == 2
@@ -434,17 +440,10 @@ def test_build_health_aggregates_mocked_project_state():
 def test_delivery_architecture_status_reads_latest_run():
     from app.platform.engineering.health import _delivery_architecture_status
 
-    class Session:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-        def scalar(self, *_args, **_kwargs):
-            return SimpleNamespace(artifacts={"architecture_status": "ready"})
-
-    with patch("app.platform.engineering.health.SessionLocal", return_value=Session()):
+    with patch(
+        "app.platform.engineering.health.eng_sync.active_delivery_run",
+        return_value={"architecture_status": "ready"},
+    ):
         assert _delivery_architecture_status("proj-1") == "ready"
 
 
