@@ -16,6 +16,12 @@ _REGION_NAMES = {
     "southcentralus", "southeastasia", "swedencentral", "switzerlandnorth",
     "uaenorth", "uksouth", "westeurope", "westus", "westus2", "westus3",
 }
+_AWS_REGIONS = {
+    "us-east-1", "us-east-2", "us-west-1", "us-west-2",
+    "eu-west-1", "eu-west-2", "eu-west-3", "eu-central-1", "eu-north-1",
+    "ap-south-1", "ap-southeast-1", "ap-southeast-2", "ap-northeast-1", "ap-northeast-2",
+    "ca-central-1", "sa-east-1", "af-south-1", "me-south-1",
+}
 _RESOURCE_NAME_STOPWORDS = {"a", "an", "the", "with", "in", "inside", "within", "using", "default", "same"}
 _CONFIRMATION = re.compile(r"^(yes|y|confirm(?:ed)?|approved?|approve|proceed|do it|execute|go ahead)\s*[.!]*$", re.IGNORECASE)
 
@@ -339,6 +345,163 @@ def _resource_group_spec(name: str, location: str, subscription: str) -> dict[st
         ],
         "preflight_expect": "__absent__",
         "verify": ["group", "show", "--name", name, "--output", "json"],
+        "requested_by": "chat",
+    }
+
+
+def _aws_region_from_message(message: str, fallback: str = "") -> str:
+    lowered = message.lower()
+    candidates = re.findall(r"\b[a-z]{2}-[a-z]+-\d\b", lowered)
+    for candidate in candidates:
+        if candidate in _AWS_REGIONS:
+            return candidate
+    return fallback if fallback in _AWS_REGIONS or not fallback else fallback
+
+
+def _s3_bucket_request(message: str) -> Optional[dict[str, str]]:
+    """Extract an S3 bucket create intent (AWS parallel to Azure RG helpers)."""
+    lowered = message.lower()
+    if not re.search(r"\b(create|make|provision|new)\b", lowered):
+        return None
+    if not any(term in lowered for term in ("s3 bucket", "s3 bucket", " aws bucket", "bucket on aws")):
+        if "s3" not in lowered or "bucket" not in lowered:
+            return None
+    name_match = re.search(
+        r"\bbucket\b.{0,60}?\b(?:named|name|called)\b\s*[:=]?\s*"
+        r"[`\"']?([a-z0-9][a-z0-9.-]{1,62})",
+        message,
+        re.IGNORECASE,
+    )
+    if not name_match:
+        name_match = re.search(
+            r"\b(?:s3\s+)?bucket\s+(?!in\b|and\b|with\b|called\b|named\b|name\b)"
+            r"[`\"']?([a-z0-9][a-z0-9.-]{1,62})",
+            message,
+            re.IGNORECASE,
+        )
+    name = name_match.group(1).lower() if name_match else ""
+    if name in _RESOURCE_NAME_STOPWORDS:
+        name = ""
+    region = _aws_region_from_message(message)
+    return {"name": name, "region": region}
+
+
+def _s3_bucket_spec(name: str, region: str) -> dict[str, Any]:
+    args = ["s3api", "create-bucket", "--bucket", name, "--region", region]
+    if region != "us-east-1":
+        args.extend(
+            ["--create-bucket-configuration", f"LocationConstraint={region}"]
+        )
+    return {
+        "project_id": "",
+        "provider": "aws",
+        "executable": "aws",
+        "args": args,
+        "target": f"aws/s3/{name}",
+        "access_scope": "write",
+        "expected_result": f"S3 bucket {name} exists in {region}.",
+        "risk": "Creates one empty S3 bucket. No objects are uploaded.",
+        "rollback": "Delete the bucket only after explicit review; deletion is not automated.",
+        "preflight": [
+            "s3api", "head-bucket", "--bucket", name, "--region", region,
+        ],
+        "preflight_expect": "__absent__",
+        "verify": ["s3api", "head-bucket", "--bucket", name, "--region", region],
+        "requested_by": "chat",
+    }
+
+
+def _sg_rule_request(message: str) -> Optional[dict[str, str]]:
+    """Extract create/update security-group ingress rule intent for AWS."""
+    lowered = message.lower()
+    if "network security group" in lowered or re.search(r"\bnsg\b", lowered):
+        return None
+    if "security group" not in lowered and "security-group" not in lowered:
+        return None
+    if not re.search(
+        r"\b(allow|open|authorize|add|create|update|ingress|inbound)\b", lowered
+    ):
+        return None
+    sg_match = re.search(
+        r"\b(sg-[0-9a-f]{8,17})\b",
+        message,
+        re.IGNORECASE,
+    )
+    if not sg_match:
+        sg_match = re.search(
+            r"(?:security[\s-]?group)\s+(?:named|name|called|id)?\s*[:=]?\s*"
+            r"[`\"']?([a-zA-Z0-9._/-]{2,128})",
+            message,
+            re.IGNORECASE,
+        )
+    group = sg_match.group(1) if sg_match else ""
+    if group.lower() in _RESOURCE_NAME_STOPWORDS:
+        group = ""
+    port_match = re.search(r"\bport\s*[:=]?\s*(\d{1,5})\b", lowered) or re.search(
+        r"\b(\d{1,5})/(?:tcp|udp)\b", lowered
+    )
+    port = port_match.group(1) if port_match else ""
+    proto_match = re.search(r"\b(tcp|udp|icmp|-1)\b", lowered)
+    protocol = proto_match.group(1) if proto_match else ("tcp" if port else "")
+    cidr_match = re.search(r"\b(\d{1,3}(?:\.\d{1,3}){3}/\d{1,2})\b", message)
+    cidr = cidr_match.group(1) if cidr_match else ""
+    region = _aws_region_from_message(message)
+    return {
+        "group_id": group if group.startswith("sg-") else "",
+        "group_name": "" if group.startswith("sg-") else group,
+        "port": port,
+        "protocol": protocol,
+        "cidr": cidr,
+        "region": region,
+    }
+
+
+def _sg_authorize_spec(
+    *,
+    group_id: str,
+    protocol: str,
+    port: str,
+    cidr: str,
+    region: str,
+) -> dict[str, Any]:
+    args = [
+        "ec2",
+        "authorize-security-group-ingress",
+        "--group-id",
+        group_id,
+        "--protocol",
+        protocol,
+        "--port",
+        port,
+        "--cidr",
+        cidr,
+        "--region",
+        region,
+    ]
+    return {
+        "project_id": "",
+        "provider": "aws",
+        "executable": "aws",
+        "args": args,
+        "target": f"aws/ec2/security-group/{group_id}/ingress/{protocol}/{port}",
+        "access_scope": "write",
+        "expected_result": (
+            f"Security group {group_id} allows {protocol}/{port} from {cidr} in {region}."
+        ),
+        "risk": (
+            "Adds or updates one inbound security group rule. Misconfigured CIDRs can "
+            "expose services publicly."
+        ),
+        "rollback": "Revoke the ingress rule only after explicit review; revocation is not automated.",
+        "preflight": [
+            "ec2", "describe-security-groups", "--group-ids", group_id,
+            "--region", region, "--output", "json",
+        ],
+        "preflight_expect": "",
+        "verify": [
+            "ec2", "describe-security-groups", "--group-ids", group_id,
+            "--region", region, "--output", "json",
+        ],
         "requested_by": "chat",
     }
 
@@ -1053,6 +1216,88 @@ def handle_turn(
         legacy_name = _pending_resource_group_name(chat_id)
         if legacy_name:
             return _missing_location_reply(legacy_name, project_id, action_scope, access_level)
+
+    # AWS structured helpers (parallel to Azure RG path) — resolve before planner.
+    s3_request = _s3_bucket_request(message)
+    if s3_request is not None:
+        aws_fields = connections.get_secret_fields(project_id, "aws") or {}
+        if not (aws_fields.get("access_key_id") and aws_fields.get("secret_access_key")):
+            return {
+                "reply": (
+                    "I understood the S3 bucket request, but AWS is not connected for this "
+                    "project. Add an access key in Settings (Cloud) first.\n\n"
+                    + provider_status_text(project_id, action_scope)
+                ),
+                "action": None,
+            }
+        region = s3_request.get("region") or str(aws_fields.get("region") or "us-east-1")
+        if not s3_request.get("name"):
+            return {
+                "reply": (
+                    "I can prepare the AWS S3 create-bucket action, but I need the bucket "
+                    "name (and optionally the region, for example `us-east-1`)."
+                ),
+                "action": None,
+                "required_action_scope": "write",
+            }
+        spec = _s3_bucket_spec(s3_request["name"], region)
+        intro = (
+            f"I prepared the AWS S3 create-bucket action for `{s3_request['name']}` "
+            f"in `{region}`."
+        )
+        if action_scope != "write":
+            return _scope_required_reply(spec, project_id, action_scope, access_level, intro)
+        return _create_or_hold_action(spec, project_id, action_scope, intro, access_level)
+
+    sg_request = _sg_rule_request(message)
+    if sg_request is not None:
+        aws_fields = connections.get_secret_fields(project_id, "aws") or {}
+        if not (aws_fields.get("access_key_id") and aws_fields.get("secret_access_key")):
+            return {
+                "reply": (
+                    "I understood the security-group rule request, but AWS is not connected "
+                    "for this project. Add an access key in Settings (Cloud) first.\n\n"
+                    + provider_status_text(project_id, action_scope)
+                ),
+                "action": None,
+            }
+        region = sg_request.get("region") or str(aws_fields.get("region") or "us-east-1")
+        missing = [
+            label
+            for label, value in (
+                ("security group id (sg-…)", sg_request.get("group_id")),
+                ("port", sg_request.get("port")),
+                ("protocol", sg_request.get("protocol")),
+                ("CIDR", sg_request.get("cidr")),
+            )
+            if not value
+        ]
+        if missing:
+            return {
+                "reply": (
+                    "I can prepare an AWS security-group ingress rule, but I still need: "
+                    + ", ".join(missing)
+                    + ". Example: `allow TCP port 443 from 10.0.0.0/8 on sg-0123456789abcdef0 "
+                    "in us-east-1`."
+                ),
+                "action": None,
+                "required_action_scope": "write",
+            }
+        spec = _sg_authorize_spec(
+            group_id=sg_request["group_id"],
+            protocol=sg_request["protocol"],
+            port=sg_request["port"],
+            cidr=sg_request["cidr"],
+            region=region,
+        )
+        intro = (
+            f"I prepared the AWS security-group ingress update for `{sg_request['group_id']}` "
+            f"({sg_request['protocol']}/{sg_request['port']} from {sg_request['cidr']}) "
+            f"in `{region}`."
+        )
+        if action_scope != "write":
+            return _scope_required_reply(spec, project_id, action_scope, access_level, intro)
+        return _create_or_hold_action(spec, project_id, action_scope, intro, access_level)
 
     request = _resource_group_request(message)
     pending_name = _pending_resource_group_name(chat_id)

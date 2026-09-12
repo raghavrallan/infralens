@@ -29,10 +29,11 @@ def test_gather_live_context_when_providers_disconnected():
                 with patch("app.chat.orchestrator._gather_code_context", return_value=None):
                     with patch("app.chat.orchestrator._provider_block", return_value=None):
                         with patch("app.chat.orchestrator.azure_infra.is_connected", return_value=False):
-                            with patch("app.chat.orchestrator.github_infra.is_connected", return_value=False):
-                                text, charts = _gather_live_context(
-                                    "hello", "p1", force=True, force_security=False
-                                )
+                            with patch("app.chat.orchestrator.aws_infra.is_connected", return_value=False):
+                                with patch("app.chat.orchestrator.github_infra.is_connected", return_value=False):
+                                    text, charts = _gather_live_context(
+                                        "hello", "p1", force=True, force_security=False
+                                    )
     assert text is None
     assert charts == []
 
@@ -48,10 +49,11 @@ def test_gather_live_context_diagnostic_adds_default_scopes():
                 ):
                     with patch("app.chat.orchestrator._provider_block", return_value="AZURE LIVE"):
                         with patch("app.chat.orchestrator.azure_infra.is_connected", return_value=True):
-                            with patch("app.chat.orchestrator.github_infra.is_connected", return_value=True):
-                                text, _charts = _gather_live_context(
-                                    "review azure posture vs github", "p1"
-                                )
+                            with patch("app.chat.orchestrator.aws_infra.is_connected", return_value=False):
+                                with patch("app.chat.orchestrator.github_infra.is_connected", return_value=True):
+                                    text, _charts = _gather_live_context(
+                                        "review azure posture vs github", "p1"
+                                    )
     assert text is not None
     assert "DEFAULT AZURE SCOPE" in text
     assert "DEFAULT GITHUB SCOPE" in text

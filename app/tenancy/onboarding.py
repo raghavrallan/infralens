@@ -37,7 +37,7 @@ def status(*, user: dict[str, Any]) -> dict[str, Any]:
             {
                 "id": "existing",
                 "label": "Use existing GitHub repository",
-                "description": "Connect GitHub, pick a repo, optionally connect Azure.",
+                "description": "Connect GitHub, pick a repo, optionally connect Azure and/or AWS.",
             },
             {
                 "id": "new",
@@ -55,6 +55,7 @@ def complete(
     repos: list[str],
     user: dict[str, Any],
     azure_connected: bool = False,
+    aws_connected: bool = False,
     github_connected: bool = False,
     project_id: Optional[str] = None,
     org_id: Optional[str] = None,
@@ -109,12 +110,14 @@ def complete(
 
     github_status = connections.status(project_id, "github")
     azure_status = connections.status(project_id, "azure")
+    aws_status = connections.status(project_id, "aws")
     return {
         "ok": True,
         "path": path,
         "project": project,
         "github_connected": bool(github_status.get("connected") or github_connected),
         "azure_connected": bool(azure_status.get("connected") or azure_connected),
+        "aws_connected": bool(aws_status.get("connected") or aws_connected),
         "next": "delivery" if path == "new" else "dashboard",
     }
 

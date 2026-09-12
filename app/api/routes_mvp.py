@@ -60,6 +60,7 @@ class OnboardingCompleteRequest(BaseModel):
     project_name: str
     repos: list[str] = []
     azure_connected: bool = False
+    aws_connected: bool = False
     github_connected: bool = False
     project_id: Optional[str] = None
 
@@ -212,6 +213,7 @@ def onboarding_complete(
             repos=body.repos,
             user=user,
             azure_connected=body.azure_connected,
+            aws_connected=body.aws_connected,
             github_connected=body.github_connected,
             project_id=body.project_id,
         )

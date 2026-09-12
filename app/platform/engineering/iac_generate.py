@@ -78,14 +78,27 @@ def _terraform_file(name: str, title: str, cloud: str, architecture: dict[str, A
 
 
 def _aws_or_generic(name: str, title: str, cloud: str) -> str:
-    if "providers" in name or name.endswith("providers.tf"):
+    if name.endswith("providers.tf") or name == "providers.tf" or "providers" in name:
         return AWS_PROVIDERS
-    if "backend" in name:
+    if name.endswith("backend.tf") or name == "backend.tf" or "backend" in name:
         return AWS_BACKEND
+    if "network" in name or "vpc" in name:
+        return AWS_NETWORK
+    if "database" in name or "postgres" in name or "rds" in name:
+        return AWS_DATABASE
+    if "secret" in name:
+        return AWS_SECRETS
+    if "compute" in name or "container" in name or "ecs" in name or "fargate" in name:
+        return AWS_COMPUTE
+    if "iam" in name:
+        return AWS_IAM
+    if "storage" in name or "s3" in name:
+        return AWS_STORAGE
     slug = "".join(ch if ch.isalnum() else "_" for ch in title.lower())[:32] or "component"
     return (
         AWS_PROVIDERS
-        + f'\nresource "aws_ssm_parameter" "{slug}" {{\n'
+        + f'\n# Placeholder module for "{title}" — replace with a concrete AWS resource.\n'
+        + f'resource "aws_ssm_parameter" "{slug}" {{\n'
         + f'  name  = "/infralens/{slug}"\n  type  = "String"\n  value = "planned"\n}}\n'
     )
 
@@ -328,7 +341,8 @@ AZURE_STORAGE = """resource "azurerm_storage_account" "app" {
 }
 """
 
-AWS_PROVIDERS = """terraform {
+AWS_PROVIDERS = """# Generated from the architecture model. Review before apply.
+terraform {
   required_version = ">= 1.5.0"
   required_providers {
     aws = {
@@ -346,12 +360,194 @@ variable "aws_region" {
   type    = string
   default = "us-east-1"
 }
+
+variable "name_prefix" {
+  type    = string
+  default = "infralens"
+}
+
+variable "tags" {
+  type    = map(string)
+  default = { product = "infralens", managed_by = "terraform" }
+}
 """
 
-AWS_BACKEND = """terraform {
-  backend "local" {
-    path = "terraform.tfstate"
+AWS_BACKEND = """# Replace with your org's remote state (S3 + DynamoDB lock). Local is for validate only.
+terraform {
+  backend "s3" {
+    bucket         = "REPLACE-tfstate-bucket"
+    key            = "infralens/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "REPLACE-tfstate-lock"
+    encrypt        = true
   }
+}
+"""
+
+AWS_NETWORK = """resource "aws_vpc" "app" {
+  cidr_block           = "10.60.0.0/16"
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+  tags                 = merge(var.tags, { Name = "vpc-${var.name_prefix}" })
+}
+
+resource "aws_subnet" "public" {
+  vpc_id                  = aws_vpc.app.id
+  cidr_block              = "10.60.1.0/24"
+  map_public_ip_on_launch = true
+  availability_zone       = data.aws_availability_zones.available.names[0]
+  tags                    = merge(var.tags, { Name = "snet-public-${var.name_prefix}" })
+}
+
+resource "aws_subnet" "private" {
+  vpc_id            = aws_vpc.app.id
+  cidr_block        = "10.60.2.0/24"
+  availability_zone = data.aws_availability_zones.available.names[0]
+  tags              = merge(var.tags, { Name = "snet-private-${var.name_prefix}" })
+}
+
+resource "aws_internet_gateway" "app" {
+  vpc_id = aws_vpc.app.id
+  tags   = merge(var.tags, { Name = "igw-${var.name_prefix}" })
+}
+
+resource "aws_security_group" "app" {
+  name        = "sg-${var.name_prefix}"
+  description = "App security group"
+  vpc_id      = aws_vpc.app.id
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  tags = var.tags
+}
+
+data "aws_availability_zones" "available" {
+  state = "available"
+}
+"""
+
+AWS_DATABASE = """resource "aws_db_subnet_group" "app" {
+  name       = "dbsubnet-${var.name_prefix}"
+  subnet_ids = [aws_subnet.private.id, aws_subnet.public.id]
+  tags       = var.tags
+}
+
+resource "aws_db_instance" "app" {
+  identifier              = "rds-${var.name_prefix}"
+  engine                  = "postgres"
+  engine_version          = "16"
+  instance_class          = "db.t4g.micro"
+  allocated_storage       = 20
+  db_subnet_group_name    = aws_db_subnet_group.app.name
+  vpc_security_group_ids  = [aws_security_group.app.id]
+  username                = "appadmin"
+  manage_master_user_password = true
+  skip_final_snapshot     = true
+  publicly_accessible     = false
+  storage_encrypted       = true
+  tags                    = var.tags
+}
+"""
+
+AWS_COMPUTE = """resource "aws_ecs_cluster" "app" {
+  name = "ecs-${var.name_prefix}"
+  tags = var.tags
+}
+
+resource "aws_ecs_task_definition" "api" {
+  family                   = "${var.name_prefix}-api"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = "256"
+  memory                   = "512"
+  execution_role_arn       = aws_iam_role.ecs_execution.arn
+  container_definitions = jsonencode([
+    {
+      name      = "api"
+      image     = "public.ecr.aws/nginx/nginx:stable"
+      essential = true
+      portMappings = [{ containerPort = 80, protocol = "tcp" }]
+    }
+  ])
+  tags = var.tags
+}
+
+resource "aws_ecs_service" "api" {
+  name            = "svc-${var.name_prefix}-api"
+  cluster         = aws_ecs_cluster.app.id
+  task_definition = aws_ecs_task_definition.api.arn
+  desired_count   = 1
+  launch_type     = "FARGATE"
+  network_configuration {
+    subnets          = [aws_subnet.private.id]
+    security_groups  = [aws_security_group.app.id]
+    assign_public_ip = false
+  }
+  tags = var.tags
+}
+"""
+
+AWS_STORAGE = """resource "aws_s3_bucket" "app" {
+  bucket = "${var.name_prefix}-app-data"
+  tags   = var.tags
+}
+
+resource "aws_s3_bucket_public_access_block" "app" {
+  bucket                  = aws_s3_bucket.app.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "app" {
+  bucket = aws_s3_bucket.app.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_versioning" "app" {
+  bucket = aws_s3_bucket.app.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+"""
+
+AWS_IAM = """resource "aws_iam_role" "ecs_execution" {
+  name = "role-${var.name_prefix}-ecs-exec"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Principal = { Service = "ecs-tasks.amazonaws.com" }
+    }]
+  })
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_execution" {
+  role       = aws_iam_role.ecs_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
+"""
+
+AWS_SECRETS = """resource "aws_secretsmanager_secret" "app" {
+  name                    = "secret/${var.name_prefix}/app"
+  recovery_window_in_days = 7
+  tags                    = var.tags
+}
+
+resource "aws_secretsmanager_secret_version" "app" {
+  secret_id     = aws_secretsmanager_secret.app.id
+  secret_string = jsonencode({ placeholder = "replace-me" })
 }
 """
 

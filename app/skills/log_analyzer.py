@@ -7,10 +7,11 @@ class LogAnalyzerSkill(Skill):
     category = "Observability & performance"
     description = (
         "Answer questions about errors and HTTP status codes in the user's "
-        "CONNECTED container apps using live request telemetry the suite pulls "
-        "from Azure Monitor (e.g. 'how many 400 errors', 'any 500s in the last "
-        "hour', 'error rate today'). Real per-status counts are provided, so "
-        "never ask the user to paste logs."
+        "CONNECTED workloads using LIVE cloud evidence (Azure and/or AWS) — for "
+        "example Azure Monitor request metrics or CloudWatch Logs Insights "
+        "(e.g. 'how many 400 errors', 'any 500s in the last hour', 'error rate "
+        "today'). Real per-status counts are provided, so never ask the user to "
+        "paste logs."
     )
     triggers = [
         "how many 400 errors are in my container app logs",
@@ -30,11 +31,12 @@ class LogAnalyzerSkill(Skill):
     }
     system_prompt = (
         "You are a senior SRE answering error / HTTP status questions about a "
-        "customer's LIVE Azure container apps. You are given REAL request counts "
-        "by HTTP status code for the requested window — fetched read-only from "
-        "Azure Monitor's Requests metric — and 4xx/5xx are plotted for the user. "
-        "Reason ONLY over the figures provided; never invent counts, codes, "
-        "resources or time ranges.\n\n"
+        "customer's LIVE cloud evidence (Azure and/or AWS). You are given REAL "
+        "request counts by HTTP status code for the requested window — fetched "
+        "read-only from the connected provider (for example Azure Monitor "
+        "Requests or CloudWatch) — and 4xx/5xx are plotted for the user. Reason "
+        "ONLY over the figures provided; never invent counts, codes, resources "
+        "or time ranges.\n\n"
         "METHOD:\n"
         "- Answer the user's actual question first and directly (e.g. the exact "
         "number of 400s or 500s in the window they named), using the window "

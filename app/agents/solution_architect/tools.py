@@ -73,15 +73,40 @@ def inventory_is_empty(report: str) -> bool:
 def get_cost_report(project_id: str, text: str = "") -> str:
     from datetime import date
 
-    from app.providers import azure_infra
+    from app.providers import aws_infra, azure_infra
 
-    if not azure_infra.is_connected(project_id):
-        return "Azure cost: not connected (treat as estimate)."
+    azure_ok = False
+    aws_ok = False
     try:
-        start, end, label = azure_infra.parse_cost_period(text or "last 30 days", today=date.today())
-        return _safe("azure cost", azure_infra.build_cost_report, project_id, start, end, label)
-    except Exception as exc:  # noqa: BLE001
-        return f"Azure cost unavailable: {exc}"
+        azure_ok = azure_infra.is_connected(project_id)
+    except Exception:  # noqa: BLE001
+        azure_ok = False
+    try:
+        aws_ok = aws_infra.is_connected(project_id)
+    except Exception:  # noqa: BLE001
+        aws_ok = False
+    if not azure_ok and not aws_ok:
+        return "Cloud cost: not connected (treat as estimate)."
+
+    blocks: list[str] = []
+    period = text or "last 30 days"
+    if azure_ok:
+        try:
+            start, end, label = azure_infra.parse_cost_period(period, today=date.today())
+            blocks.append(
+                _safe("azure cost", azure_infra.build_cost_report, project_id, start, end, label)
+            )
+        except Exception as exc:  # noqa: BLE001
+            blocks.append(f"Azure cost unavailable: {exc}")
+    if aws_ok:
+        try:
+            start, end, label = aws_infra.parse_cost_period(period, today=date.today())
+            blocks.append(
+                _safe("aws cost", aws_infra.build_cost_report, project_id, start, end, label)
+            )
+        except Exception as exc:  # noqa: BLE001
+            blocks.append(f"AWS cost unavailable: {exc}")
+    return "\n\n".join(blocks) or "Cloud cost: not connected (treat as estimate)."
 
 
 def get_code_artifacts(project_id: str, kinds: Optional[list[str]] = None) -> str:
