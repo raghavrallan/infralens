@@ -40,7 +40,6 @@ $Root = $PSScriptRoot
 Set-Location $Root
 
 $VenvPython = Join-Path $Root ".venv\Scripts\python.exe"
-$RqExe = Join-Path $Root ".venv\Scripts\rq.exe"
 $UvicornExe = Join-Path $Root ".venv\Scripts\uvicorn.exe"
 $FrontendDir = Join-Path $Root "frontend"
 $FrontendOut = Join-Path $Root "frontend\out"
@@ -560,7 +559,8 @@ function Stop-MatchingAppProcesses {
                 ($_.CommandLine -like "*scripts\\run_local_api.py*") -or
                 ($_.CommandLine -like "*scripts/run_local_api.py*") -or
                 ($_.CommandLine -like "*rq.exe*worker*intelligence*") -or
-                ($_.CommandLine -like "*rq worker intelligence*")
+                ($_.CommandLine -like "*rq worker intelligence*") -or
+                ($_.CommandLine -like "*rq.cli*worker*intelligence*")
             )
         } |
         ForEach-Object {
@@ -795,16 +795,20 @@ function Write-ChildScripts {
     )
     Write-Utf8NoBomFile -Path $ApiScriptFile -Lines $apiLines
 
+    # Use `python -m rq.cli`, not rq.exe. Windows console launchers hardcode the
+    # python.exe path from venv creation, so they break if the repo is moved
+    # (e.g. into OneDrive).
     $workerLines = @(
         "@echo off"
         "title DevSecOps Worker"
         "cd /d `"$Root`""
         "set `"DATABASE_URL=$db`""
         "set `"REDIS_URL=$redis`""
+        "set `"PYTHONPATH=$Root`""
         "echo DevSecOps Worker - leave this CMD window open"
         "echo RQ worker listening on queue: intelligence"
         "echo."
-        "`"$RqExe`" worker intelligence --worker-class app.intelligence.worker.Worker --url $redis"
+        "`"$VenvPython`" -m rq.cli worker intelligence --worker-class app.intelligence.worker.Worker --url $redis"
         "echo."
         "echo Worker exited. Press any key to close this window."
         "pause >nul"
@@ -987,6 +991,7 @@ function Stop-AppProcesses {
                 ($_.CommandLine -like "*scripts/run_local_api.py*") -or
                 ($_.CommandLine -like "*rq.exe*worker*intelligence*") -or
                 ($_.CommandLine -like "*rq worker intelligence*") -or
+                ($_.CommandLine -like "*rq.cli*worker*intelligence*") -or
                 ($_.CommandLine -like "*run-api.cmd*") -or
                 ($_.CommandLine -like "*run-worker.cmd*") -or
                 ($_.CommandLine -like "*run-frontend.cmd*") -or
