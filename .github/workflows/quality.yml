@@ -28,11 +28,14 @@ jobs:
           grep -qx worker /tmp/services.txt
           grep -q 'N8N_WEBHOOKS_ENABLED' /tmp/compose.yml
           grep -q 'n8nio/n8n' /tmp/compose.yml
-          # Must not use required-interpolation (?); it broke server deploy when .env lacked the key.
-          if grep -q 'N8N_ENCRYPTION_KEY:?\|N8N_ENCRYPTION_KEY?\?' docker-compose.yml; then
+          # Must not use required-interpolation (?:/??); it broke server deploy when .env lacked the key.
+          # Match only ${N8N_ENCRYPTION_KEY:?...} / ${N8N_ENCRYPTION_KEY??...} — not the safe ${VAR:-default} form.
+          if grep -qF '${N8N_ENCRYPTION_KEY:?' docker-compose.yml \
+            || grep -qF '${N8N_ENCRYPTION_KEY??' docker-compose.yml; then
             echo "ERROR: N8N_ENCRYPTION_KEY must not use required (? ) interpolation" >&2
             exit 1
           fi
+          grep -qF '${N8N_ENCRYPTION_KEY:-' docker-compose.yml
           echo "On-prem compose OK (n8n mandatory in container-app)"
       - name: Validate without-n8n override disables webhook defaults
         env:

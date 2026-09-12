@@ -104,10 +104,12 @@ def test_github_credentials_and_azure_cost_empty_filter():
 
 @pytest.mark.unit
 def test_architect_llm_and_prompt_seed():
-    architect_llm._llm = None
-    architect_llm._llm_signature = None
+    from app.agents.runtime import llm as runtime_llm
+
+    runtime_llm._llm = None
+    runtime_llm._llm_signature = None
     cfg = SimpleNamespace(configured=False, endpoint="", api_key="", deployment="", api_version="")
-    with patch("app.agents.solution_architect.llm.get_azure_config", return_value=cfg):
+    with patch("app.agents.runtime.llm.get_azure_config", return_value=cfg):
         with pytest.raises(RuntimeError, match="not configured"):
             architect_llm.get_architect_llm()
     cfg.configured = True
@@ -116,14 +118,14 @@ def test_architect_llm_and_prompt_seed():
     cfg.deployment = "gpt"
     cfg.api_version = "2024-02-01"
     fake = MagicMock()
-    with patch("app.agents.solution_architect.llm.get_azure_config", return_value=cfg):
-        with patch("app.agents.solution_architect.llm.observability.tracing_enabled", return_value=False):
+    with patch("app.agents.runtime.llm.get_azure_config", return_value=cfg):
+        with patch("app.agents.runtime.llm.observability.tracing_enabled", return_value=False):
             with patch("langchain_openai.AzureChatOpenAI", return_value=fake):
                 assert architect_llm.get_architect_llm() is fake
                 assert architect_llm.get_architect_llm() is fake
-    with patch("app.agents.solution_architect.llm.observability.tracing_enabled", return_value=False):
+    with patch("app.agents.runtime.llm.observability.tracing_enabled", return_value=False):
         assert architect_llm.langchain_callbacks() == []
-    with patch("app.agents.solution_architect.llm.observability.tracing_enabled", return_value=True):
+    with patch("app.agents.runtime.llm.observability.tracing_enabled", return_value=True):
         fake_mod = MagicMock()
         fake_mod.CallbackHandler.return_value = MagicMock()
         with patch.dict("sys.modules", {"langfuse.langchain": fake_mod}):

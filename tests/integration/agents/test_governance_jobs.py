@@ -11,11 +11,15 @@ from app.agents.solution_architect import governance, jobs, llm
 
 @pytest.mark.unit
 def test_architect_llm_requires_config_and_returns_empty_callbacks():
+    from app.agents.runtime import llm as runtime_llm
+
+    runtime_llm._llm = None
+    runtime_llm._llm_signature = None
     cfg = MagicMock(configured=False)
-    with patch("app.agents.solution_architect.llm.get_azure_config", return_value=cfg):
+    with patch("app.agents.runtime.llm.get_azure_config", return_value=cfg):
         with pytest.raises(RuntimeError, match="not configured"):
             llm.get_architect_llm()
-    with patch("app.agents.solution_architect.llm.observability.tracing_enabled", return_value=False):
+    with patch("app.agents.runtime.llm.observability.tracing_enabled", return_value=False):
         assert llm.langchain_callbacks() == []
         config = llm.invoke_config()
         assert config["callbacks"] == []
