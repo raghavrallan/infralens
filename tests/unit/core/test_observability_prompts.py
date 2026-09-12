@@ -8,6 +8,13 @@ import pytest
 from app.core import observability, prompts
 
 
+@pytest.fixture(autouse=True)
+def _reset_langfuse_circuit():
+    observability.reset_langfuse_circuit_for_tests()
+    yield
+    observability.reset_langfuse_circuit_for_tests()
+
+
 @pytest.mark.unit
 def test_tracing_disabled_without_keys(monkeypatch):
     monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
@@ -103,9 +110,24 @@ def test_get_text_prompt_degrades_on_langfuse_error(monkeypatch):
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk")
     monkeypatch.setenv("LANGFUSE_TRACING_ENABLED", "true")
     with patch("app.core.observability.tracing_enabled", return_value=True):
-        with patch("langfuse.get_client", side_effect=RuntimeError("down")):
+        with patch(
+            "app.core.observability.get_langfuse_client",
+            side_effect=RuntimeError("timed out"),
+        ):
             result = prompts.get_text_prompt("x", fallback="local")
     assert result == "local"
+    assert observability.langfuse_unreachable() is True
+
+
+@pytest.mark.unit
+def test_seed_skips_when_probe_fails(monkeypatch):
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk")
+    monkeypatch.setenv("LANGFUSE_TRACING_ENABLED", "true")
+    with patch("app.core.observability.probe_langfuse", return_value=False):
+        with patch("app.core.prompts.ensure_text_prompt") as ensure:
+            prompts.seed_core_prompts()
+    ensure.assert_not_called()
 
 
 @pytest.mark.unit
@@ -113,3 +135,26 @@ def test_ensure_and_seed_are_noops_when_tracing_disabled(monkeypatch):
     monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
     prompts.ensure_text_prompt("n", "p")
     prompts.seed_core_prompts()
+
+
+@pytest.mark.unit
+def test_probe_marks_unreachable_on_timeout(monkeypatch):
+    monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk")
+    monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk")
+    monkeypatch.setenv("LANGFUSE_TRACING_ENABLED", "true")
+    monkeypatch.setenv("LANGFUSE_BASE_URL", "https://langfuse.example")
+    monkeypatch.setenv("LANGFUSE_TIMEOUT", "1")
+
+    class _Boom:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get(self, *_args, **_kwargs):
+            raise TimeoutError("timed out")
+
+    with patch("httpx.Client", return_value=_Boom()):
+        assert observability.probe_langfuse() is False
+    assert observability.langfuse_unreachable() is True
