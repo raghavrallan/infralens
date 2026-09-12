@@ -1,5 +1,98 @@
 """Skill: triage and prioritise vulnerability scan results."""
-from app.skills.base import Skill
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from app.skills.base import Skill, SkillResult
+
+
+def format_vuln_triage_markdown(raw: str) -> str:
+    """Turn the skill's JSON payload into Markdown for chat rendering.
+
+    Structured JSON is still produced by the model (json_output=True) so
+    downstream extractors can use metadata["raw_json"]. Chat must never show
+    the raw object blob.
+    """
+    text = (raw or "").strip()
+    if not text:
+        return text
+    try:
+        data = json.loads(text)
+    except (ValueError, json.JSONDecodeError):
+        return raw
+    if not isinstance(data, dict):
+        return raw
+
+    summary = str(data.get("summary") or "").strip()
+    highest = str(data.get("highest_priority") or "").strip()
+    findings = data.get("findings")
+    if not isinstance(findings, list):
+        findings = []
+
+    lines: list[str] = []
+    if summary:
+        lines.append(summary)
+        lines.append("")
+    if highest:
+        lines.append(f"**Highest priority:** {highest}")
+        lines.append("")
+
+    if not findings:
+        lines.append("No discrete vulnerability findings were produced from the evidence.")
+        return "\n".join(lines).strip()
+
+    lines.append("### Findings")
+    lines.append("")
+    for idx, item in enumerate(findings, start=1):
+        if not isinstance(item, dict):
+            continue
+        title = str(
+            item.get("title")
+            or item.get("cve_id")
+            or item.get("cveid")
+            or f"Finding {idx}"
+        ).strip()
+        cve = str(item.get("cve_id") or item.get("cveid") or "").strip()
+        component = str(item.get("affected_component") or "").strip()
+        priority = str(item.get("priority") or "").strip()
+        fix = str(item.get("fix_action") or "").strip()
+        reasoning = str(item.get("reasoning") or "").strip()
+        sources = item.get("sources") if isinstance(item.get("sources"), list) else []
+        reachable = item.get("reachable")
+        exploitable = item.get("exploitable")
+
+        heading = f"{idx}. {title}"
+        if cve and cve.upper() not in ("N/A", "NA", "NONE") and cve not in title:
+            heading = f"{idx}. {cve} — {title}"
+        lines.append(f"**{heading}**")
+        if priority:
+            lines.append(f"- **Severity / priority:** {priority}")
+        if component:
+            lines.append(f"- **Affected:** {component}")
+        if reachable is not None:
+            lines.append(f"- **Reachable:** {_bool_label(reachable)}")
+        if exploitable is not None:
+            lines.append(f"- **Exploitable:** {_bool_label(exploitable)}")
+        if fix:
+            lines.append(f"- **Fix:** {fix}")
+        if reasoning:
+            lines.append(f"- **Reasoning:** {reasoning}")
+        if sources:
+            src_text = "; ".join(str(s).strip() for s in sources if str(s).strip())
+            if src_text:
+                lines.append(f"- **Evidence:** {src_text}")
+        lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _bool_label(value: Any) -> str:
+    if value is True:
+        return "yes"
+    if value is False:
+        return "no"
+    return "unknown"
 
 
 class VulnTriageSkill(Skill):
@@ -77,6 +170,13 @@ class VulnTriageSkill(Skill):
         "versions, or exploit status not supported by the input; if a signal is "
         "unknown, say so in the reasoning rather than guessing."
     )
+
+    def run(self, args: dict[str, Any]) -> SkillResult:
+        result = super().run(args)
+        raw = result.content or ""
+        result.metadata["raw_json"] = raw
+        result.content = format_vuln_triage_markdown(raw)
+        return result
 
 
 skill = VulnTriageSkill()
