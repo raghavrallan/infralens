@@ -29,12 +29,17 @@ def test_prompts_langfuse_success_and_fallback():
     client = MagicMock()
     client.get_prompt.return_value = fake_prompt
     with patch("app.core.prompts.observability.tracing_enabled", return_value=True):
-        with patch("langfuse.get_client", return_value=client):
-            text = prompts.get_text_prompt("n", fallback="fb {{name}}", variables={"name": "Ada"})
+        with patch("app.core.prompts.observability.langfuse_unreachable", return_value=False):
+            with patch("app.core.prompts.observability.get_langfuse_client", return_value=client):
+                text = prompts.get_text_prompt("n", fallback="fb {{name}}", variables={"name": "Ada"})
     assert "compiled" in text or "Ada" in text
     with patch("app.core.prompts.observability.tracing_enabled", return_value=True):
-        with patch("langfuse.get_client", side_effect=RuntimeError("down")):
-            text = prompts.get_text_prompt("n", fallback="hello {{name}}", variables={"name": "Ada"})
+        with patch("app.core.prompts.observability.langfuse_unreachable", return_value=False):
+            with patch(
+                "app.core.prompts.observability.get_langfuse_client",
+                side_effect=RuntimeError("down"),
+            ):
+                text = prompts.get_text_prompt("n", fallback="hello {{name}}", variables={"name": "Ada"})
     assert "Ada" in text
     assert prompts._fallback_compile("plain", None) == "plain"
     assert "{{missing}}" in prompts._fallback_compile("hi {{missing}}", {"name": "x"})
@@ -45,24 +50,35 @@ def test_ensure_and_seed_core_prompts():
     client = MagicMock()
     client.get_prompt.side_effect = LookupError("missing")
     with patch("app.core.prompts.observability.tracing_enabled", return_value=True):
-        with patch("langfuse.get_client", return_value=client):
-            prompts.ensure_text_prompt("n", "body")
+        with patch("app.core.prompts.observability.langfuse_unreachable", return_value=False):
+            with patch("app.core.prompts.observability.get_langfuse_client", return_value=client):
+                prompts.ensure_text_prompt("n", "body")
     client.create_prompt.assert_called()
     client.get_prompt.side_effect = None
     client.get_prompt.return_value = MagicMock()
     with patch("app.core.prompts.observability.tracing_enabled", return_value=True):
-        with patch("langfuse.get_client", return_value=client):
-            prompts.ensure_text_prompt("exists", "body")
+        with patch("app.core.prompts.observability.langfuse_unreachable", return_value=False):
+            with patch("app.core.prompts.observability.get_langfuse_client", return_value=client):
+                prompts.ensure_text_prompt("exists", "body")
     with patch("app.core.prompts.observability.tracing_enabled", return_value=True):
-        with patch("langfuse.get_client", side_effect=RuntimeError("down")):
-            prompts.ensure_text_prompt("n", "body")
+        with patch("app.core.prompts.observability.langfuse_unreachable", return_value=False):
+            with patch(
+                "app.core.prompts.observability.get_langfuse_client",
+                side_effect=RuntimeError("down"),
+            ):
+                prompts.ensure_text_prompt("n", "body")
     with patch("app.core.prompts.observability.tracing_enabled", return_value=False):
         prompts.ensure_text_prompt("n", "body")
         prompts.seed_core_prompts()
     with patch("app.core.prompts.observability.tracing_enabled", return_value=True):
-        with patch("app.core.prompts.ensure_text_prompt") as ensure:
-            with patch("app.agents.solution_architect.prompts.seed_architect_prompts", side_effect=RuntimeError("x")):
-                prompts.seed_core_prompts()
+        with patch("app.core.prompts.observability.langfuse_unreachable", return_value=False):
+            with patch("app.core.prompts.observability.probe_langfuse", return_value=True):
+                with patch("app.core.prompts.ensure_text_prompt") as ensure:
+                    with patch(
+                        "app.agents.solution_architect.prompts.seed_architect_prompts",
+                        side_effect=RuntimeError("x"),
+                    ):
+                        prompts.seed_core_prompts()
     assert ensure.call_count >= 5
 
 
