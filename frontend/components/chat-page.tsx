@@ -89,14 +89,8 @@ function scoreSkill(item: Skill, text: string) {
   return score;
 }
 
-const THINKING_STATUSES = [
-  "Thinking…",
-  "Reading your request…",
-  "Routing to the right skill…",
-  "Gathering context…",
-  "Working on a reply…",
-  "Still thinking…",
-];
+/** Shown only until the first real stream status arrives. Do not rotate canned copy. */
+const WAITING_STATUS = "Working on your question…";
 
 function messageMeta(message: ChatMessage) {
   return message.metadata || message.meta || {};
@@ -378,17 +372,15 @@ export function ChatPage() {
       }
     };
     setStatusLive(true);
-    setStatus(THINKING_STATUSES[0]);
-    let tick = 0;
-    const pulse = window.setInterval(() => {
-      tick += 1;
-      setStatus(THINKING_STATUSES[tick % THINKING_STATUSES.length]);
-    }, 2200);
+    setStatus((current) =>
+      current && current !== "Connected" && current !== "Not configured" && current !== "Checking…"
+        ? current
+        : WAITING_STATUS,
+    );
     timer = window.setTimeout(() => void poll(), 800);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
-      window.clearInterval(pulse);
       setStatusLive(false);
     };
   }, [chatId, chatLoading, sending, messages, loadChats, projectId]);
@@ -396,19 +388,11 @@ export function ChatPage() {
   useEffect(() => {
     if (!sending) return;
     setStatusLive(true);
-    setStatus(THINKING_STATUSES[0]);
-    let tick = 0;
-    const pulse = window.setInterval(() => {
-      tick += 1;
-      setStatus((current) => {
-        // Keep server-provided status if it is already more specific than the default pulse.
-        if (current && !THINKING_STATUSES.includes(current) && current !== "Waiting for reply…") return current;
-        return THINKING_STATUSES[tick % THINKING_STATUSES.length];
-      });
-    }, 1800);
-    return () => {
-      window.clearInterval(pulse);
-    };
+    setStatus((current) =>
+      current && current !== "Connected" && current !== "Not configured" && current !== "Checking…"
+        ? current
+        : WAITING_STATUS,
+    );
   }, [sending]);
 
   useEffect(() => {
