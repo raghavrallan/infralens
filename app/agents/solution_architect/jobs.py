@@ -45,7 +45,14 @@ def generate_architecture(delivery_run_id: str) -> dict[str, Any]:
         final: dict[str, Any] = {}
         for event in stream_architect(
             {
-                "objective": docs or "Design the architecture for the ingested requirements.",
+                "objective": docs.strip()
+                if docs.strip()
+                else (
+                    "Design the target architecture using the project's connected cloud "
+                    "account(s) and mapped GitHub repository as the source of truth. "
+                    "Match services to the connected provider(s); do not default to "
+                    "another cloud when docs are empty."
+                ),
                 "project_id": project_id,
                 "plan_only": True,
                 "source": "delivery",
