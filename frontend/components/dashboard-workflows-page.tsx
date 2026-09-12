@@ -255,114 +255,126 @@ function WorkflowsBody({
   };
 
   return (
-    <>
-      <section className="dash-col">
-        <div className="dash-section-head">
-          <h3>Workflows</h3>
-        </div>
-        <div className="workflow-list">
-          {!workflows.length ? (
-            <div className="empty-note">
-              No workflows yet. Create one to start automated diagnostics.
-            </div>
-          ) : (
-            workflows.map((workflow) => (
-              <div
-                className={`workflow-card${workflow.enabled ? "" : " disabled"}`}
-                key={workflow.id}
-              >
-                <div className="workflow-name">
-                  <span>{workflow.name}</span>
-                  <span
-                    className={`run-status ${workflow.enabled ? "succeeded" : "queued"}`}
-                  >
-                    {workflow.enabled ? "on" : "off"}
-                  </span>
-                </div>
-                <div className="workflow-sub">
-                  {workflow.module_label || "Workflow"} · {workflow.environment} ·{" "}
-                  {workflow.schedule_cron
-                    ? `cron ${workflow.schedule_cron}`
-                    : "manual"}
-                </div>
-                <div className="workflow-skills">
-                  {workflow.skills.map((item) => (
-                    <span className="mini-pill" key={item}>
-                      {prettyName(item)}
-                    </span>
-                  ))}
-                </div>
-                <div className="workflow-last">
-                  Last:{" "}
-                  {workflow.last_run
-                    ? `${workflow.last_run.status} ${timeAgo(workflow.last_run.created_at)}`
-                    : "never run"}
-                </div>
-                <div className="workflow-actions">
-                  <button
-                    type="button"
-                    className="tiny-btn solid"
-                    onClick={() => void runWorkflow(workflow.id)}
-                  >
-                    Run now
-                  </button>
-                  <button
-                    type="button"
-                    className="tiny-btn"
-                    onClick={() => setWorkflowModal(workflow)}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    className="tiny-btn"
-                    onClick={() => void toggleWorkflow(workflow)}
-                  >
-                    {workflow.enabled ? "Disable" : "Enable"}
-                  </button>
-                  <button
-                    type="button"
-                    className="tiny-btn danger"
-                    onClick={() => void deleteWorkflow(workflow)}
-                  >
-                    Delete
-                  </button>
-                </div>
+    <section className="dash-page">
+      <div className="workflows-layout">
+        <div className="workflows-column">
+          <div className="dash-page-toolbar">
+            <strong className="dash-panel-label">Definitions</strong>
+            <span className="hint small">{workflows.length} workflows</span>
+          </div>
+          <div className="dash-feed">
+            {!workflows.length ? (
+              <div className="dash-empty">
+                <h3>No workflows yet</h3>
+                <p>Create one to start automated diagnostics.</p>
               </div>
-            ))
-          )}
+            ) : (
+              workflows.map((workflow) => (
+                <article
+                  className={`dash-item workflow-card${workflow.enabled ? "" : " disabled"}`}
+                  key={workflow.id}
+                >
+                  <div className="workflow-name">
+                    <span>{workflow.name}</span>
+                    <span
+                      className={`run-status ${workflow.enabled ? "succeeded" : "queued"}`}
+                    >
+                      {workflow.enabled ? "on" : "off"}
+                    </span>
+                  </div>
+                  <div className="workflow-sub">
+                    {workflow.module_label || "Workflow"} · {workflow.environment} ·{" "}
+                    {workflow.schedule_cron
+                      ? `cron ${workflow.schedule_cron}`
+                      : "manual"}
+                  </div>
+                  <div className="workflow-skills">
+                    {workflow.skills.slice(0, 6).map((item) => (
+                      <span className="mini-pill" key={item}>
+                        {prettyName(item)}
+                      </span>
+                    ))}
+                    {workflow.skills.length > 6 ? (
+                      <span className="mini-pill">+{workflow.skills.length - 6}</span>
+                    ) : null}
+                  </div>
+                  <div className="workflow-last">
+                    Last:{" "}
+                    {workflow.last_run
+                      ? `${workflow.last_run.status} ${timeAgo(workflow.last_run.created_at)}`
+                      : "never run"}
+                  </div>
+                  <div className="workflow-actions">
+                    <button
+                      type="button"
+                      className="tiny-btn solid"
+                      onClick={() => void runWorkflow(workflow.id)}
+                    >
+                      Run now
+                    </button>
+                    <button
+                      type="button"
+                      className="tiny-btn"
+                      onClick={() => setWorkflowModal(workflow)}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      className="tiny-btn"
+                      onClick={() => void toggleWorkflow(workflow)}
+                    >
+                      {workflow.enabled ? "Disable" : "Enable"}
+                    </button>
+                    <button
+                      type="button"
+                      className="tiny-btn danger"
+                      onClick={() => void deleteWorkflow(workflow)}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </article>
+              ))
+            )}
+          </div>
         </div>
 
-        <div className="dash-section-head">
-          <h3>Recent runs</h3>
-          <span className="hint small">Click a run for its findings</span>
-        </div>
-        <div className="run-list">
-          {!runs.length ? (
-            <div className="empty-note">No runs yet.</div>
-          ) : (
-            runs.map((run) => (
-              <button
-                type="button"
-                className="run-item"
-                key={run.id}
-                onClick={async () =>
-                  setRunModal(await api<Run>(`/api/runs/${run.id}`))
-                }
-              >
-                <div>
-                  <div>{run.workflow_name || "Workflow"}</div>
-                  <div className="run-meta">
-                    {run.trigger} · {timeAgo(run.created_at)}
-                    {run.finding_count ? ` · ${run.finding_count} findings` : ""}
+        <div className="workflows-column">
+          <div className="dash-page-toolbar">
+            <strong className="dash-panel-label">Recent runs</strong>
+            <span className="hint small">Click a run for its findings</span>
+          </div>
+          <div className="dash-feed run-list">
+            {!runs.length ? (
+              <div className="dash-empty">
+                <h3>No runs yet</h3>
+                <p>Queue a workflow to see run history here.</p>
+              </div>
+            ) : (
+              runs.map((run) => (
+                <button
+                  type="button"
+                  className="run-item dash-item"
+                  key={run.id}
+                  onClick={async () =>
+                    setRunModal(await api<Run>(`/api/runs/${run.id}`))
+                  }
+                >
+                  <div>
+                    <div>{run.workflow_name || "Workflow"}</div>
+                    <div className="run-meta">
+                      {run.trigger} · {timeAgo(run.created_at)}
+                      {run.finding_count ? ` · ${run.finding_count} findings` : ""}
+                    </div>
                   </div>
-                </div>
-                <span className={`run-status ${run.status}`}>{run.status}</span>
-              </button>
-            ))
-          )}
+                  <span className={`run-status ${run.status}`}>{run.status}</span>
+                </button>
+              ))
+            )}
+          </div>
         </div>
-      </section>
+      </div>
 
       {workflowModal !== undefined && projectId && (
         <WorkflowModal
@@ -413,15 +425,11 @@ function WorkflowsBody({
         </Modal>
       )}
       {Toast}
-    </>
+    </section>
   );
 }
 
-function WorkflowActions({
-  onCreate,
-}: {
-  onCreate: () => void;
-}) {
+function WorkflowActions({ onCreate }: { onCreate: () => void }) {
   const { projectId } = useDashboardContext();
   return (
     <button

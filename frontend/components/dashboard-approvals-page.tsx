@@ -8,6 +8,22 @@ import type { Approval, Finding } from "../lib/types";
 import { DashboardShell, useDashboardContext } from "./dashboard-shell";
 import { Modal, useToast } from "./modal";
 
+const PAGE_SIZE = 25;
+
+function canApprove(minRole?: string) {
+  const order = [
+    "viewer",
+    "developer",
+    "devops_engineer",
+    "devops_lead",
+    "org_admin",
+    "super_admin",
+  ];
+  const me = getStoredUser();
+  const min = minRole || "devops_engineer";
+  return order.indexOf(me?.role || "viewer") >= order.indexOf(min);
+}
+
 function ApprovalsBody() {
   const {
     projectId,
@@ -17,6 +33,8 @@ function ApprovalsBody() {
     refreshKey,
   } = useDashboardContext();
   const [approvals, setApprovals] = useState<Approval[]>([]);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [approvalModal, setApprovalModal] = useState<{
     approval: Approval;
     decision: "approved" | "rejected";
@@ -39,6 +57,7 @@ function ApprovalsBody() {
         );
         if (requestId !== requestRef.current) return;
         setApprovals(nextApprovals);
+        setVisibleCount(PAGE_SIZE);
         setUpdated(new Date());
       } finally {
         if (requestId === requestRef.current) setLoading(false);
@@ -46,6 +65,10 @@ function ApprovalsBody() {
     },
     [projectId, setLoading, setUpdated, timeRange],
   );
+
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [projectId, timeRange]);
 
   useEffect(() => {
     void loadData(true);
@@ -56,6 +79,7 @@ function ApprovalsBody() {
   }, [loadData, refreshKey]);
 
   const pendingLive = approvals.filter((approval) => !approval.expired).length;
+  const visibleApprovals = approvals.slice(0, visibleCount);
 
   const explain = (finding?: Finding) => {
     if (!finding || !projectId) return;
@@ -65,13 +89,6 @@ function ApprovalsBody() {
       `Explain this finding and how to fix it safely.\n\nSkill: ${prettyName(finding.skill)}\nSeverity: ${finding.severity}\nTitle: ${finding.title}\n${finding.evidence ? `Evidence: ${finding.evidence}` : ""}`,
     );
     window.location.href = "/";
-  };
-
-  const decideApproval = (
-    approval: Approval,
-    decision: "approved" | "rejected",
-  ) => {
-    setApprovalModal({ approval, decision });
   };
 
   const executeApproval = async () => {
@@ -94,80 +111,128 @@ function ApprovalsBody() {
   };
 
   return (
-    <>
-      <section className="dash-col">
-        <div className="dash-section-head">
-          <h3>Approvals</h3>
-          <span className={`pill ${pendingLive ? "warn" : "off"}`}>
-            {pendingLive} pending
+    <section className="dash-page">
+      <div className="dash-page-toolbar">
+        <span className={`pill ${pendingLive ? "warn" : "off"}`}>
+          {pendingLive} pending
+        </span>
+        <span className="hint small">
+          Approving records intent only — nothing is executed automatically.
+        </span>
+        {approvals.length ? (
+          <span className="hint small">
+            Showing {Math.min(visibleCount, approvals.length)} of{" "}
+            {approvals.length}
           </span>
-        </div>
-        <div className="approvals-list">
-          {!approvals.length ? (
-            <div className="empty-note">
-              No approvals waiting. Change-producing findings land here,
-              time-boxed.
-            </div>
-          ) : (
-            approvals.map((approval) => (
-              <div
-                className={`approval-card${approval.expired ? " expired" : ""}`}
+        ) : null}
+      </div>
+
+      <div className="dash-feed">
+        {!approvals.length ? (
+          <div className="dash-empty">
+            <h3>No approvals waiting</h3>
+            <p>Change-producing findings land here, time-boxed for review.</p>
+          </div>
+        ) : (
+          visibleApprovals.map((approval) => {
+            const expanded = expandedId === approval.id;
+            const evidence = approval.evidence || approval.finding?.evidence;
+            const hasDetails = Boolean(
+              approval.gate_rationale ||
+                evidence ||
+                approval.rollback ||
+                approval.preflight?.summary ||
+                approval.precedent?.length,
+            );
+            return (
+              <article
+                className={`dash-item approval-card${approval.expired ? " expired" : ""}`}
                 key={approval.id}
               >
-                <div className="approval-top">
+                <div className="finding-top">
                   <span className={`gate-badge gate-${approval.gate}`}>
                     {approval.gate_label}
                   </span>
-                  <span className={`sev sev-${approval.finding?.severity}`}>
-                    {approval.finding?.severity}
-                  </span>
+                  {approval.finding?.severity ? (
+                    <span className={`sev sev-${approval.finding.severity}`}>
+                      {approval.finding.severity}
+                    </span>
+                  ) : null}
                   <span className="approval-expiry">
                     {approval.expired
                       ? "expired"
                       : timeUntil(approval.expires_in_seconds)}
                   </span>
                 </div>
-                <div className="approval-title">
+                <h3 className="finding-title">
                   {approval.finding?.title || "Finding"}
-                </div>
+                </h3>
                 <div className="finding-meta">
                   <span>{prettyName(approval.finding?.skill)}</span>
                   <span>
-                    blast: {approval.blast_radius || approval.finding?.blast_radius || "—"}
+                    blast:{" "}
+                    {approval.blast_radius ||
+                      approval.finding?.blast_radius ||
+                      "—"}
                   </span>
-                  {approval.min_role_label && (
+                  {approval.min_role_label ? (
                     <span>min role: {approval.min_role_label}</span>
-                  )}
+                  ) : null}
+                  {approval.break_glass_applied ? (
+                    <span>break-glass active</span>
+                  ) : null}
                 </div>
-                {approval.gate_rationale && (
-                  <div className="approval-note">{approval.gate_rationale}</div>
-                )}
-                {approval.evidence || approval.finding?.evidence ? (
-                  <div className="approval-note">
-                    Evidence: {approval.evidence || approval.finding?.evidence}
+                {expanded && hasDetails ? (
+                  <div className="finding-body">
+                    {approval.gate_rationale ? (
+                      <>
+                        <span className="label">Rationale</span>
+                        {approval.gate_rationale}
+                      </>
+                    ) : null}
+                    {evidence ? (
+                      <>
+                        <span className="label">Evidence</span>
+                        {evidence}
+                      </>
+                    ) : null}
+                    {approval.rollback ? (
+                      <>
+                        <span className="label">Rollback</span>
+                        {approval.rollback}
+                      </>
+                    ) : null}
+                    {approval.preflight?.summary ? (
+                      <>
+                        <span className="label">Preflight</span>
+                        {approval.preflight.summary}
+                      </>
+                    ) : null}
+                    {!!approval.precedent?.length ? (
+                      <>
+                        <span className="label">Precedent</span>
+                        {approval.precedent
+                          .slice(0, 2)
+                          .map((item) => `${item.outcome}: ${item.summary}`)
+                          .join(" · ")}
+                      </>
+                    ) : null}
                   </div>
                 ) : null}
-                {approval.rollback && (
-                  <div className="approval-note">Rollback: {approval.rollback}</div>
-                )}
-                {approval.preflight?.summary && (
-                  <div className="approval-note">{approval.preflight.summary}</div>
-                )}
-                {!!approval.precedent?.length && (
-                  <div className="approval-note">
-                    Precedent:{" "}
-                    {approval.precedent
-                      .slice(0, 2)
-                      .map((p) => `${p.outcome}: ${p.summary}`)
-                      .join(" · ")}
-                  </div>
-                )}
-                <div className="approval-note">
-                  {approval.gate_label} required — approving records intent
-                  only; nothing is executed.
-                  {approval.break_glass_applied ? " Break-glass downgrade active." : ""}
-                </div>
                 <div className="finding-actions">
+                  {hasDetails ? (
+                    <button
+                      type="button"
+                      className="tiny-btn"
+                      onClick={() =>
+                        setExpandedId((current) =>
+                          current === approval.id ? null : approval.id,
+                        )
+                      }
+                    >
+                      {expanded ? "Hide details" : "Show details"}
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     className="tiny-btn"
@@ -178,51 +243,49 @@ function ApprovalsBody() {
                   <button
                     type="button"
                     className="tiny-btn danger"
-                    onClick={() => void decideApproval(approval, "rejected")}
+                    onClick={() =>
+                      setApprovalModal({ approval, decision: "rejected" })
+                    }
                   >
                     Reject
                   </button>
-                  {(() => {
-                    const me = getStoredUser();
-                    const order = [
-                      "viewer",
-                      "developer",
-                      "devops_engineer",
-                      "devops_lead",
-                      "org_admin",
-                      "super_admin",
-                    ];
-                    const min = approval.min_role || "devops_engineer";
-                    const ok =
-                      order.indexOf(me?.role || "viewer") >= order.indexOf(min);
-                    if (!ok) {
-                      return (
-                        <span className="empty-note">
-                          Needs {approval.min_role_label || min}+
-                        </span>
-                      );
-                    }
-                    return (
-                      <button
-                        type="button"
-                        className="tiny-btn solid"
-                        onClick={() => void decideApproval(approval, "approved")}
-                        title={
-                          approval.min_role_label
-                            ? `Requires ${approval.min_role_label}+`
-                            : undefined
-                        }
-                      >
-                        Approve
-                      </button>
-                    );
-                  })()}
+                  {canApprove(approval.min_role) ? (
+                    <button
+                      type="button"
+                      className="tiny-btn solid"
+                      onClick={() =>
+                        setApprovalModal({ approval, decision: "approved" })
+                      }
+                      title={
+                        approval.min_role_label
+                          ? `Requires ${approval.min_role_label}+`
+                          : undefined
+                      }
+                    >
+                      Approve
+                    </button>
+                  ) : (
+                    <span className="empty-note">
+                      Needs {approval.min_role_label || approval.min_role}+
+                    </span>
+                  )}
                 </div>
-              </div>
-            ))
-          )}
-        </div>
-      </section>
+              </article>
+            );
+          })
+        )}
+        {approvals.length > visibleCount ? (
+          <div className="dash-feed-more">
+            <button
+              type="button"
+              className="tiny-btn"
+              onClick={() => setVisibleCount((count) => count + PAGE_SIZE)}
+            >
+              Load {Math.min(PAGE_SIZE, approvals.length - visibleCount)} more
+            </button>
+          </div>
+        ) : null}
+      </div>
 
       {approvalModal && (
         <Modal
@@ -251,7 +314,7 @@ function ApprovalsBody() {
         </Modal>
       )}
       {Toast}
-    </>
+    </section>
   );
 }
 

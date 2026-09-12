@@ -8,6 +8,8 @@ import { DashboardShell, useDashboardContext } from "./dashboard-shell";
 import { useToast } from "./modal";
 import { ThemedSelect } from "./themed-select";
 
+const PAGE_SIZE = 25;
+
 function truncate(text: string, max = 160) {
   const cleaned = text.replace(/\s+/g, " ").trim();
   if (cleaned.length <= max) return cleaned;
@@ -27,6 +29,7 @@ function FindingsBody() {
   const [severity, setSeverity] = useState("");
   const [status, setStatus] = useState("open");
   const [module, setModule] = useState("");
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const requestRef = useRef(0);
   const { showToast, Toast } = useToast();
@@ -50,6 +53,7 @@ function FindingsBody() {
         const nextFindings = await api<Finding[]>(`/api/findings?${query}`);
         if (requestId !== requestRef.current) return;
         setFindings(nextFindings);
+        setVisibleCount(PAGE_SIZE);
         setUpdated(new Date());
       } finally {
         if (requestId === requestRef.current) setLoading(false);
@@ -59,12 +63,18 @@ function FindingsBody() {
   );
 
   useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [module, severity, status, timeRange, projectId]);
+
+  useEffect(() => {
     void loadData(true);
     const timer = window.setInterval(() => {
       if (!document.hidden) void loadData(false);
     }, 15000);
     return () => window.clearInterval(timer);
   }, [loadData, refreshKey]);
+
+  const visibleFindings = findings.slice(0, visibleCount);
 
   const updateFinding = async (id: string, nextStatus: Finding["status"]) => {
     try {
@@ -92,8 +102,8 @@ function FindingsBody() {
   };
 
   return (
-    <section className="findings-page">
-      <div className="findings-toolbar" role="toolbar" aria-label="Findings filters">
+    <section className="dash-page findings-page">
+      <div className="dash-page-toolbar findings-toolbar" role="toolbar" aria-label="Findings filters">
         <ThemedSelect
           className="mini-select findings-module-select"
           value={module}
@@ -134,23 +144,28 @@ function FindingsBody() {
             { value: "", label: "All statuses" },
           ]}
         />
+        {findings.length ? (
+          <span className="hint small">
+            Showing {Math.min(visibleCount, findings.length)} of {findings.length}
+          </span>
+        ) : null}
       </div>
 
-      <div className="findings-feed findings-feed-compact">
+      <div className="dash-feed findings-feed findings-feed-compact">
         {!findings.length ? (
-          <div className="findings-empty">
+          <div className="dash-empty findings-empty">
             <h3>No findings match this filter</h3>
             <p>
               Try another module or severity, or run a workflow to populate findings.
             </p>
           </div>
         ) : (
-          findings.map((finding) => {
+          visibleFindings.map((finding) => {
             const expanded = expandedId === finding.id;
             const hasDetails = Boolean(finding.evidence || finding.recommended_action);
             return (
               <article
-                className={`finding-card finding-card-compact sev-${finding.severity}${finding.status === "resolved" ? " resolved" : ""}`}
+                className={`dash-item finding-card finding-card-compact sev-${finding.severity}${finding.status === "resolved" ? " resolved" : ""}`}
                 key={finding.id}
               >
                 <div className="finding-top">
@@ -180,9 +195,6 @@ function FindingsBody() {
                     <span>Seen {finding.occurrence_count}×</span>
                   ) : null}
                 </div>
-                {!expanded && finding.evidence ? (
-                  <p className="finding-preview">{truncate(finding.evidence, 140)}</p>
-                ) : null}
                 {expanded && hasDetails ? (
                   <div className="finding-body">
                     {finding.evidence ? (
@@ -247,6 +259,17 @@ function FindingsBody() {
             );
           })
         )}
+        {findings.length > visibleCount ? (
+          <div className="dash-feed-more">
+            <button
+              type="button"
+              className="tiny-btn"
+              onClick={() => setVisibleCount((count) => count + PAGE_SIZE)}
+            >
+              Load {Math.min(PAGE_SIZE, findings.length - visibleCount)} more
+            </button>
+          </div>
+        ) : null}
       </div>
       {Toast}
     </section>
