@@ -15,32 +15,34 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Validate container-app + n8n profiles
+      - name: Validate container-app includes n8n (mandatory on-prem)
         env:
           AUTH_JWT_SECRET: ci-jwt-secret-not-for-production
           N8N_ENCRYPTION_KEY: ci-n8n-encryption-key-32chars!!
         run: |
           set -euo pipefail
-          docker compose --profile container-app --profile n8n config > /tmp/compose.yml
-          docker compose --profile container-app --profile n8n config --services | tee /tmp/services.txt
+          docker compose --profile container-app config > /tmp/compose.yml
+          docker compose --profile container-app config --services | tee /tmp/services.txt
           grep -qx n8n /tmp/services.txt
           grep -qx api /tmp/services.txt
           grep -qx worker /tmp/services.txt
           grep -q 'N8N_WEBHOOKS_ENABLED' /tmp/compose.yml
           grep -q 'n8nio/n8n' /tmp/compose.yml
-          echo "On-prem compose OK (n8n mandatory with --profile n8n)"
-      - name: Validate container-app without n8n profile (optional path)
+          # Must not use required-interpolation (?); it broke server deploy when .env lacked the key.
+          if grep -q 'N8N_ENCRYPTION_KEY:?\|N8N_ENCRYPTION_KEY?\?' docker-compose.yml; then
+            echo "ERROR: N8N_ENCRYPTION_KEY must not use required (? ) interpolation" >&2
+            exit 1
+          fi
+          echo "On-prem compose OK (n8n mandatory in container-app)"
+      - name: Validate without-n8n override disables webhook defaults
         env:
           AUTH_JWT_SECRET: ci-jwt-secret-not-for-production
           N8N_ENCRYPTION_KEY: ci-n8n-encryption-key-32chars!!
         run: |
           set -euo pipefail
-          docker compose --profile container-app config --services | tee /tmp/optional.txt
-          if grep -qx n8n /tmp/optional.txt; then
-            echo "ERROR: n8n must not start without --profile n8n" >&2
-            exit 1
-          fi
-          echo "Optional without-n8n path OK"
+          docker compose -f docker-compose.yml -f docker-compose.without-n8n.yml --profile container-app config > /tmp/optional.yml
+          grep -q 'N8N_WEBHOOKS_ENABLED' /tmp/optional.yml
+          echo "Optional without-n8n override parses OK"
 
   frontend-typecheck:
     name: Frontend Typecheck

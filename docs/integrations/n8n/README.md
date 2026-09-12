@@ -10,10 +10,11 @@
 ## Start (our server / full stack)
 
 ```bash
-docker compose --profile container-app --profile n8n up -d --build
+docker compose --profile container-app up -d --build
 ```
 
-Server deploy (`gha-deploy.sh`) always enables both profiles and health-checks n8n.
+`n8n` is part of `container-app`. Server deploy auto-generates `N8N_ENCRYPTION_KEY` into `.env` if missing.
+
 Requires in `.env`:
 
 - `AUTH_JWT_SECRET`
