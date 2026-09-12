@@ -1,0 +1,62 @@
+---
+description: "# Infrastructure and DevOps Rules
+
+Before modifying infrastructure:
+
+* Understand the existing architecture.
+* Identify environments such as development, staging, and production.
+* Inspect existing IaC before creating new resources.
+* Reuse existing modules and patterns.
+* Follow least-privilege security.
+* Avoid unnecessary infrastructure changes.
+* Consider cost, scalability, availability, security, and observability.
+
+Never:
+
+* Destroy production resources without explicit confirmation.
+* Delete infrastructure simply because it appears unused.
+* Hardcode cloud credentials.
+* Disable security controls as a workaround.
+* Make irreversible changes without understanding their impact.
+
+For infrastructure changes, document:
+
+* What changed
+* Why it changed
+* Dependencies
+* Potential impact
+* Rollback approach when relevant
+"
+alwaysApply: false
+---
+
+# Infrastructure And Devops
+
+# Infrastructure and DevOps Rules
+
+Before modifying infrastructure:
+
+* Understand the existing architecture.
+* Identify environments such as development, staging, and production.
+* Inspect existing IaC before creating new resources.
+* Reuse existing modules and patterns.
+* Follow least-privilege security.
+* Avoid unnecessary infrastructure changes.
+* Consider cost, scalability, availability, security, and observability.
+
+Never:
+
+* Destroy production resources without explicit confirmation.
+* Delete infrastructure simply because it appears unused.
+* Hardcode cloud credentials.
+* Disable security controls as a workaround.
+* Make irreversible changes without understanding their impact.
+
+For infrastructure changes, document:
+
+* What changed
+* Why it changed
+* Dependencies
+* Potential impact
+* Rollback approach when relevant
+

@@ -1,0 +1,60 @@
+---
+description: "# Project Memory Rules
+
+Maintain persistent project context inside `.ai/`.
+
+Required files:
+
+* `PROJECT_CONTEXT.md`
+* `ARCHITECTURE.md`
+* `CURRENT_STATE.md`
+* `DECISIONS.md`
+* `TODO.md`
+* `BUGS.md`
+* `CHANGELOG.md`
+* `SESSION.md`
+
+Also maintain `AGENTS.md` at the repository root.
+
+Keep these files synchronized with the actual project.
+
+Update them when significant information changes.
+
+Never document assumptions as facts.
+
+If documentation conflicts with the implementation, inspect the code and update the documentation.
+
+The goal is that a completely new AI session can understand the project without access to previous conversations.
+"
+alwaysApply: false
+---
+
+# Project Memory Rules
+
+# Project Memory Rules
+
+Maintain persistent project context inside `.ai/`.
+
+Required files:
+
+* `PROJECT_CONTEXT.md`
+* `ARCHITECTURE.md`
+* `CURRENT_STATE.md`
+* `DECISIONS.md`
+* `TODO.md`
+* `BUGS.md`
+* `CHANGELOG.md`
+* `SESSION.md`
+
+Also maintain `AGENTS.md` at the repository root.
+
+Keep these files synchronized with the actual project.
+
+Update them when significant information changes.
+
+Never document assumptions as facts.
+
+If documentation conflicts with the implementation, inspect the code and update the documentation.
+
+The goal is that a completely new AI session can understand the project without access to previous conversations.
+

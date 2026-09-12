@@ -1,0 +1,46 @@
+---
+description: "# AI and Agent Development Rules
+
+For AI/LLM functionality:
+
+* Understand the existing agent architecture before creating a new agent.
+* Reuse existing tools, prompts, services, memory, and orchestration patterns where appropriate.
+* Keep prompts version-controlled when they are part of application behavior.
+* Do not hardcode model-specific assumptions unnecessarily.
+* Handle model failures, timeouts, invalid responses, and tool failures gracefully.
+* Validate structured model output before using it.
+* Never allow model output to bypass application authorization or security controls.
+* Do not expose secrets or internal system information through agent responses.
+* Consider token usage, latency, cost, and reliability.
+* Add evaluation or regression tests for important agent behavior.
+* Document important prompt, model, tool, and architecture decisions.
+
+For agent changes, consider:
+
+Accuracy → Reliability → Security → Cost → Latency → User experience
+"
+alwaysApply: false
+---
+
+# Ai And Agent
+
+# AI and Agent Development Rules
+
+For AI/LLM functionality:
+
+* Understand the existing agent architecture before creating a new agent.
+* Reuse existing tools, prompts, services, memory, and orchestration patterns where appropriate.
+* Keep prompts version-controlled when they are part of application behavior.
+* Do not hardcode model-specific assumptions unnecessarily.
+* Handle model failures, timeouts, invalid responses, and tool failures gracefully.
+* Validate structured model output before using it.
+* Never allow model output to bypass application authorization or security controls.
+* Do not expose secrets or internal system information through agent responses.
+* Consider token usage, latency, cost, and reliability.
+* Add evaluation or regression tests for important agent behavior.
+* Document important prompt, model, tool, and architecture decisions.
+
+For agent changes, consider:
+
+Accuracy → Reliability → Security → Cost → Latency → User experience
+

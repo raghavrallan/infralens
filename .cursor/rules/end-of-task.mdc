@@ -1,0 +1,52 @@
+---
+description: "# End of Task Rules
+
+Before considering a significant task complete:
+
+1. Verify the implementation.
+2. Run relevant tests or validation.
+3. Review the Git diff.
+4. Remove temporary/debugging changes.
+5. Check for unintended side effects.
+6. Update `.ai/CURRENT_STATE.md`.
+7. Update `.ai/SESSION.md`.
+8. Update `.ai/TODO.md`.
+9. Update `.ai/BUGS.md` if applicable.
+10. Update `.ai/CHANGELOG.md` when applicable.
+11. Update `.ai/DECISIONS.md` when a meaningful technical decision was made.
+
+The final response should briefly state:
+
+* What was changed
+* What was tested
+* Any remaining issues
+* Recommended next step
+"
+alwaysApply: false
+---
+
+# End Of Task
+
+# End of Task Rules
+
+Before considering a significant task complete:
+
+1. Verify the implementation.
+2. Run relevant tests or validation.
+3. Review the Git diff.
+4. Remove temporary/debugging changes.
+5. Check for unintended side effects.
+6. Update `.ai/CURRENT_STATE.md`.
+7. Update `.ai/SESSION.md`.
+8. Update `.ai/TODO.md`.
+9. Update `.ai/BUGS.md` if applicable.
+10. Update `.ai/CHANGELOG.md` when applicable.
+11. Update `.ai/DECISIONS.md` when a meaningful technical decision was made.
+
+The final response should briefly state:
+
+* What was changed
+* What was tested
+* Any remaining issues
+* Recommended next step
+

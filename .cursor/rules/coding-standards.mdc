@@ -1,0 +1,38 @@
+---
+description: "# Coding Standards
+
+* Follow the existing language and framework conventions.
+* Prefer simple, readable, maintainable code.
+* Avoid unnecessary abstraction.
+* Keep functions and modules focused.
+* Reuse existing utilities and services when appropriate.
+* Do not duplicate business logic.
+* Use meaningful names.
+* Handle errors explicitly.
+* Avoid silent failures.
+* Do not leave debugging code, temporary logs, or commented-out dead code.
+* Keep secrets and credentials out of source code.
+* Use environment variables or the project's existing secret-management approach.
+* Preserve backward compatibility unless a breaking change is required.
+"
+alwaysApply: false
+---
+
+# Coding Standards
+
+# Coding Standards
+
+* Follow the existing language and framework conventions.
+* Prefer simple, readable, maintainable code.
+* Avoid unnecessary abstraction.
+* Keep functions and modules focused.
+* Reuse existing utilities and services when appropriate.
+* Do not duplicate business logic.
+* Use meaningful names.
+* Handle errors explicitly.
+* Avoid silent failures.
+* Do not leave debugging code, temporary logs, or commented-out dead code.
+* Keep secrets and credentials out of source code.
+* Use environment variables or the project's existing secret-management approach.
+* Preserve backward compatibility unless a breaking change is required.
+

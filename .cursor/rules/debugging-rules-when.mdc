@@ -1,0 +1,40 @@
+---
+description: "# Debugging Rules
+
+When fixing a bug:
+
+1. Understand the expected behavior.
+2. Identify the actual behavior.
+3. Reproduce the issue when possible.
+4. Trace the problem to its root cause.
+5. Fix the root cause rather than masking the symptom.
+6. Validate the fix.
+7. Check for regressions.
+8. Document the issue if it is important.
+
+Do not randomly change multiple unrelated parts of the system.
+
+Do not declare a bug fixed without validation when validation is possible.
+"
+alwaysApply: false
+---
+
+# Debugging Rules When
+
+# Debugging Rules
+
+When fixing a bug:
+
+1. Understand the expected behavior.
+2. Identify the actual behavior.
+3. Reproduce the issue when possible.
+4. Trace the problem to its root cause.
+5. Fix the root cause rather than masking the symptom.
+6. Validate the fix.
+7. Check for regressions.
+8. Document the issue if it is important.
+
+Do not randomly change multiple unrelated parts of the system.
+
+Do not declare a bug fixed without validation when validation is possible.
+

@@ -1,0 +1,58 @@
+---
+description: "# Git Rules
+
+Before significant changes:
+
+* Check `git status`.
+* Understand the current branch.
+* Review relevant recent changes when necessary.
+
+Keep commits focused and meaningful.
+
+Do not:
+
+* Reset or delete user changes without permission.
+* Force-push without explicit instruction.
+* Rewrite Git history unnecessarily.
+* Delete branches or tags without explicit permission.
+* Commit generated files unless the project requires them.
+
+Before finishing:
+
+* Review changed files.
+* Remove accidental changes.
+* Ensure the repository is in a clean and understandable state.
+
+Never overwrite unrelated user work.
+"
+alwaysApply: false
+---
+
+# Git Rules Before
+
+# Git Rules
+
+Before significant changes:
+
+* Check `git status`.
+* Understand the current branch.
+* Review relevant recent changes when necessary.
+
+Keep commits focused and meaningful.
+
+Do not:
+
+* Reset or delete user changes without permission.
+* Force-push without explicit instruction.
+* Rewrite Git history unnecessarily.
+* Delete branches or tags without explicit permission.
+* Commit generated files unless the project requires them.
+
+Before finishing:
+
+* Review changed files.
+* Remove accidental changes.
+* Ensure the repository is in a clean and understandable state.
+
+Never overwrite unrelated user work.
+

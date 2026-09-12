@@ -1,0 +1,48 @@
+---
+description: "# API and Database Rules
+
+Before modifying APIs or database structures:
+
+* Understand existing contracts.
+* Check all known consumers.
+* Preserve backward compatibility when possible.
+* Validate request and response schemas.
+* Handle errors consistently.
+* Consider authentication and authorization.
+
+For database changes:
+
+* Understand the existing schema.
+* Use migrations when the project supports migrations.
+* Never casually delete or modify production data.
+* Consider indexes, constraints, performance, and rollback.
+* Update relevant documentation.
+
+Do not change an API or schema solely to simplify implementation.
+"
+alwaysApply: false
+---
+
+# Api And Database
+
+# API and Database Rules
+
+Before modifying APIs or database structures:
+
+* Understand existing contracts.
+* Check all known consumers.
+* Preserve backward compatibility when possible.
+* Validate request and response schemas.
+* Handle errors consistently.
+* Consider authentication and authorization.
+
+For database changes:
+
+* Understand the existing schema.
+* Use migrations when the project supports migrations.
+* Never casually delete or modify production data.
+* Consider indexes, constraints, performance, and rollback.
+* Update relevant documentation.
+
+Do not change an API or schema solely to simplify implementation.
+
