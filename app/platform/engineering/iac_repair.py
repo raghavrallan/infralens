@@ -193,8 +193,8 @@ def propose_fix(
     for name, body in raw_files.items():
         if not isinstance(body, str) or not body.strip():
             continue
-        rel = str(name).replace("\\", "/").lstrip("/")
-        if ".." in rel.split("/") or not _PUSHABLE.search(rel):
+        rel = _safe_rel_path(str(name))
+        if not rel:
             continue
         safe_files[rel] = body
     return {
@@ -202,6 +202,18 @@ def propose_fix(
         "files": safe_files,
         "unfixable": bool(parsed.get("unfixable")),
     }
+
+
+def _safe_rel_path(raw: str) -> str:
+    """Keep module-relative paths; collapse path-traversal attempts to basename."""
+    rel = (raw or "").replace("\\", "/").lstrip("/")
+    if not rel or not _PUSHABLE.search(rel):
+        return ""
+    parts = [part for part in rel.split("/") if part and part != "."]
+    if any(part == ".." for part in parts):
+        base = Path(rel).name
+        return base if base and _PUSHABLE.search(base) else ""
+    return "/".join(parts)
 
 
 def apply_file_updates(
@@ -223,8 +235,8 @@ def apply_file_updates(
             if (row.filename or row.name)
         }
         for raw_name, content in (files or {}).items():
-            name = str(raw_name).replace("\\", "/").lstrip("/")
-            if not name or ".." in name.split("/") or not _PUSHABLE.search(name):
+            name = _safe_rel_path(str(raw_name))
+            if not name:
                 continue
             if not isinstance(content, str) or not content.strip():
                 continue
