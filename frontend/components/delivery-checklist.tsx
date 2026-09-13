@@ -648,7 +648,15 @@ export function DeliveryChecklist({ projectId }: { projectId: string }) {
 
           {tasks.length > 0 && (
             <div className="eng-task-list">
-              <h4 style={{ margin: "8px 0 12px" }}>Executable tasks ({tasks.filter((t) => t.status === "completed").length}/{tasks.length})</h4>
+              <h4 style={{ margin: "8px 0 12px" }}>
+                Executable tasks (
+                {tasks.filter((t) => t.status === "ready" || t.status === "in_progress").length} ready ·{" "}
+                {tasks.filter((t) => t.status === "completed").length}/{tasks.length} done
+                {tasks.some((t) => t.status === "blocked")
+                  ? ` · ${tasks.filter((t) => t.status === "blocked").length} blocked`
+                  : ""}
+                )
+              </h4>
               {tasks.map((task) => {
                 const next = NEXT_STATUS[task.status];
                 const required = (task.required_artifacts || []).map((item) => typeof item === "string" ? item : item.name || "").filter(Boolean);
