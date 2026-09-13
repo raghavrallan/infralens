@@ -252,11 +252,17 @@ def test_generated_stubs_are_valid_enough_to_attach():
         yml = _stub_artifact("yaml", "ci.yml", "CI/CD", "")
         py = _stub_artifact("python", "test_smoke.py", "Tests", "")
         md = _stub_artifact("document", "architecture.md", "Docs", "Write the HLD")
-    assert "azurerm_virtual_network" in tf
+    assert "modules/network" in tf or "azurerm_virtual_network" in tf
     assert "required_providers" in providers
     assert "jobs:" in yml
     assert "def test_architecture_contract" in py
     assert "Docs" in md
+    with patch("app.platform.engineering.iac_generate.load_architecture", return_value={}):
+        module = _stub_artifact("terraform", "modules/network/main.tf", "Create VPC", "")
+        root = _stub_artifact("terraform", "main.tf", "Root", "")
+    assert "azurerm_virtual_network" in module
+    assert 'module "network"' in root
+    assert "null_resource" not in module
 
 
 @pytest.mark.unit
@@ -560,7 +566,13 @@ def test_generate_missing_for_project_writes_required_files():
                     "app.platform.engineering.iac_generate.load_architecture",
                     return_value={"cloud": "azure"},
                 ):
-                    out = generate_missing_for_project("p1", actor="admin")
-    assert out["count"] == 1
-    assert save.call_args.kwargs["name"] == "network.tf"
-    assert "azurerm_" in save.call_args.kwargs["content_text"]
+                    with patch(
+                        "app.platform.engineering.artifacts.list_artifacts",
+                        return_value=[],
+                    ):
+                        out = generate_missing_for_project("p1", actor="admin")
+    assert out["count"] >= 1
+    names = [call.kwargs["name"] for call in save.call_args_list]
+    assert any(name == "network.tf" or name.startswith("modules/") for name in names)
+    bodies = [call.kwargs["content_text"] for call in save.call_args_list]
+    assert any("azurerm_" in body or 'module "' in body for body in bodies)

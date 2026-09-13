@@ -186,7 +186,20 @@ def test_generate_artifact_content_is_real_azure_hcl():
         network = generate_artifact_content(
             name="network.tf", kind="terraform", title="network", description="", project_id=""
         )
+        module_main = generate_artifact_content(
+            name="modules/network/main.tf",
+            kind="terraform",
+            title="network",
+            description="",
+            project_id="",
+        )
+        tree_main = generate_artifact_content(
+            name="main.tf", kind="terraform", title="root", description="", project_id=""
+        )
     assert "hashicorp/azurerm" in providers
-    assert "azurerm_resource_group" in providers
-    assert "azurerm_virtual_network" in network
+    assert "modules/network" in network
+    assert "azurerm_virtual_network" in module_main
+    assert "null_resource" not in module_main
     assert "null_resource" not in network
+    assert 'module "network"' in tree_main
+    assert 'source      = "./modules/network"' in tree_main

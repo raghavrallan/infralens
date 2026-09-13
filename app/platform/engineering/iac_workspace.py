@@ -42,7 +42,9 @@ def load_generated_files(project_id: str, delivery_run_id: str = "") -> dict[str
                 continue
             if ".." in name.split("/"):
                 continue
-            files[Path(name).name] = row.content_text or ""
+            # Keep module/env relative paths. Basename-only keys used to collapse
+            # modules/*/main.tf into one file and destroy the module layout.
+            files[name] = row.content_text or ""
     return files
 
 
