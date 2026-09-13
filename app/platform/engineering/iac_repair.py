@@ -193,7 +193,7 @@ def propose_fix(
     for name, body in raw_files.items():
         if not isinstance(body, str) or not body.strip():
             continue
-        rel = _safe_rel_path(str(name))
+        rel = _safe_rel_path(str(name), allow_traversal_basename=True)
         if not rel:
             continue
         safe_files[rel] = body
@@ -204,16 +204,20 @@ def propose_fix(
     }
 
 
-def _safe_rel_path(raw: str) -> str:
-    """Keep module-relative paths; collapse path-traversal attempts to basename."""
-    rel = (raw or "").replace("\\", "/").lstrip("/")
-    if not rel or not _PUSHABLE.search(rel):
+def _safe_rel_path(raw: str, *, allow_traversal_basename: bool = False) -> str:
+    """Keep module-relative paths. Optionally collapse ../x.tf to x.tf for proposals."""
+    text = (raw or "").replace("\\", "/")
+    rel = text.lstrip("/")
+    if not rel:
         return ""
     parts = [part for part in rel.split("/") if part and part != "."]
     if any(part == ".." for part in parts):
+        if not allow_traversal_basename:
+            return ""
         base = Path(rel).name
         return base if base and _PUSHABLE.search(base) else ""
-    return "/".join(parts)
+    joined = "/".join(parts)
+    return joined if joined and _PUSHABLE.search(joined) else ""
 
 
 def apply_file_updates(
@@ -234,14 +238,20 @@ def apply_file_updates(
             for row in rows
             if (row.filename or row.name)
         }
+        # Also index by basename so legacy flat artifacts still match.
+        by_base = {
+            Path(key).name: row
+            for key, row in by_name.items()
+            if Path(key).name
+        }
         for raw_name, content in (files or {}).items():
-            name = _safe_rel_path(str(raw_name))
+            name = _safe_rel_path(str(raw_name), allow_traversal_basename=False)
             if not name:
                 continue
             if not isinstance(content, str) or not content.strip():
                 continue
             body = content[:MAX_TEXT]
-            row = by_name.get(name)
+            row = by_name.get(name) or by_base.get(Path(name).name)
             if row is not None:
                 row.content_text = body
                 row.origin = "azure_openai_repair"
