@@ -209,11 +209,25 @@ def generate_for_task(
         raise HTTPException(status_code=404, detail="Task not found")
     _project(user, task["project_id"])
     assert_capability(user, "propose_write")
+    # Always materialize the module/env tree first (deterministic modules, not LLM junk).
+    from app.platform.engineering.iac_generate import generate_missing_for_project
+
+    bulk = generate_missing_for_project(
+        task["project_id"], actor=user.get("username") or ""
+    )
     required = task.get("required_artifacts") or [{"name": "main.tf", "kind": body.kind}]
-    saved = []
+    saved = list(bulk.get("generated") or [])
+    # Re-fetch task artifacts after bulk generate so we don't duplicate.
+    task = task_store.get_task(task_id) or task
+    have = {
+        (item.get("name") or "").replace("\\", "/").lower()
+        for item in (task.get("artifacts") or [])
+    }
     for spec in required:
         name = spec.get("name") if isinstance(spec, dict) else str(spec)
         kind = (spec.get("kind") if isinstance(spec, dict) else body.kind) or body.kind
+        if not name or name.replace("\\", "/").lower() in have:
+            continue
         from app.platform.engineering.iac_generate import generate_artifact_content
 
         content = generate_artifact_content(
@@ -245,7 +259,7 @@ def generate_for_task(
         ref_type="task",
         ref_id=task_id,
     )
-    workspace = {}
+    workspace = bulk.get("workspace") or {}
     repair = {}
     if task.get("delivery_run_id"):
         run_id = str(task["delivery_run_id"])
@@ -254,8 +268,7 @@ def generate_for_task(
 
             workspace = iac_workspace.sync(task["project_id"], run_id)
         except Exception:
-            workspace = {}
-        # Validate/init with repair loop so generated modules converge toward green.
+            workspace = workspace or {}
         try:
             from app.platform.engineering import iac_delivery
 
@@ -273,6 +286,7 @@ def generate_for_task(
         "artifacts": saved,
         "workspace": workspace,
         "repair": repair,
+        "module_tree": {"count": bulk.get("count") or 0},
     }
 
 

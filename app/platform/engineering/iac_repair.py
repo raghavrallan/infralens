@@ -27,10 +27,13 @@ _REDACT = re.compile(
 _SYSTEM = """You fix Terraform for an InfraLens isolated workspace.
 The workspace uses a local backend (terraform.tfstate). Do not switch to a remote backend.
 Do not invent cloud credentials. Do not replace real resources with null_resource.
+Layout is MODULE-BASED: modules/<name>/{main,variables,outputs}.tf plus root providers.tf / variables.tf / main.tf.
+Preserve that layout. Never flatten modules into a single root file. Never rewrite modules into null_resource stubs.
+When editing a module file, use the full relative path as the key (example: modules/network/main.tf).
 Return JSON only:
 {
   "diagnosis": "what failed and why",
-  "files": {"filename.tf": "full replacement contents"},
+  "files": {"modules/network/main.tf": "full replacement contents"},
   "unfixable": false
 }
 Only include files that must change. Use complete file bodies, not diffs.
@@ -186,11 +189,14 @@ def propose_fix(
     if not isinstance(parsed, dict):
         raise RuntimeError("Azure OpenAI returned a non-object Terraform repair response")
     raw_files = parsed.get("files") if isinstance(parsed.get("files"), dict) else {}
-    safe_files = {
-        Path(str(name).replace("\\", "/")).name: str(body)
-        for name, body in raw_files.items()
-        if isinstance(body, str) and body.strip()
-    }
+    safe_files = {}
+    for name, body in raw_files.items():
+        if not isinstance(body, str) or not body.strip():
+            continue
+        rel = str(name).replace("\\", "/").lstrip("/")
+        if ".." in rel.split("/") or not _PUSHABLE.search(rel):
+            continue
+        safe_files[rel] = body
     return {
         "diagnosis": str(parsed.get("diagnosis") or "No diagnosis returned"),
         "files": safe_files,
@@ -212,13 +218,13 @@ def apply_file_updates(
             )
         ).all()
         by_name = {
-            Path(row.filename or row.name or "").name: row
+            (row.filename or row.name or "").replace("\\", "/").lstrip("/"): row
             for row in rows
-            if Path(row.filename or row.name or "").name
+            if (row.filename or row.name)
         }
         for raw_name, content in (files or {}).items():
-            name = Path(str(raw_name).replace("\\", "/")).name
-            if not name or ".." in str(raw_name) or not _PUSHABLE.search(name):
+            name = str(raw_name).replace("\\", "/").lstrip("/")
+            if not name or ".." in name.split("/") or not _PUSHABLE.search(name):
                 continue
             if not isinstance(content, str) or not content.strip():
                 continue

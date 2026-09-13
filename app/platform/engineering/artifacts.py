@@ -85,14 +85,22 @@ def save_artifact(
     kind = kind or infer_kind(filename or name, mime)
     with SessionLocal() as session:
         existing = None
-        if task_id and name:
-            existing = session.scalar(
-                select(ProjectArtifact).where(
-                    ProjectArtifact.project_id == project_id,
-                    ProjectArtifact.task_id == task_id,
-                    ProjectArtifact.name == name,
+        if name:
+            if task_id:
+                existing = session.scalar(
+                    select(ProjectArtifact).where(
+                        ProjectArtifact.project_id == project_id,
+                        ProjectArtifact.task_id == task_id,
+                        ProjectArtifact.name == name,
+                    )
                 )
-            )
+            if existing is None:
+                existing = session.scalar(
+                    select(ProjectArtifact).where(
+                        ProjectArtifact.project_id == project_id,
+                        ProjectArtifact.filename == (filename or name),
+                    )
+                )
         version = 1
         if existing is not None:
             version = int(existing.version or 1) + 1
