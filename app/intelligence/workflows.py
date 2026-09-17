@@ -5,6 +5,7 @@ schedule or on demand. Every run is tracked from queued to finished, and each
 finding it produces carries the Risk Engine gate decided at write time. Findings
 are grouped under the six agent modules from the design.
 """
+import logging
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Optional
@@ -25,6 +26,8 @@ from app.intelligence.findings import compute_fingerprint
 from app.intelligence.risk_engine import GATE_LABELS as _GATE_LABELS
 from app.intelligence.risk_engine import normalize_action_class, normalize_blast_radius
 from app.skills.classification import is_workflow_safe
+
+logger = logging.getLogger(__name__)
 
 # Change-producing findings wait this long for a decision; nothing auto-executes.
 _APPROVAL_TTL_HOURS = 72
@@ -819,7 +822,13 @@ def save_findings(
                     )
                 )
         except Exception:
-            pass
+            # Approval rows are already committed; do not roll them back.
+            # Surface the miss so operators can retry / inspect n8n.
+            logger.exception(
+                "approval-created webhook dispatch failed for project=%s count=%s",
+                project_id,
+                len(created_approvals),
+            )
     return written
 
 

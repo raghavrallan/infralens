@@ -24,6 +24,7 @@ function WorkflowModal({
   const initialModule = existing?.module || catalog.modules[0]?.key || "";
   const initialModuleSkills =
     catalog.modules.find((item) => item.key === initialModule)?.skills || [];
+  const { showToast, Toast } = useToast();
   const [draft, setDraft] = useState<WorkflowDraft>({
     name: existing?.name || "",
     objective: existing?.objective || "",
@@ -52,7 +53,10 @@ function WorkflowModal({
   };
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!draft.skills.length) return;
+    if (!draft.skills.length) {
+      showToast("Pick at least one skill before saving.", "error");
+      return;
+    }
     const options: RequestInit = {
       method: existing ? "PATCH" : "POST",
       body: JSON.stringify({ ...draft, enabled: existing?.enabled ?? true }),
@@ -71,6 +75,7 @@ function WorkflowModal({
       description="Only read-only skills can run unattended. Pick the skills, an optional schedule, and the environment used to gate findings."
       onClose={onClose}
     >
+      {Toast}
       <form className="modal-body" onSubmit={(event) => void save(event)}>
         <label className="modal-label">
           <span>Name</span>
