@@ -83,21 +83,25 @@ def save_artifact(
     validate: bool = True,
 ) -> dict[str, Any]:
     kind = kind or infer_kind(filename or name, mime)
+    scoped_task_id = task_id or ""
     with SessionLocal() as session:
         existing = None
         if name:
-            if task_id:
-                existing = session.scalar(
-                    select(ProjectArtifact).where(
-                        ProjectArtifact.project_id == project_id,
-                        ProjectArtifact.task_id == task_id,
-                        ProjectArtifact.name == name,
-                    )
+            # Prefer exact name within the same task scope (empty = project-level).
+            existing = session.scalar(
+                select(ProjectArtifact).where(
+                    ProjectArtifact.project_id == project_id,
+                    ProjectArtifact.task_id == scoped_task_id,
+                    ProjectArtifact.name == name,
                 )
+            )
             if existing is None:
+                # Filename fallback stays task-scoped so a save for task A
+                # cannot overwrite an unrelated file owned by task B / root.
                 existing = session.scalar(
                     select(ProjectArtifact).where(
                         ProjectArtifact.project_id == project_id,
+                        ProjectArtifact.task_id == scoped_task_id,
                         ProjectArtifact.filename == (filename or name),
                     )
                 )

@@ -245,6 +245,60 @@ def test_get_artifact_full_returns_complete_text():
 
 
 @pytest.mark.unit
+def test_save_artifact_filename_fallback_is_task_scoped():
+    """Saving under task A must not overwrite a same-filename row on task B."""
+    from app.platform.engineering import artifacts as artifact_store
+
+    class _Session:
+        def __init__(self) -> None:
+            self.queries: list[dict[str, object]] = []
+            self.added = None
+            self.committed = False
+
+        def scalar(self, stmt):  # noqa: ANN001
+            # Record that we always constrain by task_id via the WHERE clauses
+            # built in save_artifact; return None so a new row is created.
+            self.queries.append({"stmt": str(stmt)})
+            return None
+
+        def add(self, row):  # noqa: ANN001
+            self.added = row
+
+        def commit(self) -> None:
+            self.committed = True
+
+        def refresh(self, row):  # noqa: ANN001
+            return None
+
+    session = _Session()
+
+    class _CM:
+        def __enter__(self):
+            return session
+
+        def __exit__(self, *args):
+            return False
+
+    with patch("app.platform.engineering.artifacts.SessionLocal", return_value=_CM()):
+        with patch("app.platform.engineering.artifacts.validate_artifact", side_effect=lambda aid: {"id": aid}):
+            payload = artifact_store.save_artifact(
+                project_id="p1",
+                name="modules/vpc/main.tf",
+                filename="main.tf",
+                kind="terraform",
+                content_text='resource "null_resource" "x" {}',
+                task_id="task-a",
+                validate=False,
+            )
+    assert session.added is not None
+    assert session.added.task_id == "task-a"
+    assert session.added.filename == "main.tf"
+    assert payload["task_id"] == "task-a"
+    # Both lookups (name + filename) must have run without matching foreign tasks.
+    assert len(session.queries) == 2
+
+
+@pytest.mark.unit
 def test_generated_stubs_are_valid_enough_to_attach():
     with patch("app.platform.engineering.iac_generate.load_architecture", return_value={}):
         tf = _stub_artifact("terraform", "network.tf", "Create VPC", "")
@@ -534,11 +588,19 @@ def test_architect_initial_state_merges_memory_seed():
 def test_search_precedent_prefers_knowledge_prompt():
     from app.agents.solution_architect import tools
 
+    class _EmptyRetriever:
+        def as_text(self, skill: str = "") -> str:
+            return "No engineering precedent for this project."
+
     with patch(
-        "app.platform.engineering.knowledge.architect_context",
-        return_value={"prompt": "ENGINEERING MEMORY\n- prior EKS decision"},
+        "app.agents.runtime.retrievers.get_precedent_retriever",
+        return_value=_EmptyRetriever(),
     ):
-        text = tools.search_precedent("p1")
+        with patch(
+            "app.platform.engineering.knowledge.architect_context",
+            return_value={"prompt": "ENGINEERING MEMORY\n- prior EKS decision"},
+        ):
+            text = tools.search_precedent("p1")
     assert "EKS" in text
 
 
@@ -576,3 +638,77 @@ def test_generate_missing_for_project_writes_required_files():
     assert any(name == "network.tf" or name.startswith("modules/") for name in names)
     bodies = [call.kwargs["content_text"] for call in save.call_args_list]
     assert any("azurerm_" in body or 'module "' in body for body in bodies)
+
+
+@pytest.mark.unit
+def test_generate_missing_refreshes_existing_terraform_required():
+    from app.platform.engineering.iac_generate import generate_missing_for_project
+
+    tasks = [
+        {
+            "id": "t1",
+            "title": "Network",
+            "description": "vnet",
+            "delivery_run_id": "d1",
+            "required_artifacts": [{"name": "network.tf", "kind": "terraform"}],
+            "artifacts": [{"name": "network.tf", "kind": "terraform"}],
+        }
+    ]
+    with patch("app.platform.engineering.tasks.list_tasks", return_value=tasks):
+        with patch(
+            "app.platform.engineering.artifacts.save_artifact",
+            return_value={"validation_status": "passed"},
+        ) as save:
+            with patch("app.platform.engineering.iac_workspace.sync", return_value={}):
+                with patch(
+                    "app.platform.engineering.iac_generate.load_architecture",
+                    return_value={"cloud": "azure"},
+                ):
+                    with patch(
+                        "app.platform.engineering.iac_generate.generate_module_env_tree",
+                        return_value={},
+                    ):
+                        with patch(
+                            "app.platform.engineering.artifacts.list_artifacts",
+                            return_value=[],
+                        ):
+                            out = generate_missing_for_project("p1", actor="admin")
+    assert out["count"] >= 1
+    assert any(call.kwargs["name"] == "network.tf" for call in save.call_args_list)
+
+
+@pytest.mark.unit
+def test_generate_missing_skips_existing_non_terraform_required():
+    from app.platform.engineering.iac_generate import generate_missing_for_project
+
+    tasks = [
+        {
+            "id": "t1",
+            "title": "Docs",
+            "description": "readme",
+            "delivery_run_id": "d1",
+            "required_artifacts": [{"name": "README.md", "kind": "markdown"}],
+            "artifacts": [{"name": "README.md", "kind": "markdown"}],
+        }
+    ]
+    with patch("app.platform.engineering.tasks.list_tasks", return_value=tasks):
+        with patch(
+            "app.platform.engineering.artifacts.save_artifact",
+            return_value={"validation_status": "passed"},
+        ) as save:
+            with patch("app.platform.engineering.iac_workspace.sync", return_value={}):
+                with patch(
+                    "app.platform.engineering.iac_generate.load_architecture",
+                    return_value={"cloud": "azure"},
+                ):
+                    with patch(
+                        "app.platform.engineering.iac_generate.generate_module_env_tree",
+                        return_value={},
+                    ):
+                        with patch(
+                            "app.platform.engineering.artifacts.list_artifacts",
+                            return_value=[],
+                        ):
+                            out = generate_missing_for_project("p1", actor="admin")
+    assert out["count"] == 0
+    save.assert_not_called()

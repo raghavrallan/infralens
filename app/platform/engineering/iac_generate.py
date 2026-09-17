@@ -826,14 +826,23 @@ def generate_missing_for_project(project_id: str, *, actor: str = "") -> dict[st
     for task in task_store.list_tasks(project_id):
         delivery_run_id = delivery_run_id or str(task.get("delivery_run_id") or "")
         required = task.get("required_artifacts") or []
-        have = {
-            (item.get("name") or "").replace("\\", "/").lower()
+        existing_by_name = {
+            (item.get("name") or "").replace("\\", "/").lower(): item
             for item in (task.get("artifacts") or [])
+            if item.get("name")
         }
         for spec in required:
             name = spec.get("name") if isinstance(spec, dict) else str(spec)
             kind = ((spec.get("kind") if isinstance(spec, dict) else "") or "document")
-            if not name or name.replace("\\", "/").lower() in have:
+            if not name:
+                continue
+            key = name.replace("\\", "/").lower()
+            prior = existing_by_name.get(key)
+            # Refresh Terraform so flat/LLM junk is replaced; keep other kinds
+            # when an exact-path artifact already exists for this task.
+            if prior is not None and not (
+                key.endswith(".tf") or str(kind).lower() == "terraform"
+            ):
                 continue
             content = generate_artifact_content(
                 name=name,
@@ -862,6 +871,7 @@ def generate_missing_for_project(project_id: str, *, actor: str = "") -> dict[st
                     "validation_status": str(saved.get("validation_status") or ""),
                 }
             )
+            existing_by_name[key] = {"name": name}
     workspace: dict[str, Any] = {}
     if delivery_run_id:
         try:

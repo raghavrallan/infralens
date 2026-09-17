@@ -40,3 +40,10 @@ def test_format_vuln_triage_empty_findings() -> None:
     md = format_vuln_triage_markdown(raw)
     assert "No CVE scanner results." in md
     assert "No discrete vulnerability findings" in md
+
+
+def test_format_vuln_triage_reuses_parsed_payload() -> None:
+    raw = '{"summary": "From parsed", "highest_priority": "low", "findings": []}'
+    parsed = {"summary": "From parsed", "highest_priority": "low", "findings": []}
+    md = format_vuln_triage_markdown("this is not json", parsed=parsed)
+    assert "From parsed" in md

@@ -7,22 +7,34 @@ from typing import Any
 from app.skills.base import Skill, SkillResult
 
 
-def format_vuln_triage_markdown(raw: str) -> str:
+def _parse_vuln_triage_payload(raw: str) -> dict[str, Any] | None:
+    text = (raw or "").strip()
+    if not text:
+        return None
+    try:
+        data = json.loads(text)
+    except (ValueError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def format_vuln_triage_markdown(
+    raw: str,
+    *,
+    parsed: dict[str, Any] | None = None,
+) -> str:
     """Turn the skill's JSON payload into Markdown for chat rendering.
 
     Structured JSON is still produced by the model (json_output=True) so
     downstream extractors can use metadata["raw_json"]. Chat must never show
     the raw object blob.
+
+    Pass ``parsed`` when the caller already decoded the JSON so the payload is
+    not parsed twice on the hot skill path.
     """
-    text = (raw or "").strip()
-    if not text:
-        return text
-    try:
-        data = json.loads(text)
-    except (ValueError, json.JSONDecodeError):
-        return raw
-    if not isinstance(data, dict):
-        return raw
+    data = parsed if parsed is not None else _parse_vuln_triage_payload(raw)
+    if data is None:
+        return raw or ""
 
     summary = str(data.get("summary") or "").strip()
     highest = str(data.get("highest_priority") or "").strip()
@@ -174,8 +186,11 @@ class VulnTriageSkill(Skill):
     def run(self, args: dict[str, Any]) -> SkillResult:
         result = super().run(args)
         raw = result.content or ""
+        parsed = _parse_vuln_triage_payload(raw)
         result.metadata["raw_json"] = raw
-        result.content = format_vuln_triage_markdown(raw)
+        if parsed is not None:
+            result.metadata["parsed"] = parsed
+        result.content = format_vuln_triage_markdown(raw, parsed=parsed)
         return result
 
 
