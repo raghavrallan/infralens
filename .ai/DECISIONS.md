@@ -50,6 +50,18 @@ Recorded product/engineering decisions found in repo docs and code. Add new entr
 - **Decision:** Org → project → users isolation; onboarding when user lacks memberships; project lists must not be global.
 - **Consequence:** Any new list/query APIs must scope by org/project membership.
 
+## D-010 — Merged tenancy keeps string ids and application filters (2026-10-16)
+
+- **Source:** migration tracker `M-10`, `O-01`–`O-08`; existing `app/core/db.py` string keys.
+- **Decision:** Primary keys stay strings so both UUID and 32-hex ids fit. No Row Level Security and no Alembic. A connection profile directory key is derived so it is always 32 lowercase hex.
+- **Consequence:** New Azure connection rows use 32-hex ids. Suite rows can stay UUIDs. Isolation is enforced in `app/tenancy/access.py`.
+
+## D-011 — Both secret stores stay (2026-10-16)
+
+- **Source:** tracker `M-04`, `X-01`, `X-06`.
+- **Decision:** Org Azure client secrets use the live AES-256-GCM cipher (`APP_SECRET` or `data/app-secret`). Per-project `connections.fields` stay masked the way the suite already stored them. Signup stores `org_role=org_owner` and global role `viewer`.
+- **Consequence:** `is_org_admin()` does not treat `org_owner` as `org_admin` yet. Live `can()` does. Phase 3 merges those checks. `data/` is gitignored.
+
 ## D-009 — Local Next uses webpack (2026-09-12)
 
 - **Source:** PR #33 / commit `8045b61`; panic logs “Next.js package not found”

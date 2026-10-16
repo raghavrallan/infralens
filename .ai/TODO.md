@@ -17,6 +17,14 @@ Prioritized from README roadmap + status docs. Do not invent new product goals.
 
 Confirm with humans before treating these as active work.
 
+## Single-product merge
+
+- [x] Phase 1 — branch `combine-infralens-live`
+- [x] Phase 2 code — shared tenancy model and the ported access tests. The full tenancy pytest command still fails on the delivery stage walk (B-003).
+- [ ] Phase 3 — session cookie and merged RBAC. `org_owner` is stored; suite `is_org_admin()` does not grant that role yet.
+- [ ] Phase 4 — cost fold fixture from `check-access.mjs` (`K-05`) and Azure read plane
+- [ ] `test_delivery_walks_remaining_stages` needs Azure OpenAI in `app_config` before that stage walk can pass. Not a Phase 2 schema failure.
+
 ## Agent hygiene (ongoing)
 
 - [ ] Keep `.ai/SESSION.md` updated after each meaningful session

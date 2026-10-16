@@ -2,6 +2,13 @@
 
 Agent-oriented changelog (not a full git log). Newest first.
 
+## 2026-10-16
+
+- Branch `combine-infralens-live` from `master` @ `5949865`.
+- One Postgres tenancy model for both products: org Azure app registration, subscription map, project slug and `budget_usd`, session row, audit log.
+- Live access isolation and AES-GCM secret box ported. Suite connection masking and pbkdf2 passwords kept. Scrypt `salt:hash` passwords verify.
+- Cost folding and estate pages are not in this change.
+
 ## 2026-09-12
 
 - Merged PR #33 (`fix/stale-architect-runs`) to `master` → tip `87b9c60`.

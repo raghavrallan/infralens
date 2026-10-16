@@ -81,7 +81,12 @@ def ensure_org_membership(
     user_id: str,
     org_role: str = "member",
 ) -> dict[str, Any]:
-    role = "org_admin" if org_role == "org_admin" else "member"
+    if org_role == "org_admin":
+        role = "org_admin"
+    elif org_role == "org_owner":
+        role = "org_owner"
+    else:
+        role = "member"
     with SessionLocal() as session:
         row = session.scalar(
             select(OrgMembership).where(
@@ -147,9 +152,13 @@ def ensure_project_membership(
     user_id: str,
     project_role: str = "developer",
 ) -> dict[str, Any]:
-    role = normalize_role(project_role)
-    if role in {"super_admin", "org_admin"}:
-        role = "devops_lead"
+    raw = (project_role or "").strip()
+    if raw in {"project_admin", "billing_reader", "operator", "viewer"}:
+        role = raw
+    else:
+        role = normalize_role(raw)
+        if role in {"super_admin", "org_admin"}:
+            role = "devops_lead"
     with SessionLocal() as session:
         row = session.scalar(
             select(ProjectMembership).where(

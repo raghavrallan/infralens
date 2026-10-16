@@ -7,9 +7,11 @@ from typing import Any, Optional
 
 from sqlalchemy import func, select
 
-from app.tenancy import memberships
+from app.core import auth
 from app.core.db import Organization, OrgMembership, Project, SessionLocal, User
 from app.core.rbac import normalize_role
+from app.tenancy import memberships
+from app.tenancy.access import AccessError, audit
 
 
 def _slugify(name: str) -> str:
@@ -182,3 +184,66 @@ def list_org_projects(org_id: str) -> list[dict[str, Any]]:
             }
             for p in rows
         ]
+
+
+def signup_organization(
+    *,
+    name: str,
+    org_name: str,
+    email: str,
+    password: str,
+) -> dict[str, Any]:
+    """Create a user and an organization that user owns. No other org is visible."""
+    clean_name = " ".join((name or "").split())
+    clean_org = " ".join((org_name or "").split())
+    clean_email = (email or "").strip().lower()
+    if len(clean_name) < 2 or len(clean_org) < 2:
+        raise AccessError(400, "Enter your name and the organization name.")
+    if "@" not in clean_email or len(clean_email) > 160:
+        raise AccessError(400, "Enter a valid email.")
+    if len(password or "") < 8:
+        raise AccessError(400, "Use a password of at least 8 characters.")
+    user_id = uuid.uuid4().hex
+    org_id = uuid.uuid4().hex
+    with SessionLocal() as session:
+        if session.scalar(select(User.id).where(func.lower(User.email) == clean_email)):
+            raise AccessError(
+                409,
+                "That email already has an account. Sign in, or ask an admin to add you to the organization.",
+            )
+        username = clean_email if len(clean_email) <= 64 else f"user-{user_id[:16]}"
+        if session.scalar(select(User.id).where(User.username == username)):
+            username = f"user-{user_id[:16]}"
+        session.add(
+            User(
+                id=user_id,
+                username=username,
+                email=clean_email,
+                display_name=clean_name[:120],
+                password_hash=auth.hash_password(password),
+                role="viewer",
+                is_active=True,
+            )
+        )
+        slug = _slugify(clean_org)
+        if session.scalar(select(Organization.id).where(Organization.slug == slug)):
+            slug = f"{slug[:90]}-{org_id[:4]}"
+        session.add(
+            Organization(
+                id=org_id,
+                name=clean_org[:120],
+                slug=slug,
+                created_by=user_id,
+            )
+        )
+        session.add(
+            OrgMembership(
+                id=str(uuid.uuid4()),
+                org_id=org_id,
+                user_id=user_id,
+                org_role="org_owner",
+            )
+        )
+        session.commit()
+    audit(org_id=org_id, user_id=user_id, action="org.create", detail=clean_org)
+    return {"ok": True, "user_id": user_id, "org_id": org_id, "org_role": "org_owner"}

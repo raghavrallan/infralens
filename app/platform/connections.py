@@ -10,9 +10,10 @@ Supported connection methods:
   - AWS    : "access_key" (access key id/secret/region) or "sso"
   - GitHub : "token" (personal access token) or "sso"
 """
+import hashlib
+import re
 from typing import Any, Optional
 
-from sqlalchemy import select
 from sqlalchemy.exc import ProgrammingError
 
 from app.core.db import Connection, SessionLocal
@@ -30,6 +31,19 @@ _SECRET_FIELDS = {
     "token",
     "password",
 }
+_PROFILE_KEY = re.compile(r"^[a-f0-9]{32}$")
+
+
+def connection_profile_key(connection_id: str) -> str:
+    """Directory key for one connection. Always 32 lowercase hex characters.
+
+    A 32-hex id is used as itself. A UUID loses its hyphens. Anything else is
+    hashed so the key still matches ``^[a-f0-9]{32}$``.
+    """
+    compact = re.sub(r"[^a-f0-9]", "", (connection_id or "").lower())
+    if _PROFILE_KEY.fullmatch(compact):
+        return compact
+    return hashlib.sha256((connection_id or "").encode("utf-8")).hexdigest()[:32]
 
 
 def _mask(value: str) -> str:

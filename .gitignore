@@ -16,6 +16,8 @@ frontend/tsconfig.tsbuildinfo
 .env
 *.local
 .connections.json
+# Local Azure profiles and the generated APP_SECRET file. Postgres is the store.
+data/
 
 # IDE / OS
 .vscode/
