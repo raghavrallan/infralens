@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -145,6 +146,31 @@ def test_delivery_walks_remaining_stages(require_db, org_with_project):
     arch = delivery.transition(run["id"], to_stage="architecture", user_role="super_admin")
     assert arch["stage"] == "architecture"
     assert arch["next_actions"]
+    # Master blocks Terraform until a proposal is ready. This database has no
+    # Azure OpenAI settings, so the inline job records that and the gate holds.
+    with pytest.raises(ValueError, match="Architecture must be ready"):
+        delivery.transition(run["id"], to_stage="terraform", user_role="super_admin")
+    from app.agents.solution_architect import jobs
+
+    with (
+        patch(
+            "app.core.config.get_azure_config",
+            return_value=SimpleNamespace(configured=True),
+        ),
+        patch(
+            "app.agents.solution_architect.graph.stream_architect",
+            return_value=[
+                {
+                    "type": "final",
+                    "reply": "HLD",
+                    "plan": [],
+                    "architecture": {"components": [{"name": "app"}]},
+                }
+            ],
+        ),
+    ):
+        generated = jobs.generate_architecture(run["id"])
+    assert generated["ok"] is True
     tf = delivery.transition(run["id"], to_stage="terraform", user_role="super_admin")
     assert "terraform_pr" in (tf["artifacts"] or {})
     planned = delivery.transition(run["id"], to_stage="plan", user_role="super_admin")

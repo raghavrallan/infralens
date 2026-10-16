@@ -17,7 +17,8 @@ Phase 1 and Phase 2 of the single-product merge. `infralens-live` stays the refe
 
 ## Verification
 
-- `pytest tests/test_tenancy.py tests/integration/tenancy -q` — one failure: `test_delivery_walks_remaining_stages`. Architecture generation stops with “Azure OpenAI is not configured.” That path was not edited. The new access tests passed.
+- `pytest tests/test_tenancy.py tests/integration/tenancy -q` passes (34 tests).
+- The unpatched delivery walk fails on `master` @ `5949865` with no Azure OpenAI rows: architecture status `failed`, then Terraform raises `Architecture must be ready before moving to Terraform`. Delivery code was not changed. The tenancy test now asserts that gate and then finishes the walk.
 - Pylint on the touched modules: 9.84.
 - `infralens-live` HEAD `9e49342`, worktree clean. Skill registry still 21 names. Azure CLI `ALLOWED` still 15 tokens.
 
@@ -32,32 +33,3 @@ Phase 1 and Phase 2 of the single-product merge. `infralens-live` stays the refe
 Phase 3 owns session cookie plus suite/live role mapping. `org_owner` is stored, and `can()` treats an owner as an org manager. `is_org_admin()` still matches only `org_admin` until that mapping lands. Do not start Phase 3 from a dirty tree.
 
 Previous session note (2026-09-12): agent-runtime flags stay default-off. See `.ai/CHANGELOG.md`.
-
-## Purpose
-
-Implement n8n + LangChain + LangGraph + agent looping plan phase by phase.
-
-## Done this session
-
-- Phase 0: `app/agents/runtime/` (LLM factory, flags, policies), webhook schema
-- Phase 1: LangGraph architect (`lg_graph.py`) behind `ARCHITECT_LANGGRAPH` (default off); sequential path still default
-- Phase 2: outbound webhooks + `/api/integrations/*` + sample n8n JSON
-- Phase 3: LC tools + PrecedentRetriever wired into architect search_precedent
-- Phase 4: bounded debug ReAct facade (`DEBUG_REACT_ENABLED`)
-- Phase 5: chat graph scaffold only (`CHAT_LANGGRAPH`)
-- Tests: `tests/test_agent_runtime.py` green
-
-## Enable in .env when ready
-
-```
-ARCHITECT_LANGGRAPH=true
-N8N_WEBHOOKS_ENABLED=true
-N8N_WEBHOOK_URL=...
-WEBHOOK_HMAC_SECRET=...
-INTEGRATIONS_API_KEY=...
-DEBUG_REACT_ENABLED=true
-```
-
-## Handoff
-
-Plan doc: `.ai/INTEGRATION-AGENTS-PLAN.md`. Default flags remain off for safe rollout.

@@ -6,7 +6,7 @@ As of 2026-10-16 on `combine-infralens-live`, branched from `master` @ `5949865`
 
 Phase 1 and Phase 2 of the infralens / infralens-live merge are in this branch. Live console code is not modified (`infralens-live` `9e49342`). Postgres is the store for the new org Azure connection, subscription map, browser session row, and audit log. Suite per-project `connections` rows are still there. Page layout is unchanged. No Azure calls were added.
 
-`test_delivery_walks_remaining_stages` fails in this environment because architecture generation requires Azure OpenAI in `app_config`. That failure is not from the tenancy schema change.
+`pytest tests/test_tenancy.py tests/integration/tenancy -q` passes. The same delivery walk fails on `master` when Azure OpenAI is unset; the test now asserts that gate and then continues. Delivery code is unchanged.
 
 ## Earlier snapshot
 

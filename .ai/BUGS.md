@@ -4,11 +4,12 @@ Track known defects. Prefer evidence (logs, commits, Actions URLs).
 
 ## Open
 
-### B-003 — Delivery stage walk cannot finish without Azure OpenAI
+### B-003 — Delivery stage walk blocks Terraform when Azure OpenAI is unset
 
-- **Symptom:** `tests/integration/tenancy/test_membership_delivery_projects.py::test_delivery_walks_remaining_stages` raises `Architecture must be ready before moving to Terraform`.
-- **Cause:** `generate_architecture` sets `architecture_status` to `failed` when `app_config` has no Azure OpenAI endpoint and key. Observed 2026-10-16 on `combine-infralens-live` with an empty test database.
-- **Status:** Pre-existing relative to the tenancy merge. Delivery code was not changed in that work.
+- **Symptom:** Moving a delivery run to Terraform raises `Architecture must be ready before moving to Terraform`.
+- **Cause:** `generate_architecture` sets `architecture_status` to `failed` when `app_config` has no Azure OpenAI endpoint and key. The gate has been in `app/platform/delivery.py` since `d8f9920` (2026-09-02). The stage-walk test was written earlier, on 2026-08-15.
+- **Master:** Same failure on `master` @ `5949865` with a fresh database and no Azure OpenAI rows. Delivery and job code on `combine-infralens-live` match that commit.
+- **Status:** Not a tenancy regression. The tenancy test now asserts that gate, then finishes the walk through `generate_architecture` with a stubbed architect result. Product behavior is unchanged.
 
 ### B-001 — Home-directory lockfile can break Turbopack if webpack flag is dropped
 
