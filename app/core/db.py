@@ -6,9 +6,23 @@ the Postgres connection string itself comes from the environment.
 """
 import os
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any, Optional
 
-from sqlalchemy import Boolean, DateTime, Integer, String, create_engine, inspect, text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    create_engine,
+    func,
+    inspect,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
@@ -133,7 +147,7 @@ class OrgMembership(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     org_id: Mapped[str] = mapped_column(String(36), index=True)
     user_id: Mapped[str] = mapped_column(String(36), index=True)
-    # org_admin | member
+    # org_admin | org_owner | member. org_owner is the live signup owner.
     org_role: Mapped[str] = mapped_column(String(32), default="member")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
@@ -146,7 +160,8 @@ class ProjectMembership(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     project_id: Mapped[str] = mapped_column(String(36), index=True)
     user_id: Mapped[str] = mapped_column(String(36), index=True)
-    # devops_lead | devops_engineer | developer | viewer
+    # Suite: devops_lead | devops_engineer | developer | viewer.
+    # Live: project_admin | billing_reader | operator | viewer.
     project_role: Mapped[str] = mapped_column(String(32), default="developer")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
@@ -250,10 +265,17 @@ class Project(Base):
     """A workspace that isolates its own connections, chats and mapped repos."""
 
     __tablename__ = "projects"
+    __table_args__ = (
+        UniqueConstraint("org_id", "slug", name="projects_org_id_slug_key"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     org_id: Mapped[str] = mapped_column(String(36), index=True, default="")
     name: Mapped[str] = mapped_column(String(120), default="New project")
+    # Unique inside the organization. The same slug may exist in another org.
+    slug: Mapped[str] = mapped_column(String(120))
+    # Monthly budget baseline for the estate forecast. Null leaves the delta unset.
+    budget_usd: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True)
     # GitHub repositories ("owner/name") this project is allowed to inspect.
     repos: Mapped[list[str]] = mapped_column(JSONB, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
@@ -274,6 +296,94 @@ class Connection(Base):
     connected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
+
+
+class AzureConnection(Base):
+    """Org-level Azure app registration shared by many projects.
+
+    The per-project ``connections`` row is unchanged and still holds AWS,
+    GitHub, and Azure method fields. Estate reads use the subscriptions on
+    the connections mapped through ``project_connections``.
+    """
+
+    __tablename__ = "azure_connections"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    org_id: Mapped[str] = mapped_column(String(36), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    tenant_id: Mapped[str] = mapped_column(String(64))
+    client_id: Mapped[str] = mapped_column(String(64))
+    secret_cipher: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(32), default="pending")
+    status_detail: Mapped[str] = mapped_column(Text, default="")
+    last_checked_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+    __table_args__ = (
+        Index("azure_connections_client_id", func.lower(client_id), unique=True),
+    )
+
+
+class Subscription(Base):
+    """An Azure subscription discovered on one org's app registration."""
+
+    __tablename__ = "subscriptions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    org_id: Mapped[str] = mapped_column(String(36), index=True)
+    connection_id: Mapped[str] = mapped_column(String(36), index=True)
+    name: Mapped[str] = mapped_column(String(200), default="")
+    state: Mapped[str] = mapped_column(String(64), default="")
+
+
+class ProjectConnection(Base):
+    """Maps an org Azure connection onto a project. One connection, many projects."""
+
+    __tablename__ = "project_connections"
+    __table_args__ = (
+        Index("project_connections_connection_id_idx", "connection_id"),
+    )
+
+    project_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    connection_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+
+
+class ProjectSubscription(Base):
+    """Legacy one-subscription-per-project binding. Not the running map path."""
+
+    __tablename__ = "project_subscriptions"
+
+    project_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    subscription_id: Mapped[str] = mapped_column(String(36), primary_key=True, unique=True)
+
+
+class LoginSession(Base):
+    """Browser session. The raw token is not stored; ``token_hash`` is SHA-256."""
+
+    __tablename__ = "sessions"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), index=True)
+    org_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class AuditLog(Base):
+    """Org-scoped audit row. Detail is a short label, never a client secret."""
+
+    __tablename__ = "audit_log"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    org_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    project_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    user_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    action: Mapped[str] = mapped_column(String(64))
+    detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
 class Chat(Base):
@@ -645,6 +755,90 @@ class ExecutionApproval(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+def _column_names(conn: Any, table: str) -> set[str]:
+    rows = conn.execute(
+        text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND table_name = :table"
+        ),
+        {"table": table},
+    )
+    return {row[0] for row in rows}
+
+
+def _ensure_project_live_columns(conn: Any) -> None:
+    """Add project slug and budget on databases created before the live merge."""
+    if conn.execute(text("SELECT to_regclass('public.projects')")).scalar() is None:
+        return
+    columns = _column_names(conn, "projects")
+    if "slug" not in columns:
+        conn.execute(text("ALTER TABLE projects ADD COLUMN slug VARCHAR(120)"))
+    if "budget_usd" not in columns:
+        conn.execute(text("ALTER TABLE projects ADD COLUMN budget_usd NUMERIC(12, 2)"))
+    conn.execute(
+        text(
+            "UPDATE projects SET slug = 'default' "
+            "WHERE id = :default_id AND (slug IS NULL OR btrim(slug) = '')"
+        ),
+        {"default_id": DEFAULT_PROJECT_ID},
+    )
+    conn.execute(
+        text(
+            "UPDATE projects SET slug = 'p-' || replace(id, '-', '') "
+            "WHERE slug IS NULL OR btrim(slug) = ''"
+        )
+    )
+    conn.execute(text("ALTER TABLE projects ALTER COLUMN slug SET NOT NULL"))
+    exists = conn.execute(
+        text("SELECT 1 FROM pg_constraint WHERE conname = 'projects_org_id_slug_key'")
+    ).scalar()
+    if not exists:
+        conn.execute(
+            text(
+                "ALTER TABLE projects "
+                "ADD CONSTRAINT projects_org_id_slug_key UNIQUE (org_id, slug)"
+            )
+        )
+
+
+def _connection_rank(row: AzureConnection) -> tuple[int, datetime]:
+    stamp = row.last_checked_at or row.created_at
+    if stamp is None:
+        stamp = datetime.min.replace(tzinfo=timezone.utc)
+    elif stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    return (1 if row.status == "connected" else 0, stamp)
+
+
+def merge_duplicate_azure_connections() -> int:
+    """Keep the connected row for one client id, else the latest, and delete the rest."""
+    from sqlalchemy import delete, select, update
+
+    removed = 0
+    with SessionLocal() as session:
+        grouped: dict[str, list[AzureConnection]] = {}
+        for row in session.scalars(select(AzureConnection)).all():
+            grouped.setdefault((row.client_id or "").lower(), []).append(row)
+        for group in grouped.values():
+            if len(group) < 2:
+                continue
+            group.sort(key=_connection_rank, reverse=True)
+            keep = group[0]
+            for extra in group[1:]:
+                session.execute(
+                    update(Subscription)
+                    .where(Subscription.connection_id == extra.id)
+                    .values(connection_id=keep.id)
+                )
+                session.execute(
+                    delete(ProjectConnection).where(ProjectConnection.connection_id == extra.id)
+                )
+                session.delete(extra)
+                removed += 1
+        session.commit()
+    return removed
+
+
 def _pk_columns(conn: Any, table: str) -> list[str]:
     rows = conn.execute(
         text(
@@ -708,8 +902,8 @@ def _migrate() -> None:  # pragma: no cover
                 )
                 conn.execute(
                     text(
-                        "INSERT INTO projects (id, org_id, name, repos, created_at, updated_at) "
-                        "VALUES (:id, :org_id, :name, '[]'::jsonb, now(), now()) "
+                        "INSERT INTO projects (id, org_id, name, slug, repos, created_at, updated_at) "
+                        "VALUES (:id, :org_id, :name, 'default', '[]'::jsonb, now(), now()) "
                         "ON CONFLICT (id) DO NOTHING"
                     ),
                     {
@@ -825,6 +1019,17 @@ def _migrate() -> None:  # pragma: no cover
                         conn.execute(text(f"ALTER TABLE chat_memories {ddl}"))
                     except Exception:
                         pass
+
+        _ensure_project_live_columns(conn)
+
+    merge_duplicate_azure_connections()
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS azure_connections_client_id "
+                "ON azure_connections (lower(client_id))"
+            )
+        )
 
 
 def ensure_tenancy_seed() -> None:

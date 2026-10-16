@@ -113,12 +113,10 @@ def hash_password(password: str) -> str:
     return f"pbkdf2_sha256${_PBKDF2_ROUNDS}${salt}${digest}"
 
 
-def verify_password(password: str, password_hash: str) -> bool:
+def _verify_pbkdf2(password: str, password_hash: str) -> bool:
     try:
-        algo, rounds_raw, salt, expected = password_hash.split("$", 3)
+        _algo, rounds_raw, salt, expected = password_hash.split("$", 3)
     except ValueError:
-        return False
-    if algo != "pbkdf2_sha256":
         return False
     try:
         rounds = int(rounds_raw)
@@ -131,6 +129,40 @@ def verify_password(password: str, password_hash: str) -> bool:
         rounds,
     ).hex()
     return hmac.compare_digest(digest, expected)
+
+
+def _verify_scrypt(password: str, password_hash: str) -> bool:
+    """Verify a live ``salt:hash`` produced by Node ``scryptSync``."""
+    salt, separator, digest = password_hash.partition(":")
+    if not separator or not salt or not digest:
+        return False
+    try:
+        expected = bytes.fromhex(digest)
+    except ValueError:
+        return False
+    try:
+        actual = hashlib.scrypt(
+            password.encode("utf-8"),
+            salt=salt.encode("utf-8"),
+            n=2**14,
+            r=8,
+            p=1,
+            dklen=32,
+        )
+    except (ValueError, OverflowError):
+        return False
+    if len(actual) != len(expected):
+        return False
+    return hmac.compare_digest(actual, expected)
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    stored = password_hash or ""
+    if stored.startswith("pbkdf2_sha256$"):
+        return _verify_pbkdf2(password, stored)
+    if ":" in stored and "$" not in stored:
+        return _verify_scrypt(password, stored)
+    return False
 
 
 def _public_user(user: User) -> dict[str, Any]:

@@ -5,6 +5,7 @@ set of allowed GitHub repositories, so work for one client/product never leaks
 into another. Chats are scoped to a project too.
 """
 import json
+import re
 import uuid
 from typing import Any, Optional
 
@@ -71,11 +72,36 @@ def _try_execute(session: Any, statement: Any) -> bool:
         return False
 
 
+def _slugify(value: str) -> str:
+    base = re.sub(r"[^a-z0-9]+", "-", (value or "").strip().lower()).strip("-")[:48]
+    return base or "item"
+
+
+def _unique_slug(session: Any, org_id: str, name: str, project_id: str) -> str:
+    base = _slugify(name)
+    candidate = base
+    n = 2
+    while session.scalar(
+        select(Project.id).where(
+            Project.org_id == org_id,
+            Project.slug == candidate,
+            Project.id != project_id,
+        )
+    ):
+        suffix = f"-{n}"
+        candidate = f"{base[: max(1, 48 - len(suffix))]}{suffix}"
+        n += 1
+    return candidate
+
+
 def _summary(project: Project, default_id: str | None) -> dict[str, Any]:
+    budget = getattr(project, "budget_usd", None)
     return {
         "id": project.id,
         "name": project.name,
+        "slug": getattr(project, "slug", "") or "",
         "org_id": getattr(project, "org_id", "") or "",
+        "budget_usd": None if budget is None else float(budget),
         "is_default": project.id == default_id,
         "repos": list(project.repos or []),
         "created_at": project.created_at.isoformat() if project.created_at else None,
@@ -105,7 +131,12 @@ def ensure_default() -> str:
                 if session.get(Project, DEFAULT_PROJECT_ID) is None
                 else str(uuid.uuid4())
             )
-            selected = Project(id=new_id, name="Default project", repos=[])
+            selected = Project(
+                id=new_id,
+                name="Default project",
+                repos=[],
+                slug="default" if new_id == DEFAULT_PROJECT_ID else f"default-{new_id[:8]}",
+            )
             session.add(selected)
             session.flush()
         setting = session.get(AppConfig, DEFAULT_PROJECT_CONFIG_KEY)
@@ -148,6 +179,7 @@ def create_project(
     owner_user_id: Optional[str] = None,
     owner_project_role: str = "devops_lead",
     reuse_empty: bool = False,
+    budget_usd: Optional[float] = None,
 ) -> dict[str, Any]:
     clean = " ".join((name or "").strip().split()) or "New project"
 
@@ -183,7 +215,14 @@ def create_project(
 
             org = session.scalar(select(Organization).order_by(Organization.created_at.asc()))
             org_id = org.id if org else ""
-        project = Project(id=project_id, name=clean, repos=[], org_id=org_id or "")
+        project = Project(
+            id=project_id,
+            name=clean,
+            repos=[],
+            org_id=org_id or "",
+            slug=_unique_slug(session, org_id or "", clean, project_id),
+            budget_usd=budget_usd,
+        )
         session.add(project)
         session.commit()
         summary = _summary(project, _default_id(session))

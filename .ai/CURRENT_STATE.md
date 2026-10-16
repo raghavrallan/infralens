@@ -1,6 +1,16 @@
 # CURRENT_STATE.md
 
-As of 2026-09-12 on `master` @ `87b9c60` (after merge of PR #33 `fix/stale-architect-runs`).
+As of 2026-10-16 on `combine-infralens-live`, branched from `master` @ `5949865`.
+
+## Merge
+
+Phase 1 and Phase 2 of the infralens / infralens-live merge are in this branch. Live console code is not modified (`infralens-live` `9e49342`). Postgres is the store for the new org Azure connection, subscription map, browser session row, and audit log. Suite per-project `connections` rows are still there. Page layout is unchanged. No Azure calls were added.
+
+`pytest tests/test_tenancy.py tests/integration/tenancy -q` passes. The same delivery walk fails on `master` when Azure OpenAI is unset; the test now asserts that gate and then continues. Delivery code is unchanged.
+
+## Earlier snapshot
+
+As of 2026-09-12 on `master` @ `87b9c60` (after merge of PR #33 `fix/stale-architect-runs`). The registry now has 21 skills; the paragraph below that says 20 is older than `5949865`.
 
 ## Working locally
 
