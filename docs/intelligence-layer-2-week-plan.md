@@ -1,5 +1,7 @@
 # InfraLens 2-Week Plan — Living Checklist
 
+Folded into this repo on 2026-10-20. The Python package is `engine/app` and is imported as `app` when `PYTHONPATH=engine`. The UI is the Next.js console in `src/`, not a separate frontend. The checklist below is the 2026-07-30 engine note.
+
 Status as of 2026-07-30. **PDF skipped** (Excel + Word + Markdown only).
 
 See also: [`intelligence-layer-2-week-status.md`](./intelligence-layer-2-week-status.md),  

@@ -17,7 +17,8 @@ if ($env:RUN_INFRA_TESTS -match '^(?i:1|true|yes|on)$') {
 }
 
 Write-Host "==> Pylint (fail under 9.0)"
-pylint app executors
+$env:PYTHONPATH = Join-Path $root "engine"
+pylint (Join-Path $root "engine\app") executors
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host "==> Tests + coverage (fail under $failUnder%; RUN_INFRA_TESTS=$($env:RUN_INFRA_TESTS))"

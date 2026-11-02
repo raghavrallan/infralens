@@ -12,10 +12,11 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+ENGINE = ROOT / "engine"
 os.chdir(ROOT)
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-os.environ["PYTHONPATH"] = str(ROOT) + os.pathsep + os.environ.get("PYTHONPATH", "")
+if str(ENGINE) not in sys.path:
+    sys.path.insert(0, str(ENGINE))
+os.environ["PYTHONPATH"] = str(ENGINE) + os.pathsep + os.environ.get("PYTHONPATH", "")
 
 import uvicorn
 
@@ -41,7 +42,7 @@ def main() -> None:
         host=host,
         port=port,
         reload=True,
-        reload_dirs=[str(ROOT / "app")],
+        reload_dirs=[str(ENGINE / "app")],
         reload_excludes=reload_excludes(),
     )
 

@@ -110,7 +110,7 @@ jobs:
       - name: Run Pylint (fail under 9.0)
         run: |
           set -o pipefail
-          pylint app executors --output-format=parseable | tee pylint.txt
+          PYTHONPATH=engine pylint engine/app executors --output-format=parseable | tee pylint.txt
       - name: Upload Pylint report
         if: always()
         uses: actions/upload-artifact@v4

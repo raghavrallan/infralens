@@ -1,5 +1,7 @@
 # Server deploy (GitHub Actions → SSH + rsync)
 
+Folded into this repo on 2026-10-20. The Python package is `engine/app` and is imported as `app` when `PYTHONPATH=engine`. The product UI is the Next.js console in `src/`. This file is the skills-engine server deploy, not the console's `npm run dev` path.
+
 Deploy uses a **deploy-only** SSH key. On the server that key is forced through
 `gha-ssh-wrapper.sh`, which only allows:
 

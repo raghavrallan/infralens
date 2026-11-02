@@ -34,7 +34,7 @@ RUN if [ -n "$PIP_TRUSTED_HOSTS" ]; then \
       pip install --no-cache-dir -r requirements.txt; \
     fi
 
-COPY app ./app
+COPY engine/app ./app
 COPY scripts ./scripts
 COPY --from=frontend-builder /build/frontend/out ./frontend/out
 

@@ -1,0 +1,157 @@
+{
+  "product": "Infralens",
+  "fps": 30,
+  "width": 1920,
+  "height": 1080,
+  "voice": "am_michael",
+  "output": {
+    "video": "../infralens-agentic.mp4",
+    "srt": "../infralens-agentic.srt"
+  },
+  "music": {
+    "file": "/home/raghav/OpenReels/assets/music/warm-acoustic-01.mp3",
+    "trackId": "warm-acoustic-01",
+    "mood": "warm_acoustic",
+    "license": "Pixabay License",
+    "source": "Pixabay",
+    "sourceId": 232912,
+    "volume": 0.85
+  },
+  "scenes": [
+    {
+      "id": "opening",
+      "kind": "opening",
+      "kicker": "ONE PRODUCT",
+      "title": "A cloud estate is more than a bill.",
+      "subtitle": "Someone still has to investigate, propose, and decide.",
+      "lines": [
+        "A cloud estate is more than a bill.",
+        "Someone still has to investigate, propose, and decide."
+      ]
+    },
+    {
+      "id": "problem",
+      "kind": "stats",
+      "kicker": "THE GAP",
+      "title": "Seeing the spend is only the start.",
+      "source": "Flexera, 2025 State of the Cloud. A survey of cloud decision-makers. Not an Infralens result.",
+      "stats": [
+        {
+          "value": 84,
+          "suffix": "%",
+          "label": "say managing cloud spend is their top cloud challenge. The next action is still a person's."
+        }
+      ],
+      "lines": [
+        "Flexera's 2025 State of the Cloud report says managing cloud spend is the top challenge for eighty-four percent of organizations.",
+        "The bill, the inventory, and the recommendation still sit apart from the person who has to act."
+      ]
+    },
+    {
+      "id": "intro",
+      "kind": "intro",
+      "kicker": "INFRALENS",
+      "title": "Infralens",
+      "subtitle": "The estate and the agentic side, in one shell.",
+      "lines": [
+        "Infralens is one product.",
+        "The console holds the estate. The agentic side works the same project. There is no second suite."
+      ]
+    },
+    {
+      "id": "works",
+      "kind": "console",
+      "kicker": "THE ESTATE",
+      "title": "Estate overview",
+      "project": "This project",
+      "nav": ["Dashboard", "Costs & billing", "Alerts", "Advisor", "Chat", "Workflows", "Findings", "Approvals"],
+      "active": "Dashboard",
+      "services": [
+        { "name": "Compute", "color": "#E2773C" },
+        { "name": "Data", "color": "#0084FF" },
+        { "name": "Network", "color": "#0BAA60" },
+        { "name": "Platform", "color": "#7C6AE8" }
+      ],
+      "tiles": [
+        { "label": "Cost snapshot", "value": "Saved" },
+        { "label": "Resources", "value": "This project" },
+        { "label": "Alerts", "value": "By severity" },
+        { "label": "Advisor", "value": "Recommendations" }
+      ],
+      "footnote": "Saved snapshot for this project. Interface reconstructed from the console. No tenant data.",
+      "lines": [
+        "Open the estate.",
+        "The dashboard reads a saved snapshot of cost, resources, alerts, and Advisor, and only for the subscriptions on this project."
+      ]
+    },
+    {
+      "id": "identify",
+      "kind": "identify",
+      "kicker": "THE AGENTIC SIDE",
+      "title": "Chat, workflows, and findings share the project.",
+      "columns": [
+        {
+          "heading": "Chat",
+          "rows": ["Agent runs a skill", "Plan returns steps you can execute", "Default scope is read-only"]
+        },
+        {
+          "heading": "Workflows",
+          "rows": ["Saved on the project", "Run now enqueues a job", "The worker must be up"]
+        },
+        {
+          "heading": "Findings",
+          "rows": ["Open, from a workflow run", "The gate stays visible", "The recommended action stays with it"]
+        }
+      ],
+      "lines": [
+        "In chat, Agent runs a skill. Plan returns steps you can execute.",
+        "The default scope is read-only. The agent analyses and recommends. It does not pretend a live change already happened.",
+        "Workflows enqueue a run when Azure or AWS is connected and the worker is up. Findings from those runs stay open, with the gate and the recommended action."
+      ]
+    },
+    {
+      "id": "resolve",
+      "kind": "resolve",
+      "kicker": "A PERSON STILL DECIDES",
+      "title": "Architecture proposes. Approval records.",
+      "steps": [
+        "Architecture keeps a Solution Architect run and the stage of that delivery.",
+        "A write-scoped skill may draft a change. It names the provider, the target, and the rollback.",
+        "Approval records the decision. The inbox does not execute the change."
+      ],
+      "approvalTitle": "Approvals",
+      "approvalBody": "Approving records the decision. The inbox does not execute the change.",
+      "lines": [
+        "Architecture keeps a Solution Architect run, and the stage of that delivery.",
+        "You take a change into chat. Approval records the decision. The approvals inbox does not execute it."
+      ]
+    },
+    {
+      "id": "value",
+      "kind": "value",
+      "kicker": "WHAT THE TEAM GETS",
+      "title": "More than a billing view.",
+      "items": [
+        { "title": "Estate", "body": "A saved snapshot of cost, resources, alerts, and Advisor." },
+        { "title": "Agent", "body": "A skill runs, or a plan comes back, inside the project." },
+        { "title": "Workflows", "body": "A run can be enqueued. Findings keep the gate." },
+        { "title": "Decision", "body": "A person approves. The inbox does not apply the change." }
+      ],
+      "lines": [
+        "The result is one project for the estate and for the agent.",
+        "A person is still accountable before Azure or AWS is changed."
+      ]
+    },
+    {
+      "id": "close",
+      "kind": "close",
+      "kicker": "INFRALENS",
+      "title": "Infralens",
+      "subtitle": "See the estate. Ask the agent. Decide before you change it.",
+      "url": "github.com/raghavrallan/infralens",
+      "lines": [
+        "Infralens. See the estate. Ask the agent. Decide before you change it."
+      ]
+    }
+  ]
+}

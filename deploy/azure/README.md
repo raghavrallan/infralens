@@ -1,5 +1,7 @@
 # Isolated Container Apps rollout
 
+Folded into this repo on 2026-10-20. The Python package is `engine/app` and is imported as `app` when `PYTHONPATH=engine`. The product UI is the Next.js console in `src/`. The root image still expects a `frontend/` directory that this repo does not contain.
+
 The API and intelligence worker remain separate from the provider CLI
 executors. Build each image with a pinned tag and push them to the existing
 `eqacrregistrydeveastus001.azurecr.io` registry:

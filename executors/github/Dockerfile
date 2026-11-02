@@ -18,7 +18,7 @@ RUN apt-get update \
        else \
          pip install --no-cache-dir httpx==0.28.1 redis==5.2.1 rq==2.1.0; \
        fi
-COPY app ./app
+COPY engine/app ./app
 COPY executors ./executors
 COPY executors/common/startup.sh /usr/local/bin/devsecops-startup
 RUN chmod 0755 /usr/local/bin/devsecops-startup

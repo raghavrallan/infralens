@@ -1,68 +1,28 @@
-# AGENTS.md — InfraLens / DevSecOps Skills Suite
+# AGENTS.md
 
-Persistent onboarding for AI agents. **Read this first**, then `.ai/` for deeper memory.
-Do not rely on prior chat history. Treat the repository + `.ai/` as source of truth.
+Infralens is the multi-client Azure console. It is not the AthletesGoLive mock in `agl-infralens`.
 
-## What this product is
+Read `.ai/CURRENT_STATE.md` before changing behavior.
 
-**InfraLens Skills Suite** (GitHub: `raghavrallan/infralens`) — a DevSecOps product with:
+- Do not put mock cost, resources, or invoices back into the product path.
+- Do not call Azure for a subscription that is not attached to the selected project.
+- Do not return client secrets, access tokens, secret values, or another organization's rows. Do not grant Azure RBAC from this repo.
+- Console Azure reads go through the sandbox in `src/lib/azure/sandbox.js` and `src/lib/azure/cli.js`. That is `az`, including `az rest`. `src/lib/azure/arm.js` throws if imported. Do not add a Node `fetch` to Azure.
+- On-demand reads are cached in Redis for one hour by `src/lib/read-cache.js`. A read of one resource must include that resource's name and group in the cache key. Do not serve one resource's payload for another.
+- Chat Azure reads in `engine/app/providers/azure_infra.py` still use HTTP. Do not describe those as sandbox calls.
+- The skills engine is `engine/app`, imported as `app` with `PYTHONPATH=engine`. Do not put a Python package at the repo-root `app/` directory. Next.js will prefer it over `src/app` and every page 404s.
+- Agentic pages stay in the live shell. Do not add a second frontend, and do not describe them as a separate suite. The browser calls `/suite-api/*`, which proxies to the FastAPI process. Local Linux start is `scripts/start-suite.sh`. The console is port 3001. The API uses `APP_PORT` (8001 when 8000 is taken).
+- Postgres is the system of record for the console and the agentic engine. Do not add SQLite back.
+- `data/` is local secret storage, including Azure CLI profiles. Do not commit it or a real `.env`.
+- Do not start a full estate cost sync to fix a page. Cost Management returns 429, and a failed sync must not replace a ready snapshot.
+- Run `npm run check` after changing access or cost folding.
 
-1. **Chat / Skills** — LLM-routed reusable skills (Azure OpenAI today).
-2. **DevOps Intelligence Layer** — queued diagnose workflows → findings gated by **action class × blast radius**.
-3. **Engineering / delivery** — org tenancy, onboarding, delivery checklist, solution architect graph, isolated Terraform workspaces, provider CLI executors.
+<!-- BEGIN:nextjs-agent-rules -->
 
-Differentiation (from README): gate by action class × blast radius, not by tool name.
+# This is NOT the Next.js you know
 
-## Canonical paths
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
 
-| Path | Role |
-|------|------|
-| `app/main.py` | FastAPI entry: auth middleware, API routes, SPA static mount |
-| `app/api/` | `routes_mvp.py`, `routes_engineering.py` |
-| `app/skills/` | Skill modules + registry (`__init__.py`) |
-| `app/chat/` | Orchestrator, chats, memory, project context |
-| `app/intelligence/` | Workflows, RQ worker/queue, risk engine, findings, scheduler |
-| `app/agents/solution_architect/` | Clarify→…→finalize architecture pipeline |
-| `app/platform/` | Connections, delivery, break-glass, engineering IaC/tasks |
-| `app/execution/` | Provider action jobs, Terraform runner, approvals |
-| `app/tenancy/` | Orgs, projects, memberships, invites, onboarding |
-| `app/org_executors/` | Per-org executor pool scaling |
-| `app/core/` | DB models, JWT/RBAC, Azure OpenAI config, observability |
-| `executors/` | Dockerized Azure/AWS/GitHub CLI RQ workers |
-| `frontend/` | Next.js 16 app (static export in prod; `next dev --webpack` locally) |
-| `docs/` | Architect + intelligence status/plan + EQIP scenario notes |
-| `.ai/` | Project memory for agents (update when you learn something lasting) |
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
 
-## Runtime model
-
-- **Production:** FastAPI serves API + `frontend/out` (Next `output: "export"`). No Next server.
-- **Local (recommended):** `.\start-local.ps1 setup` then `.\start-local.ps1 start`
-  - Docker: Postgres `:5544`, Redis `:6399`
-  - API `:8000`, Next live UI `:3000`, RQ `intelligence` worker
-  - Optional: `-WithExecutors` or `docker-compose.local-executors.yml`
-- LLM + cloud credentials: **Postgres via Settings UI**, not `.env`.
-- Env holds: `DATABASE_URL`, `REDIS_URL`, JWT/SMTP/OAuth/Langfuse/executor keys (see `.env.example`).
-
-## Agent workflow (required)
-
-1. Read `AGENTS.md` → `.ai/PROJECT_CONTEXT.md` → `.ai/SESSION.md` → relevant other `.ai/*`.
-2. Prefer existing docs (`README.md`, `docs/solution-architect.md`) over guessing.
-3. After meaningful work, **update** `.ai/SESSION.md`, and as needed `CURRENT_STATE.md`, `TODO.md`, `BUGS.md`, `DECISIONS.md`, `CHANGELOG.md`.
-4. Do not invent product facts. If unknown, write **unknown** and cite what you checked.
-5. Do not commit secrets (`.env`), untracked junk (`_/`), or auto-generated `frontend/next-env.d.ts` noise unless intentionally required.
-
-## Quality bar
-
-- PRs: `.github/workflows/quality.yml` — Pylint ≥ 9.0, unit + integration; 90% coverage only when `RUN_INFRA_TESTS=true`.
-- Merge to `master` triggers `.github/workflows/deploy.yml` (rsync + SSH); does **not** re-run quality.
-- Local: `.\scripts\quality.ps1` or `make quality`.
-
-## Safety rules (product)
-
-- Only workflow-safe **diagnose** skills run unattended (`app/skills/classification.py`).
-- Terraform **apply** is Lead-gated; architect graph is read-only for infra apply.
-- Never gate safety-direction actions (rollback/isolate) — see Risk Engine.
-
-## Deeper memory
-
-See `.ai/ARCHITECTURE.md`, `.ai/CURRENT_STATE.md`, `.ai/DECISIONS.md`, `.ai/TODO.md`, `.ai/BUGS.md`, `.ai/CHANGELOG.md`, `.ai/SESSION.md`.
+<!-- END:nextjs-agent-rules -->

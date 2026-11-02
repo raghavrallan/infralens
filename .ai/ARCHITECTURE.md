@@ -1,89 +1,21 @@
-# ARCHITECTURE.md
+# Architecture
 
-Derived from code + README + `docs/solution-architect.md`. Last reviewed: 2026-09-12.
+Next.js App Router, JavaScript, Tailwind CSS v4, React 19. Console and skills engine share Postgres (`DATABASE_URL`, local compose on `localhost:5544`). Redis is `localhost:6399`: database 0 holds the RQ queue and the console read cache; the estate Celery worker uses the `estate` queue.
 
-## High-level
+- `organizations`, `users`, and `memberships` are the client boundary. A user can belong to more than one organization. The session stores the active `org_id` in the `il_session` cookie.
+- `projects` belong to one organization. `project_members` holds project roles for people who are not organization admins.
+- `azure_connections` store the tenant ID, client ID, and an encrypted client secret. `subscriptions` are the subscriptions that identity can see. `project_subscriptions.subscription_id` is unique, so a subscription is on at most one project.
+- `src/lib/rbac.js` decides permissions. Organization owner and admin bypass project roles inside their own organization only.
+- Console Azure reads sign in with the Azure CLI inside an isolated profile at `data/azure-profiles/{connectionId}`. `src/lib/azure/cli.js` allows a fixed command set and records every spawn. `src/lib/azure/sandbox.js` reads inventory, cost, metrics, and child resources with `az rest`. `src/lib/azure/arm.js` throws if imported. Do not call Azure with Node `fetch`.
+- Estate snapshots live in `estate_snapshots`, one row per organization, project, and range (`7d`, `30d`, `mtd`, `qtr`). `scripts/sync-estate.mjs` writes a snapshot. A failed sync does not replace a ready snapshot. Schedule refresh runs in the Celery `estate` worker.
+- One worker writes one `estate_snapshots` row. Reads are slices, projected in SQL so a route does not parse the whole document. `GET /api/estate/status` is the only route that may enqueue (`open=1` on the first open, `fresh=1` on a manual reload). The shell polls status every 4 seconds while a sync is running and downloads parts only when project, range, or `syncedAt` changes. `GET /api/estate/overview` is cost and KPIs (`billing.read` strips spend). `GET /api/estate/resources` is inventory (`?service=` and `?group=` filter the resource list). `GET /api/estate/activity`, `/alerts`, and `/advisor` are the other parts. `GET /api/estate` is the same control payload as status. Slice routes never enqueue.
+- On-demand reads go through `POST /api/compute/inspect` and `src/lib/inspect.js`: metrics, KQL, storage containers, SQL allow lists, container revisions, network layout, and platform catalogs. `src/lib/read-cache.js` keeps each result in Redis for one hour. Per-resource actions (`network`, `revisions`, `layout`, `catalog`) are keyed by resource name and resource group. Logs are not hour-cached. `src/lib/refresh-reads.js` refreshes stored reads after a successful snapshot write.
+- Sandbox audit rows are in `sandbox_calls`. The Sandbox page shows the live command stream, the audit table, and the Redis cache size. Deleting a cache entry does not change Azure.
+- The catalog is four groups in `src/lib/services.js`: compute, data, network, and platform. Hubs are `/compute`, `/data`, `/network`, and `/platform`. Each service page is `ComputeSection` plus the group module (`compute.js`, `data.js`, `network.js`, `platform.js`). Activity on those pages comes from the saved log. That log is collected per resource provider and capped per resource type, so one busy provider cannot drop the others. The window is the last 7 days.
+- `src/proxy.js` sends anonymous browsers to `/login`. `/accept-invite`, `/approve-member`, and `/suite-api` stay public.
+- The skills engine is `engine/app`. `PYTHONPATH=engine` makes `import app` work. The browser calls `/suite-api/*`, and `src/app/suite-api/[...path]/route.js` forwards that to the FastAPI process. Local start is `scripts/start-suite.sh`. The API listens on `APP_PORT` (8001 when 8000 is already taken).
+- Agentic screens live under `src/app/(console)/` and use `src/components/suite/SuiteScreen.js`. The folder name is historical. JWT keys in the browser are `infralens_auth_token` and `infralens_auth_user`. That login is still separate from `il_session`. Chat modes are Agent and Plan. Default action scope is read-only.
+- Chat Azure reads in `engine/app/providers/azure_infra.py` still use HTTP. Those calls do not appear in the sandbox audit.
+- Do not put a Python package at repo-root `app/`. Next.js would resolve it ahead of `src/app`.
 
-```text
-Browser (Next static or next dev)
-    │  JWT Bearer
-    ▼
-FastAPI (app/main.py)
-    ├── Chat / Skills ──▶ Orchestrator ──▶ Skill Registry ──▶ Azure OpenAI
-    ├── Intelligence ──▶ RQ queue "intelligence" ──▶ worker ──▶ findings + risk gates
-    ├── Solution Architect ──▶ RQ job generate_architecture (in-process fallback)
-    ├── Delivery / Engineering APIs ──▶ artifacts, tasks, isolated Terraform
-    ├── Tenancy / Auth / RBAC
-    └── Internal execution claim APIs ──▶ org provider executor workers
-```
-
-Production: one Uvicorn process serves `/api/*` and mounts `frontend/out`.
-
-## Backend packages
-
-| Package | Responsibility |
-|---------|----------------|
-| `app/api` | MVP + engineering route modules included from `main` |
-| `app/chat` | Agent/Plan modes, multi-skill planning, SSE stream, chat memory |
-| `app/skills` | ~20 registered skills; `classification.py` marks workflow-safe diagnose set |
-| `app/intelligence` | Six modules, runs, findings, risk engine, APScheduler, RQ worker |
-| `app/agents/solution_architect` | Sequential graph (default) or LangGraph when `ARCHITECT_LANGGRAPH=true`: clarify → explore → design → critique → verify → finalize |
-| `app/agents/runtime` | Shared LLM factory, loop policies, feature flags, LC tools/retrievers |
-| `app/agents/debug_graph` | Bounded ReAct facade over execution debug_loop (`DEBUG_REACT_ENABLED`) |
-| `app/integrations` | Signed outbound webhooks + n8n event schemas (`N8N_WEBHOOKS_ENABLED`) |
-| `app/platform` | Connections, delivery stages, break-glass, engineering IaC/tasks/memory |
-| `app/execution` | Structured provider actions, Terraform runner, org RQ queues |
-| `app/providers` | Azure/AWS/GitHub inventory adapters |
-| `app/tenancy` | Orgs, projects, memberships, invites, onboarding |
-| `app/org_executors` | Scale controller for per-org CLI executor pools |
-| `app/core` | DB models, JWT, RBAC, Azure OpenAI config, mailer, Langfuse |
-| `executors/` | Process workers that pull org provider queues via control-plane HTTP |
-
-## Frontend
-
-- App Router under `frontend/app/` — chat, login, dashboard, settings, wiki, orgs, onboarding, invite, approve-member.
-- Shared UI in `frontend/components/` (`chat-page`, `delivery-checklist`, `auth-gate`, `shell`, …).
-- `frontend/lib/api.ts` — `NEXT_PUBLIC_API_BASE` in local next-dev; relative `/api` when served by FastAPI.
-- `frontend/next.config.ts` — `trailingSlash: true`; export only when not development; rewrites only in development; `turbopack.root` pinned to frontend app dir.
-
-## Data model (tables in `app/core/db.py`)
-
-Tenancy: `organizations`, `org_memberships`, `projects`, `project_memberships`, `users`, `invites`, `membership_requests`, `org_executor_settings`.
-
-Chat/config: `app_config`, `connections`, `chats`, `messages`, `chat_memories`.
-
-Intelligence: `workflows`, `workflow_runs`, `findings`, `finding_identities`, `approvals`, `engineering_memory`.
-
-Delivery/arch: `architecture_runs`, `architecture_decisions`, `delivery_runs`, `delivery_tasks`, `project_requirements`, `project_artifacts`, `project_risks`, `project_activities`, `revert_requests`, `break_glass_sessions`.
-
-Execution: `execution_jobs`, `execution_events`, `execution_approvals`.
-
-Defaults: `DEFAULT_PROJECT_ID = "default"`; seeded org id `00000000-0000-4000-8000-000000000001` (slug `infralens`).
-
-## Key workflows
-
-### Chat
-
-`POST /api/chat` / stream variants → `orchestrator`: Auto skill pick, forced skill, or multi-agent plan. `/solution_architect` forces architect skill (not auto-routed, not workflow-safe).
-
-### Intelligence
-
-Diagnose skills only in `WORKFLOW_SAFE` → RQ → normalize findings → attach Risk Engine gate → dashboard. Approvals model exists with TTL for human/two-person gates; **change actuation still roadmap**.
-
-### Solution architect → delivery
-
-Delivery stages (`app/platform/delivery.py`): ingest → architecture → terraform → plan → apply → code → done.  
-Architect job writes progress; Lead+ accepts architecture; task generate writes Terraform into isolated workspace; apply is Lead-gated and not agent-driven (`docs/solution-architect.md`).
-
-### Provider executors
-
-Queues `org.{org_id}.provider.{azure|aws|github}.{read|write}`. Workers authenticate with `EXECUTOR_SERVICE_KEY`. Org scale: local Docker stub or Azure Container Apps (`deploy/azure/README.md`).
-
-## CI/CD
-
-- **Quality Gates** on PR: Pylint ≥ 9.0; unit; integration (+ optional 90% cov if `RUN_INFRA_TESTS=true`). Python 3.11.
-- **Deploy** on push to `master`: rsync (excludes `.env`, `node_modules`, `.venv`, …) + SSH `deploy` (`deploy/server/README.md`).
-
-## Risk matrix (product)
-
-Documented in README: action class × environment (dev/staging vs production), with blast-radius escalation and never-gated safety-direction actions.
+`data/azure-profiles/`, `data/app-secret`, and `.env` are local. Do not commit them. Do not print client secrets or secret values.

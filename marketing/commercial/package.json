@@ -1,0 +1,21 @@
+{
+  "name": "infralens-landscape-commercial",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "voice": "node scripts/voice.mjs",
+    "render": "node scripts/render.mjs"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.441",
+    "@remotion/google-fonts": "4.0.441",
+    "@remotion/renderer": "4.0.441",
+    "kokoro-js": "1.2.1",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "remotion": "4.0.441"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild", "onnxruntime-node", "sharp", "protobufjs"]
+  }
+}
