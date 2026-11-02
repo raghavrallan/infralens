@@ -1,5 +1,7 @@
 # EQIP messy multi-turn chat scenarios
 
+Folded into this repo on 2026-10-20. This is a historical skills-engine transcript. The product UI is now the Next.js console in `src/`. The engine package is `engine/app`.
+
 Generated: 2026-08-02 08:37 UTC
 Project: EQIP (`5310f26d-911a-47f6-b7ab-4376d8ab78bd`)
 Mode: Agent · Read-only · Ask for approval · User: `admin`

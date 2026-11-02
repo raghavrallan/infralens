@@ -1,5 +1,7 @@
 # EQIP AWS onboarding
 
+Folded into this repo on 2026-10-20. The Python package is `engine/app` and is imported as `app` when `PYTHONPATH=engine`. AWS credentials for skills are stored by the agentic settings page, which is separate from the console's Azure app registration.
+
 Connect an AWS account so chat skills and structured actions can use **live**
 Cost Explorer, CloudWatch, Config/Security Hub, and inventory data — the same
 paths Azure already had.

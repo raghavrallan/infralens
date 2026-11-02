@@ -1,57 +1,15 @@
-# DECISIONS.md
+# Decisions
 
-Recorded product/engineering decisions found in repo docs and code. Add new entries when agents make lasting choices.
-
-## D-001 — Gate actions by class × blast radius, not by tool
-
-- **Source:** README Risk Engine section; `app/intelligence/risk_engine.py`
-- **Decision:** Classify every recommended action; escalate by blast radius; never gate safety-direction (rollback/isolate).
-- **Consequence:** Skills and findings must carry classification metadata (`app/skills/classification.py`).
-
-## D-002 — Only diagnose skills are workflow-safe
-
-- **Source:** README; `WORKFLOW_SAFE` in `app/skills/classification.py`
-- **Decision:** Unattended intelligence workflows run read-only diagnose skills only.
-- **Consequence:** Generators/executors/architect are chat/delivery driven, not cron-autonomous by default.
-
-## D-003 — Secrets boundary
-
-- **Source:** README Storage; `.env.example` header
-- **Decision:** Postgres holds Azure OpenAI + cloud/GitHub connection secrets. Env holds infra URLs, JWT, SMTP, OAuth client secrets, executor key, Langfuse.
-- **Consequence:** Do not add LLM keys to `.env` as the primary config path.
-
-## D-004 — Production UI is static export behind FastAPI
-
-- **Source:** README Architecture; `frontend/next.config.ts`; `app/main.py` StaticFiles
-- **Decision:** `npm run build` → `frontend/out`; no Next runtime in production.
-- **Consequence:** Local HMR uses `next dev` (now `--webpack`); API origin via `NEXT_PUBLIC_API_BASE` / rewrites.
-
-## D-005 — Two RQ planes
-
-- **Source:** `app/intelligence/queue.py`, `app/execution/queue.py`, compose/executor docs
-- **Decision:** `intelligence` queue for workflows/architect jobs; org-scoped `org.*.provider.*` for CLI executors.
-- **Consequence:** Provider write/read is not consumed by the intelligence worker.
-
-## D-006 — Terraform apply is human Lead-gated and isolated
-
-- **Source:** `docs/solution-architect.md`; delivery/engineering code
-- **Decision:** Per-project/per-run workspace; strip host cloud env; apply requires Lead+ and successful plan; architect cannot apply.
-- **Consequence:** Generated IaC may PR to GitHub under `infra/infralens/...`; state stays in workspace.
-
-## D-007 — Solution architect is explicit, not auto-routed
-
-- **Source:** README; skill registration notes
-- **Decision:** Forced via `/solution_architect` or delivery architecture stage; not workflow-safe.
-- **Consequence:** Planner should not silently pick it for arbitrary chat unless forced.
-
-## D-008 — Tenancy isolation is mandatory
-
-- **Source:** `docs/intelligence-layer-2-week-status.md`
-- **Decision:** Org → project → users isolation; onboarding when user lacks memberships; project lists must not be global.
-- **Consequence:** Any new list/query APIs must scope by org/project membership.
-
-## D-009 — Local Next uses webpack (2026-09-12)
-
-- **Source:** PR #33 / commit `8045b61`; panic logs “Next.js package not found”
-- **Decision:** `next dev --webpack` because Turbopack inferred root from home-directory `package-lock.json` and panicked, looping `/login/`.
-- **Consequence:** Keep `turbopack.root` pinned to frontend app dir if Turbopack is re-enabled later.
+- 2026-10-04: Azure access first used the CLI with an isolated config directory per connection. Cost Management was called with `az rest` because the `az costmanagement` argument shape changes between CLI versions.
+- 2026-10-04: A client ID maps to one connection. The same connection can be mapped to many projects. The pair of project and connection is unique. A project reads every subscription that belongs to its mapped connections.
+- 2026-10-04: Operators see inventory and not cost. Viewers see both. Organization admins see every project in their organization and no other organization.
+- 2026-10-04: Client secrets are encrypted with AES-GCM. The key is `APP_SECRET` or a generated `data/app-secret`. The secret is not returned to the browser.
+- 2026-10-04: Failed estate reads are not cached. Refresh (`fresh=1`) bypasses the memory snapshot.
+- 2026-11-02: The console is in `raghavrallan/infralens`. The product name is Infralens. `src/` is the UI and `engine/app` is the Python package, so Next.js does not pick up a root `app/` directory.
+- 2026-10-17: One product lives in this repo. The Next.js console stays the UI. The skills engine is at `engine/app`, with `executors/`, `tests/`, and `deploy/`. The separate Next frontend is not shipped. Agentic screens are routes in `src/app/(console)` using this shell. They are not a second product. Browser calls go to `/suite-api/*`, which proxies the FastAPI process, so Next `/api/*` and FastAPI `/api/*` do not collide. The Python package is not at repo-root `app/`, because Next.js would resolve that ahead of `src/app`.
+- 2026-10-17: A short-lived experiment read the estate with a Node HTTP client and a cached token. That path is retired. `src/lib/azure/arm.js` throws. Chat skills still use HTTP inside the engine.
+- 2026-10-31: Console reads use the isolated CLI sandbox. Commands are serialized with a profile lock. `az rest` is still the CLI. Each spawn is written to `sandbox_calls` with the command, the route, the caller, the status, and the duration. Passwords and request bodies are not stored.
+- 2026-10-31: The console and the skills engine share Postgres. Redis database 0 caches on-demand reads for one hour and also backs RQ. A per-resource read is keyed by action, service, resource name, and resource group. `fresh=true` replaces that copy. Opening a tab with `cacheOnly` does not call Azure on a miss. Log tails are not put in that cache.
+- 2026-10-31: The visible catalog is the services in `src/lib/services.js`. Service pages share `ComputeSection`. Group modules supply metrics, KQL, columns, and the detail tab. `kind=serverless` stays on the resources list so Functions are not hidden behind Logic Apps.
+- 2026-10-31: The saved activity log is one query per resource provider present in the project, then at most 20 events per resource type. Child operations match the parent service by type prefix. The window stays 7 days.
+- 2026-10-31: Key Vault catalogs return names, enabled state, and updated time. They do not return secret or key values. Storage used size is the account BlobCapacity metric. Per-container byte totals are not available to this app registration.

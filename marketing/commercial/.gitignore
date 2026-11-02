@@ -1,0 +1,8 @@
+node_modules
+.pnpm-store
+work
+out
+public/voiceover.wav
+public/music.mp3
+public/sfx.wav
+public/hit.wav

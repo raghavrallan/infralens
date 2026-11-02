@@ -1,5 +1,7 @@
 # Solution Architect workflow
 
+Folded into this repo on 2026-10-20. The Python package is `engine/app` and is imported as `app` when `PYTHONPATH=engine`. The UI is the Next.js console in `src/`, not a separate frontend. Paths below such as `app/agents/...` are import paths.
+
 How InfraLens turns a project into a structured architecture and executable delivery tasks.
 
 ## Pipeline

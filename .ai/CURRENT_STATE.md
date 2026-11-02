@@ -1,53 +1,15 @@
-# CURRENT_STATE.md
+# Current state
 
-As of 2026-09-12 on `master` @ `87b9c60` (after merge of PR #33 `fix/stale-architect-runs`).
+Remote: `https://github.com/raghavrallan/infralens.git`. This tree is the Next.js console and the engine at `engine/app`. It replaces the previous root `app/` and `frontend/` layout.
 
-## Working locally
+The console and the agentic engine use one Postgres database. Organization sign-in is the `il_session` cookie. Agentic screens still use their own JWT. They are pages in this shell, not a separate suite.
 
-- Prefer `.\start-local.ps1` for Postgres/Redis + API + RQ worker + `next dev --webpack`.
-- Dirty tree observed during inspection (not part of product state): modified `frontend/next-env.d.ts` (Next auto), untracked `_/` — ignore unless intentional.
+Estate pages read a saved snapshot. Compute, data, network, and platform each have a hub and a page per service: overview, inventory, a service-specific detail tab, activity, live metrics, availability, and alerts. Detail tabs (subnets, listeners, SQL allow lists, blob containers, key and API catalogs, container revisions) load through the sandbox and stay in Redis for an hour, one copy per resource.
 
-## Implemented (evidence in repo)
+The Sandbox page shows the CLI stream, the call audit, and how much memory the read cache uses. A person can delete one cached read or the whole project cache.
 
-From README, `docs/intelligence-layer-2-week-status.md`, and code:
+`scripts/start-suite.sh start` brings up Postgres, Redis, the API, the RQ worker, the estate Celery worker, and the console. The console listens on port 3001.
 
-- Chat + skill registry (20 skills registered in `app/skills/__init__.py`)
-- Intelligence workflows, findings, risk engine, RQ worker, scheduler
-- Solution architect graph + delivery architecture stage + ADR findings path
-- Org tenancy, RBAC, invites/SMTP, onboarding, membership approval
-- Delivery checklist (role-aware), engineering memory strip, break-glass surfaces
-- Isolated Terraform workspaces, GitHub PR sync for IaC, Lead-gated apply
-- Provider executor containers + org executor settings/scale controller
-- Quality Gates CI + Deploy workflow
-- Local Next login/HMR hardening (webpack + session validation) merged via #33
-- Stale/zombie architect & workflow run failure handling merged via #33 lineage
-- ADR persistence fixes (finding fingerprint upsert, blast_radius coercion)
+Chat can run a skill or return a plan for the selected project. Workflows, findings, architecture, engineering, and break-glass are the rest of that agentic side. A workflow run waits for the RQ worker. Approval records a decision and does not execute the change from the inbox.
 
-## Intentionally incomplete / out of scope (this milestone)
-
-From README roadmap and body:
-
-- Full **actuation** of reversible / human-approval / two-person change execution on the finding→gate path
-- Fully populated approvals inbox UX (diff, dry-run, rollback plan) + bounded break-glass path completion
-- Engineering memory **feeding back** into Risk Engine as precedent
-- Complete redirect-based SSO for Azure / AWS / GitHub
-- MCP servers for skill reuse
-
-## Docs dated status (2026-07-30)
-
-`docs/intelligence-layer-2-week-status.md` / plan:
-
-- Tenancy/RBAC/onboarding/delivery checklist marked Done after isolation fix
-- ACR / Container App redeploy steps (T17, T28) **skipped by request**
-- Referenced Excel/Word plan artifacts may exist under `docs/`; treat plan markdown as the durable checklist
-
-## EQIP scenario evidence
-
-- `docs/eqip-chat-scenario-questions.md` — 2026-08-01 scenario pack (reported 28/28 ok in that doc)
-- `docs/eqip-messy-chat-scenarios.md` — 2026-08-02 messy multi-turn (reported 8/8 ok)
-
-## Environment assumptions
-
-- Azure OpenAI must be configured in Settings for chat/architect to work
-- Provider inventory needs project connections (Azure/AWS/GitHub)
-- SMTP + `PUBLIC_APP_URL` required for invite/approval email links
+Chat skills still read Azure over HTTP inside the engine. Those reads are outside the sandbox log.

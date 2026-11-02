@@ -1,29 +1,9 @@
-# TODO.md
+# Todo
 
-Prioritized from README roadmap + status docs. Do not invent new product goals.
-
-## Next milestones (README)
-
-1. Wire **actuation** onto finding → risk → gate path (reversible + undo, human approval, two-person; never-gated rollback).
-2. Populate **approvals inbox** with informed, time-boxed approvals (diff, blast radius, dry-run, rollback plan) and bounded break-glass.
-3. Feed approved/rejected outcomes into **engineering memory** and surface precedent back into the Risk Engine.
-4. Complete **redirect-based SSO** login for Azure / AWS / GitHub.
-5. **MCP servers** so external models/tools can reuse skills.
-
-## Ops / deploy (from 2-week status — skipped earlier)
-
-- [ ] T17 Week-1 deploy (skipped by request in plan)
-- [ ] T28 Final ACR / Container App redeploy (skipped by request)
-
-Confirm with humans before treating these as active work.
-
-## Agent hygiene (ongoing)
-
-- [ ] Keep `.ai/SESSION.md` updated after each meaningful session
-- [ ] When fixing bugs, add a short entry to `BUGS.md` (open → resolved)
-- [ ] Prefer merging quality-green PRs; Deploy runs only after `master` push
-
-## Unknown / needs verification
-
-- Live production health after PR #33 merge deploy (check Actions for latest Deploy run)
-- Whether Excel/Word delivery-plan binaries under `docs/` are still authoritative vs markdown status
+- Unify the organization `il_session` login and the agentic engine JWT.
+- Move chat Azure reads in `engine/app/providers/azure_infra.py` onto the sandbox CLI so they show up in the sandbox audit.
+- The root `Dockerfile` still builds a `frontend/` stage this repo does not contain. Local runs use `scripts/start-suite.sh`. Fix that image before relying on it.
+- Add invoice download for billing accounts that grant Billing Reader.
+- Page Databricks usage through the Databricks API when Cost Management quantity is not enough.
+- Let a project admin invite members without making them an organization admin.
+- Activity on service pages is the last 7 days. It does not follow the 30-day or quarter cost range.

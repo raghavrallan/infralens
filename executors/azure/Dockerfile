@@ -15,7 +15,7 @@ FROM mcr.microsoft.com/azure-cli:2.76.0
 
 WORKDIR /app
 COPY --from=dependencies /opt/executor-deps /opt/executor-deps
-COPY app ./app
+COPY engine/app ./app
 COPY executors ./executors
 COPY executors/common/startup.sh /usr/local/bin/devsecops-startup
 RUN chmod 0755 /usr/local/bin/devsecops-startup

@@ -1,0 +1,63 @@
+1
+00:00:00,000 --> 00:00:02,975
+A cloud estate is more than a bill.
+
+2
+00:00:03,135 --> 00:00:07,485
+Someone still has to investigate, propose, and decide.
+
+3
+00:00:08,005 --> 00:00:18,405
+Flexera's 2025 State of the Cloud report says managing cloud spend is the top challenge for eighty-four percent of organizations.
+
+4
+00:00:18,565 --> 00:00:25,240
+The bill, the inventory, and the recommendation still sit apart from the person who has to act.
+
+5
+00:00:25,760 --> 00:00:28,510
+Infralens is one product.
+
+6
+00:00:28,670 --> 00:00:36,345
+The console holds the estate. The agentic side works the same project. There is no second suite.
+
+7
+00:00:36,865 --> 00:00:38,915
+Open the estate.
+
+8
+00:00:39,075 --> 00:00:48,650
+The dashboard reads a saved snapshot of cost, resources, alerts, and Advisor, and only for the subscriptions on this project.
+
+9
+00:00:49,170 --> 00:00:54,570
+In chat, Agent runs a skill. Plan returns steps you can execute.
+
+10
+00:00:54,730 --> 00:01:03,630
+The default scope is read-only. The agent analyses and recommends. It does not pretend a live change already happened.
+
+11
+00:01:03,790 --> 00:01:16,065
+Workflows enqueue a run when Azure or AWS is connected and the worker is up. Findings from those runs stay open, with the gate and the recommended action.
+
+12
+00:01:16,585 --> 00:01:22,485
+Architecture keeps a Solution Architect run, and the stage of that delivery.
+
+13
+00:01:22,645 --> 00:01:30,395
+You take a change into chat. Approval records the decision. The approvals inbox does not execute it.
+
+14
+00:01:30,915 --> 00:01:35,490
+The result is one project for the estate and for the agent.
+
+15
+00:01:35,650 --> 00:01:41,475
+A person is still accountable before Azure or AWS is changed.
+
+16
+00:01:41,995 --> 00:01:47,495
+Infralens. See the estate. Ask the agent. Decide before you change it.

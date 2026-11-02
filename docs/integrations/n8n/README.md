@@ -1,5 +1,7 @@
 # On-prem n8n (mandatory for InfraLens server)
 
+Folded into this repo on 2026-10-20. The Python package is `engine/app` and is imported as `app` when `PYTHONPATH=engine`. The UI is the Next.js console in `src/`, not a separate frontend. Local console work does not require n8n. This file is the server deploy.
+
 ## Containers vs libraries
 
 | Component | Runs as | Notes |

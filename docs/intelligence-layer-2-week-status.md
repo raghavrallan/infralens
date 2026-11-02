@@ -1,5 +1,7 @@
 # InfraLens 2-Week Delivery — Implementation Status
 
+Folded into this repo on 2026-10-20. The Python package is `engine/app` and is imported as `app` when `PYTHONPATH=engine`. The UI is the Next.js console in `src/`, not a separate frontend. The status below is the 2026-07-30 engine note, not the console merge.
+
 **Date:** 2026-07-30  
 **Scope:** Intelligence Layer gaps + **real multi-org tenancy** + RBAC + Onboarding + E2E delivery  
 **PDF:** skipped (Excel + Word + this Markdown)  

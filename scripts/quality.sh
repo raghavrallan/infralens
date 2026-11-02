@@ -13,6 +13,6 @@ case "${RUN_INFRA_TESTS:-}" in
 esac
 
 echo "==> Pylint (fail under 9.0)"
-pylint app executors
+PYTHONPATH=engine pylint engine/app executors
 echo "==> Tests + coverage (fail under ${FAIL_UNDER}%; RUN_INFRA_TESTS=${RUN_INFRA_TESTS:-})"
 pytest --cov=app --cov=executors --cov-branch --cov-report=term-missing --cov-report=html --cov-report=xml --cov-fail-under="${FAIL_UNDER}" --junitxml=junit.xml

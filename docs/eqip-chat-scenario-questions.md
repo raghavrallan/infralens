@@ -1,5 +1,7 @@
 # EQIP chat scenario pack (read-only)
 
+Folded into this repo on 2026-10-20. This is a historical skills-engine transcript. The product UI is now the Next.js console in `src/`. The engine package is `engine/app`.
+
 Generated: 2026-08-01 23:57 UTC
 Project: EQIP (`5310f26d-911a-47f6-b7ab-4376d8ab78bd`)
 Mode: Agent · Actions: Read-only · Access: Ask for approval
