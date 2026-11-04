@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useFeedback } from "@/components/Feedback";
+import PasswordField from "@/components/PasswordField";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -53,13 +54,13 @@ export default function SignupPage() {
           ["name", "Your name", "text"],
           ["orgName", "Organization", "text"],
           ["email", "Email", "email"],
-          ["password", "Password", "password"],
         ].map(([key, label, type]) => (
           <label key={key} className="mt-3 block text-xs font-semibold text-muted">
             {label}
             <input type={type} value={form[key]} onChange={(event) => set(key, event.target.value)} className="mt-1 h-11 w-full rounded-2xl border border-line px-3 text-sm outline-none focus:border-brand" />
           </label>
         ))}
+        <PasswordField label="Password" autoComplete="new-password" value={form.password} onChange={(event) => set("password", event.target.value)} className="mt-3" />
         {error && <p className="mt-3 text-sm text-danger">{error}</p>}
         <button type="submit" disabled={loading} className="mt-5 h-11 w-full rounded-2xl bg-brand text-sm font-semibold text-white disabled:opacity-60">
           {loading ? "Creating…" : "Create organization"}

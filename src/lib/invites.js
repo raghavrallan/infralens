@@ -1,7 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { one, run } from "./db.js";
 import { HttpError } from "./access.js";
-import { hashPassword, id, sha256, usernameFor, verifyPassword } from "./ids.js";
+import { hashPassword, id, sha256, verifyPassword } from "./ids.js";
+import { availableUsername } from "./usernames.js";
 import { sendInviteEmail, INVITE_MINUTES } from "./invite-mail.js";
 import { ensureOrgColumns, assertAssignableRole, roleRank } from "./org-lifecycle.js";
 import { rankOf, roleLabel, suiteRoleFor } from "./rbac.js";
@@ -146,7 +147,7 @@ export async function acceptInvite({ token, name, password }) {
     user = { id: id() };
     await run(
       "INSERT INTO users (id, username, email, display_name, password_hash, role, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, true, now(), now())",
-      [user.id, usernameFor(invite.email, user.id), invite.email, chosen, hashPassword(secret), suiteRoleFor(invite.org_role, invite.project_role)],
+      [user.id, await availableUsername(chosen, user.id), invite.email, chosen, hashPassword(secret), suiteRoleFor(invite.org_role, invite.project_role)],
     );
   } else if (!verifyPassword(secret, user.password_hash)) {
     throw new HttpError(401, "That password does not match this account.");

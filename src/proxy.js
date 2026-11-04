@@ -17,7 +17,11 @@ export function proxy(request) {
     url.pathname = "/login";
     return NextResponse.redirect(url);
   }
-  return NextResponse.next();
+  const headers = new Headers(request.headers);
+  const forwarded = request.headers.get("x-forwarded-for") || "";
+  const ip = String(request.ip || forwarded.split(",")[0] || request.headers.get("x-real-ip") || "").trim();
+  if (ip) headers.set("x-infralens-client", ip);
+  return NextResponse.next({ request: { headers } });
 }
 
 export const config = {
