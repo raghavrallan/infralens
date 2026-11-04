@@ -34,10 +34,14 @@ export function verifyPassword(password, stored) {
   return timingSafeEqual(prev, next);
 }
 
-export function usernameFor(email, userId) {
-  const clean = String(email || "").trim().toLowerCase();
-  if (clean.length > 0 && clean.length <= 64) return clean;
-  return `${clean.slice(0, 48)}-${String(userId || "").slice(0, 8)}`.slice(0, 64);
+export function usernameFor(name) {
+  const base = String(name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ".")
+    .replace(/^\.+|\.+$/g, "")
+    .slice(0, 64);
+  return base || "user";
 }
 
 export function sha256(value) {

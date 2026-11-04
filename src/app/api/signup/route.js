@@ -3,7 +3,8 @@ import { audit } from "@/lib/access";
 import { one, run } from "@/lib/db";
 import { fail } from "@/lib/http";
 import { HttpError } from "@/lib/access";
-import { hashPassword, id, slugify, usernameFor } from "@/lib/ids";
+import { hashPassword, id, slugify } from "@/lib/ids";
+import { availableUsername } from "@/lib/usernames";
 import { COOKIE, cookieOptions, createSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -27,7 +28,7 @@ export async function POST(request) {
     if (await one("SELECT id FROM organizations WHERE slug = ?", [slug])) slug = `${slug}-${orgId.slice(0, 4)}`;
     await run(
       "INSERT INTO users (id, username, email, display_name, password_hash, role, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'org_admin', true, now(), now())",
-      [userId, usernameFor(email, userId), email, name, hashPassword(password)],
+      [userId, await availableUsername(name, userId), email, name, hashPassword(password)],
     );
     await run(
       "INSERT INTO organizations (id, name, slug, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, now(), now())",

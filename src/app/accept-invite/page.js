@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import PasswordField from "@/components/PasswordField";
 
 const field = "mt-1 h-11 w-full rounded-2xl border border-line px-3 text-sm outline-none focus:border-brand";
 
@@ -89,8 +90,8 @@ export default function AcceptInvitePage() {
             </dl>
             <form className="mt-4" onSubmit={accept}>
               <label className="block text-xs font-semibold text-muted">Your name<input className={field} value={name} onChange={(event) => setName(event.target.value)} required /></label>
-              <label className="mt-3 block text-xs font-semibold text-muted">{peek.accountExists ? "Your password" : "Choose a password"}<input type="password" minLength={8} autoComplete="new-password" className={field} value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
-              <label className="mt-3 block text-xs font-semibold text-muted">Confirm password<input type="password" minLength={8} autoComplete="new-password" className={field} value={confirm} onChange={(event) => setConfirm(event.target.value)} required /></label>
+              <PasswordField className="mt-3" label={peek.accountExists ? "Your password" : "Choose a password"} minLength={8} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required />
+              <PasswordField className="mt-3" label="Confirm password" minLength={8} autoComplete="new-password" value={confirm} onChange={(event) => setConfirm(event.target.value)} required />
               {peek.accountExists && <p className="mt-3 text-sm text-muted">This email already has an Infralens password. Enter it to join. It will not be replaced.</p>}
               {message && <p className="mt-3 text-sm text-danger">{message}</p>}
               <button type="submit" disabled={busy} className="mt-5 h-11 w-full rounded-2xl bg-brand text-sm font-semibold text-white disabled:opacity-60">
